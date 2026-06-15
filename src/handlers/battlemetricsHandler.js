@@ -208,18 +208,8 @@ module.exports = {
         /* Go through each battlemetrics instance and notify changes */
         for (const battlemetricsId of battlemetricsIds) {
             const bmInstance = client.battlemetricsInstances[battlemetricsId];
-
-            /* Server name changed? */
-            if (settings.battlemetricsServerNameChanges && bmInstance.serverEvaluation.hasOwnProperty('server_name')) {
-                const oldName = bmInstance.serverEvaluation['server_name'].from;
-                const newName = bmInstance.serverEvaluation['server_name'].to;
-
-                const title = client.intlGet(guildId, 'battlemetricsServerNameChanged');
-                const description = `__**${client.intlGet(guildId, 'old')}:**__ ${oldName}\n` +
-                    `__**${client.intlGet(guildId, 'new')}:**__ ${newName}`;
-
-                await DiscordMessages.sendBattlemetricsEventMessage(guildId, battlemetricsId, title, description);
-            }
+            /* Server name changes are still recovered in bmInstance.server_name by Battlemetrics.update();
+             * only the Discord notification/alarm is intentionally suppressed here. */
 
             /* Players whos name have changed */
             if (settings.battlemetricsGlobalNameChanges && bmInstance.nameChangedPlayers.length !== 0) {

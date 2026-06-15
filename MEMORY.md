@@ -29,3 +29,9 @@
 - Added `/tmp/rustplus-markers.json` dump on each polling refresh. It includes `markers`, vending-machine `vendors`, `monuments`, plus guild/server/timestamp metadata so the user can compare before/while Deep Sea is active.
 - Updated the Deep Sea candidate matcher to scan serialized GenericRadius marker payloads for `deep|sea|floating|ghost|naval`, matching the requested jq discovery keywords while still limiting state changes to GenericRadius marker appearance/disappearance.
 - Extended `!events` compatibility toward RustPlusBot naming by recording `vendor` events and accepting `ch47`, `oil_rig_small`, and `large_oil_rig` aliases in addition to existing Cargo/Heli/Oil/Chinook/Deep Sea names.
+
+## Battlemetrics noise suppression
+- User reported repeated `Battlemetrics Server Name Changed` Discord spam. Disabled those notifications in the Battlemetrics handler and changed the default `battlemetricsServerNameChanges` setting to `false`; other Battlemetrics notifications remain untouched.
+
+## Battlemetrics name recovery clarification
+- Clarified that Battlemetrics server names are still updated/recovered inside the Battlemetrics instance; only the Discord notification/alarm for `server_name` changes is suppressed.
