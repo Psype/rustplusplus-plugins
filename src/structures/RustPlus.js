@@ -97,7 +97,9 @@ class RustPlus extends RustPlusLib {
             heli: [],
             small: [],
             large: [],
-            chinook: []
+            chinook: [],
+            vendor: [],
+            deepsea: []
         };
         this.patrolHelicopterTracers = new Object();
         this.cargoShipTracers = new Object();
@@ -222,7 +224,10 @@ class RustPlus extends RustPlusLib {
         const commandSmallEn = `${Client.client.intlGet('en', 'commandSyntaxSmall')}`;
         const commandLargeEn = `${Client.client.intlGet('en', 'commandSyntaxLarge')}`;
         const commandChinookEn = `${Client.client.intlGet('en', 'commandSyntaxChinook')}`;
-        if (![commandCargoEn, commandHeliEn, commandSmallEn, commandLargeEn, commandChinookEn].includes(event)) return;
+        const commandVendorEn = `${Client.client.intlGet('en', 'commandSyntaxTravelingVendor')}`;
+        const commandDeepseaEn = `${Client.client.intlGet('en', 'commandSyntaxDeepsea')}`;
+        if (![commandCargoEn, commandHeliEn, commandSmallEn, commandLargeEn, commandChinookEn,
+            commandVendorEn, commandDeepseaEn].includes(event)) return;
 
         const str = `${Timer.getCurrentDateTime()} - ${message}`;
 
@@ -1235,6 +1240,32 @@ class RustPlus extends RustPlusLib {
         return decayString;
     }
 
+    getCommandDeepsea(isInfoChannel = false) {
+        const deepseaMarkers = this.mapMarkers.deepseas;
+        if (deepseaMarkers.length > 0) {
+            const locations = deepseaMarkers.map(marker => marker.location.string).join(', ');
+            const seenSince = deepseaMarkers
+                .map(marker => marker.deepseaSeenSince)
+                .filter(seenSince => seenSince !== undefined)
+                .sort((a, b) => a - b)[0] || new Date();
+            const secondsSince = (new Date() - seenSince) / 1000;
+            return Client.client.intlGet(this.guildId, isInfoChannel ? 'deepseaActiveShort' : 'deepseaActiveAt', {
+                locations: locations,
+                time: Timer.secondsToFullScale(secondsSince, isInfoChannel ? 's' : '')
+            });
+        }
+
+        if (this.mapMarkers.timeSinceDeepseaWasActive === null) {
+            return isInfoChannel ? Client.client.intlGet(this.guildId, 'notActive') :
+                Client.client.intlGet(this.guildId, 'deepseaNotActive');
+        }
+
+        const secondsSince = (new Date() - this.mapMarkers.timeSinceDeepseaWasActive) / 1000;
+        return Client.client.intlGet(this.guildId, isInfoChannel ? 'timeSinceLast' : 'timeSinceDeepseaActive', {
+            time: Timer.secondsToFullScale(secondsSince, isInfoChannel ? 's' : '')
+        });
+    }
+
     getCommandDespawn(command) {
         const prefix = this.generalSettings.prefix;
         const commandDespawn = `${prefix}${Client.client.intlGet(this.guildId, 'commandSyntaxDespawn')}`;
@@ -1284,9 +1315,15 @@ class RustPlus extends RustPlusLib {
         const commandLargeEn = `${Client.client.intlGet('en', 'commandSyntaxLarge')}`;
         const commandChinook = `${Client.client.intlGet(this.guildId, 'commandSyntaxChinook')}`;
         const commandChinookEn = `${Client.client.intlGet('en', 'commandSyntaxChinook')}`;
+        const commandVendor = `${Client.client.intlGet(this.guildId, 'commandSyntaxTravelingVendor')}`;
+        const commandVendorEn = `${Client.client.intlGet('en', 'commandSyntaxTravelingVendor')}`;
+        const commandDeepsea = `${Client.client.intlGet(this.guildId, 'commandSyntaxDeepsea')}`;
+        const commandDeepseaEn = `${Client.client.intlGet('en', 'commandSyntaxDeepsea')}`;
 
         const EVENTS = [commandCargo, commandCargoEn, commandHeli, commandHeliEn, commandSmall,
-            commandSmallEn, commandLarge, commandLargeEn, commandChinook, commandChinookEn];
+            commandSmallEn, commandLarge, commandLargeEn, commandChinook, commandChinookEn,
+            commandVendor, commandVendorEn, commandDeepsea, commandDeepseaEn,
+            'ch47', 'oil_rig_small', 'large_oil_rig'];
 
         if (command.toLowerCase().startsWith(`${commandEvents}`)) {
             command = command.slice(`${commandEvents}`.length).trim();
@@ -1336,19 +1373,32 @@ class RustPlus extends RustPlusLib {
                 event = 'heli';
             } break;
 
+            case 'ch47':
+            case commandChinookEn:
+            case commandChinook: {
+                event = 'chinook';
+            } break;
+
+            case commandVendorEn:
+            case commandVendor: {
+                event = 'vendor';
+            } break;
+
+            case 'oil_rig_small':
             case commandSmallEn:
             case commandSmall: {
                 event = 'small';
             } break;
 
+            case 'large_oil_rig':
             case commandLargeEn:
             case commandLarge: {
                 event = 'large';
             } break;
 
-            case commandChinookEn:
-            case commandChinook: {
-                event = 'chinook';
+            case commandDeepseaEn:
+            case commandDeepsea: {
+                event = 'deepsea';
             } break;
 
             default: {
