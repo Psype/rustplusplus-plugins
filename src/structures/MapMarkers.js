@@ -46,6 +46,7 @@ class MapMarkers {
         this._ch47s = [];
         this._cargoShips = [];
         this._genericRadiuses = [];
+        this._deepseas = [];
         this._patrolHelicopters = [];
         this._travelingVendors = [];
 
@@ -64,6 +65,7 @@ class MapMarkers {
         this.timeSincePatrolHelicopterWasOnMap = null;
         this.timeSincePatrolHelicopterWasDestroyed = null;
         this.timeSinceTravelingVendorWasOnMap = null;
+        this.timeSinceDeepseaWasActive = null;
 
         /* Event location */
         this.patrolHelicopterDestroyedLocation = null;
@@ -93,6 +95,8 @@ class MapMarkers {
     set cargoShips(cargoShips) { this._cargoShips = cargoShips; }
     get genericRadiuses() { return this._genericRadiuses; }
     set genericRadiuses(genericRadiuses) { this._genericRadiuses = genericRadiuses; }
+    get deepseas() { return this._deepseas; }
+    set deepseas(deepseas) { this._deepseas = deepseas; }
     get patrolHelicopters() { return this._patrolHelicopters; }
     set patrolHelicopters(patrolHelicopters) { this._patrolHelicopters = patrolHelicopters; }
     get travelingVendors() { return this._travelingVendors; }
@@ -607,21 +611,69 @@ class MapMarkers {
 
         /* GenericRadius markers that are new. */
         for (let marker of newMarkers) {
+            let mapSize = this.rustplus.info.correctedMapSize;
+            let pos = Map.getPos(marker.x, marker.y, mapSize, this.rustplus);
+            marker.location = pos;
+
             this.genericRadiuses.push(marker);
+
+            if (this.isDeepseaMarker(marker)) {
+                marker.deepseaSeenSince = new Date();
+                this.deepseas.push(marker);
+                this.rustplus.sendEvent(
+                    this.rustplus.notificationSettings.deepseaDetectedSetting ||
+                        this.rustplus.notificationSettings.cargoShipDetectedSetting,
+                    this.client.intlGet(this.rustplus.guildId, 'deepseaOpenedAt', { location: pos.string }),
+                    'deepsea',
+                    Constants.COLOR_DEEPSEA_OPENED,
+                    this.rustplus.isFirstPoll,
+                    'cargoship_logo.png');
+            }
         }
 
         /* GenericRadius markers that have left. */
         for (let marker of leftMarkers) {
             this.genericRadiuses = this.genericRadiuses.filter(e => e.id !== marker.id);
+
+            if (this.isDeepseaMarker(marker)) {
+                this.timeSinceDeepseaWasActive = new Date();
+                this.rustplus.sendEvent(
+                    this.rustplus.notificationSettings.deepseaLeftSetting ||
+                        this.rustplus.notificationSettings.cargoShipLeftSetting,
+                    this.client.intlGet(this.rustplus.guildId, 'deepseaClosed'),
+                    'deepsea',
+                    Constants.COLOR_DEEPSEA_CLOSED,
+                    this.rustplus.isFirstPoll,
+                    'cargoship_logo.png');
+                this.deepseas = this.deepseas.filter(e => e.id !== marker.id);
+            }
         }
 
         /* GenericRadius markers that still remains. */
         for (let marker of remainingMarkers) {
+            let mapSize = this.rustplus.info.correctedMapSize;
+            let pos = Map.getPos(marker.x, marker.y, mapSize, this.rustplus);
             let genericRadius = this.getMarkerByTypeId(this.types.GenericRadius, marker.id);
 
             genericRadius.x = marker.x;
             genericRadius.y = marker.y;
+            genericRadius.location = pos;
+
+            if (this.isDeepseaMarker(marker)) {
+                let deepsea = this.deepseas.find(e => e.id === marker.id);
+                if (deepsea) {
+                    deepsea.x = marker.x;
+                    deepsea.y = marker.y;
+                    deepsea.location = pos;
+                    deepsea.deepseaSeenSince = deepsea.deepseaSeenSince || new Date();
+                }
+            }
         }
+    }
+
+    isDeepseaMarker(marker) {
+        const markerText = JSON.stringify(marker);
+        return /deep|sea|floating|ghost|naval/i.test(markerText);
     }
 
     updatePatrolHelicopters(mapMarkers) {
@@ -863,6 +915,7 @@ class MapMarkers {
         this.ch47s = [];
         this.cargoShips = [];
         this.genericRadiuses = [];
+        this.deepseas = [];
         this.patrolHelicopters = [];
         this.travelingVendors = [];
 
@@ -886,6 +939,7 @@ class MapMarkers {
         this.timeSincePatrolHelicopterWasOnMap = null;
         this.timeSincePatrolHelicopterWasDestroyed = null;
         this.timeSinceTravelingVendorWasOnMap = null;
+        this.timeSinceDeepseaWasActive = null;
 
         this.patrolHelicopterDestroyedLocation = null;
 
