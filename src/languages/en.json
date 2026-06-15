@@ -735,7 +735,7 @@
     "travelingVendorHaltedSetting": "When the Traveling Vendor stops moving, send a notification.",
     "travelingVendorLeftSetting": "When the Traveling Vendor left the map, send a notification.",
     "travelingVendorLocatedAt": "The Traveling Vendor is located at {location}.",
-    "travelingVendorLeftMap" : "The Traveling Vendor just left the map at {location}.",
+    "travelingVendorLeftMap": "The Traveling Vendor just left the map at {location}.",
     "travelingVendorNotCurrentlyOnMap": "The Traveling Vendor is not currently on the map.",
     "travelingVendorResumedAt": "The Traveling Vendor resumed moving at {location}.",
     "travelingVendorSpawnedAt": "The Traveling Vendor spawned at {location}.",
@@ -786,5 +786,15 @@
     "wipeDetected": "Wipe detected!",
     "yield": "Yield",
     "youAreAlreadyLeader": "You are already leader.",
-    "youAreNotPairedWithServer": "Leader command does not work because you're not paired with the server."
+    "youAreNotPairedWithServer": "Leader command does not work because you're not paired with the server.",
+    "commandSyntaxDeepsea": "deepsea",
+    "deepsea": "Deep Sea",
+    "deepseaActiveAt": "Deep Sea: active | position {locations} | seen since {time}.",
+    "deepseaActiveShort": "Active at {locations} for {time}",
+    "deepseaClosed": "Deep Sea just closed.",
+    "deepseaDetectedSetting": "When Deep Sea opens, send a notification.",
+    "deepseaLeftSetting": "When Deep Sea closes, send a notification.",
+    "deepseaNotActive": "Deep Sea: not active | no previous sighting.",
+    "deepseaOpenedAt": "Deep Sea opened at {location}.",
+    "timeSinceDeepseaActive": "Deep Sea: not active | last seen {time} ago."
 }
