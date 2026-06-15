@@ -21,6 +21,7 @@
 const CommandHandler = require('../handlers/inGameCommandHandler.js');
 const Constants = require('../util/constants.js');
 const DiscordMessages = require('../discordTools/discordMessages.js');
+const EventDebugLogger = require('../util/eventDebugLogger.js');
 const InGameChatHandler = require('../handlers/inGameChatHandler.js');
 const SmartSwitchGroupHandler = require('../handlers/smartSwitchGroupHandler.js');
 const TeamChatHandler = require("../handlers/teamChatHandler.js");
@@ -30,6 +31,8 @@ module.exports = {
     name: 'message',
     async execute(rustplus, client, message) {
         if (!rustplus.isServerAvailable()) return rustplus.deleteThisRustplusInstance();
+
+        EventDebugLogger.logRustplusPayload(rustplus, 'rustplus:message', message);
 
         if (!rustplus.isOperational) return;
 

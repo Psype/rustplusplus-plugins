@@ -97,7 +97,8 @@ class RustPlus extends RustPlusLib {
             heli: [],
             small: [],
             large: [],
-            chinook: []
+            chinook: [],
+            deepsea: []
         };
         this.patrolHelicopterTracers = new Object();
         this.cargoShipTracers = new Object();
@@ -222,7 +223,9 @@ class RustPlus extends RustPlusLib {
         const commandSmallEn = `${Client.client.intlGet('en', 'commandSyntaxSmall')}`;
         const commandLargeEn = `${Client.client.intlGet('en', 'commandSyntaxLarge')}`;
         const commandChinookEn = `${Client.client.intlGet('en', 'commandSyntaxChinook')}`;
-        if (![commandCargoEn, commandHeliEn, commandSmallEn, commandLargeEn, commandChinookEn].includes(event)) return;
+        const commandDeepseaEn = `${Client.client.intlGet('en', 'commandSyntaxDeepsea')}`;
+        if (![commandCargoEn, commandHeliEn, commandSmallEn, commandLargeEn, commandChinookEn,
+            commandDeepseaEn].includes(event)) return;
 
         const str = `${Timer.getCurrentDateTime()} - ${message}`;
 
@@ -1235,6 +1238,65 @@ class RustPlus extends RustPlusLib {
         return decayString;
     }
 
+    getCommandDeepsea(isInfoChannel = false) {
+        const deepseaMarkers = this.mapMarkers.deepseas;
+        if (deepseaMarkers.length > 0) {
+            const locations = deepseaMarkers.map(marker => marker.location.string).join(', ');
+            if (isInfoChannel) {
+                return Client.client.intlGet(this.guildId, 'deepseaActiveShort', { locations: locations });
+            }
+
+            const seenSince = deepseaMarkers
+                .map(marker => marker.deepseaSeenSince)
+                .filter(seenSince => seenSince !== undefined)
+                .sort((a, b) => a - b)[0] || new Date();
+            const secondsSinceSeen = (new Date() - seenSince) / 1000;
+            const secondsUntilDefaultClose = (Constants.DEFAULT_DEEPSEA_DURATION_MS / 1000) - secondsSinceSeen;
+
+            if (secondsUntilDefaultClose > 0) {
+                return Client.client.intlGet(this.guildId, 'deepseaActiveAtPrediction', {
+                    locations: locations,
+                    elapsed: Timer.secondsToFullScale(secondsSinceSeen),
+                    time: Timer.secondsToFullScale(secondsUntilDefaultClose)
+                });
+            }
+
+            return Client.client.intlGet(this.guildId, 'deepseaActiveAt', { locations: locations });
+        }
+
+        if (this.mapMarkers.timeSinceDeepseaWasActive === null) {
+            return isInfoChannel ? Client.client.intlGet(this.guildId, 'notActive') :
+                Client.client.intlGet(this.guildId, 'deepseaNotActive');
+        }
+
+        const secondsSince = (new Date() - this.mapMarkers.timeSinceDeepseaWasActive) / 1000;
+        if (isInfoChannel) {
+            return Client.client.intlGet(this.guildId, 'timeSinceLast', {
+                time: Timer.secondsToFullScale(secondsSince, 's')
+            });
+        }
+
+        const secondsUntilMin = (Constants.DEFAULT_DEEPSEA_COOLDOWN_MIN_MS / 1000) - secondsSince;
+        const secondsUntilMax = (Constants.DEFAULT_DEEPSEA_COOLDOWN_MAX_MS / 1000) - secondsSince;
+        if (secondsUntilMax <= 0) {
+            return Client.client.intlGet(this.guildId, 'timeSinceDeepseaActiveOverdue', {
+                time: Timer.secondsToFullScale(secondsSince)
+            });
+        }
+        else if (secondsUntilMin <= 0) {
+            return Client.client.intlGet(this.guildId, 'timeSinceDeepseaActiveSoon', {
+                time: Timer.secondsToFullScale(secondsSince),
+                maxTime: Timer.secondsToFullScale(secondsUntilMax)
+            });
+        }
+
+        return Client.client.intlGet(this.guildId, 'timeSinceDeepseaActivePrediction', {
+            time: Timer.secondsToFullScale(secondsSince),
+            minTime: Timer.secondsToFullScale(secondsUntilMin),
+            maxTime: Timer.secondsToFullScale(secondsUntilMax)
+        });
+    }
+
     getCommandDespawn(command) {
         const prefix = this.generalSettings.prefix;
         const commandDespawn = `${prefix}${Client.client.intlGet(this.guildId, 'commandSyntaxDespawn')}`;
@@ -1284,9 +1346,12 @@ class RustPlus extends RustPlusLib {
         const commandLargeEn = `${Client.client.intlGet('en', 'commandSyntaxLarge')}`;
         const commandChinook = `${Client.client.intlGet(this.guildId, 'commandSyntaxChinook')}`;
         const commandChinookEn = `${Client.client.intlGet('en', 'commandSyntaxChinook')}`;
+        const commandDeepsea = `${Client.client.intlGet(this.guildId, 'commandSyntaxDeepsea')}`;
+        const commandDeepseaEn = `${Client.client.intlGet('en', 'commandSyntaxDeepsea')}`;
 
         const EVENTS = [commandCargo, commandCargoEn, commandHeli, commandHeliEn, commandSmall,
-            commandSmallEn, commandLarge, commandLargeEn, commandChinook, commandChinookEn];
+            commandSmallEn, commandLarge, commandLargeEn, commandChinook, commandChinookEn,
+            commandDeepsea, commandDeepseaEn, 'ch47', 'oil_rig_small', 'large_oil_rig'];
 
         if (command.toLowerCase().startsWith(`${commandEvents}`)) {
             command = command.slice(`${commandEvents}`.length).trim();
@@ -1336,19 +1401,28 @@ class RustPlus extends RustPlusLib {
                 event = 'heli';
             } break;
 
+            case 'ch47':
+            case commandChinookEn:
+            case commandChinook: {
+                event = 'chinook';
+            } break;
+
+
+            case 'oil_rig_small':
             case commandSmallEn:
             case commandSmall: {
                 event = 'small';
             } break;
 
+            case 'large_oil_rig':
             case commandLargeEn:
             case commandLarge: {
                 event = 'large';
             } break;
 
-            case commandChinookEn:
-            case commandChinook: {
-                event = 'chinook';
+            case commandDeepseaEn:
+            case commandDeepsea: {
+                event = 'deepsea';
             } break;
 
             default: {
