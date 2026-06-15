@@ -789,12 +789,16 @@
     "youAreNotPairedWithServer": "Leader command does not work because you're not paired with the server.",
     "commandSyntaxDeepsea": "deepsea",
     "deepsea": "Deep Sea",
-    "deepseaActiveAt": "Deep Sea: active | position {locations} | seen since {time}.",
-    "deepseaActiveShort": "Active at {locations} for {time}",
+    "deepseaActiveAt": "Deep Sea is active at {locations}. Default 3h window has elapsed since first sighting, so it may close soon.",
+    "deepseaActiveShort": "Active at {locations}",
     "deepseaClosed": "Deep Sea just closed.",
     "deepseaDetectedSetting": "When Deep Sea opens, send a notification.",
     "deepseaLeftSetting": "When Deep Sea closes, send a notification.",
-    "deepseaNotActive": "Deep Sea: not active | no previous sighting.",
-    "deepseaOpenedAt": "Deep Sea opened at {location}.",
-    "timeSinceDeepseaActive": "Deep Sea: not active | last seen {time} ago."
+    "deepseaNotActive": "No current data on Deep Sea.",
+    "deepseaOpenedAt": "Deep Sea event is active at {location}.",
+    "timeSinceDeepseaActive": "{time} since the last Deep Sea event was active.",
+    "deepseaActiveAtPrediction": "Deep Sea is active at {locations}. Observed for {elapsed}; predicted close in about {time} or less.",
+    "timeSinceDeepseaActivePrediction": "{time} since the last Deep Sea event was active. Next expected in {minTime}-{maxTime}.",
+    "timeSinceDeepseaActiveSoon": "{time} since the last Deep Sea event was active. Next expected any time within {maxTime}.",
+    "timeSinceDeepseaActiveOverdue": "{time} since the last Deep Sea event was active. Next expected any time now."
 }

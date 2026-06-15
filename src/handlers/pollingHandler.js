@@ -19,6 +19,7 @@
 */
 
 const Fs = require('fs');
+const EventDebugLogger = require('../util/eventDebugLogger.js');
 const Info = require('../structures/Info');
 const InformationHandler = require('../handlers/informationHandler.js');
 const MapMarkers = require('../structures/MapMarkers.js');
@@ -65,6 +66,7 @@ module.exports = {
         rustplus.time.updateTime(time.time);
         rustplus.info.updateInfo(info.info);
         dumpMapMarkers(rustplus, mapMarkers.mapMarkers);
+        EventDebugLogger.logMapMarkers(rustplus, mapMarkers.mapMarkers, rustplus.map ? rustplus.map.monuments : []);
         rustplus.mapMarkers.updateMapMarkers(mapMarkers.mapMarkers);
 
         await InformationHandler.handler(rustplus);

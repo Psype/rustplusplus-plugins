@@ -56,6 +56,9 @@ module.exports = {
     /* Default timer times */
     DEFAULT_CARGO_SHIP_EGRESS_TIME_MS: 50 * 60 * 1000, /* 50 min */
     DEFAULT_OIL_RIG_LOCKED_CRATE_UNLOCK_TIME_MS: 15 * 60 * 1000, /* 15 min */
+    DEFAULT_DEEPSEA_DURATION_MS: 3 * 60 * 60 * 1000, /* 3 hours */
+    DEFAULT_DEEPSEA_COOLDOWN_MIN_MS: 90 * 60 * 1000, /* 1.5 hours */
+    DEFAULT_DEEPSEA_COOLDOWN_MAX_MS: 150 * 60 * 1000, /* 2.5 hours */
 
     /* Other constants */
     PATROL_HELI_DOWNED_RADIUS: 400,

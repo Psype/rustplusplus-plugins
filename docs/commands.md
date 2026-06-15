@@ -440,7 +440,7 @@ In-Game Command | Description
 
 ## **deepsea**
 
-> **Track Deep Sea activity from the Rust+ map marker when exposed by the server.** When the Deep Sea generic radius marker appears, the bot records it like other map events and `!deepsea` reports active location or last seen time.
+> **Track Deep Sea activity from the Rust+ map marker when exposed by the server.** When the Deep Sea generic radius marker appears, the bot records it like other map events and `!deepsea` reports active location, last seen time, and an estimated next/open-close window from default Deep Sea timing.
 <br>Command: `!deepsea`
 
 
@@ -466,7 +466,7 @@ In-Game Command | Description
 
 ## **events**
 
-> **Get recent In-Game events.** Available events are cargo, heli, small, large, chinook/ch47, vendor, deepsea. Compatibility aliases include oil_rig_small and large_oil_rig.
+> **Get recent In-Game events.** Available events are cargo, heli, small, large, chinook/ch47, deepsea. Compatibility aliases include oil_rig_small and large_oil_rig.
 <br>Command: `!events` - Get last 5 events
 <br>Command: `!events 3` - Get last 3 events
 <br>Command: `!events cargo` - Get last 5 events from cargo
