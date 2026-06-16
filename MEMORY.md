@@ -82,3 +82,8 @@
 ## Deep Sea isolation refactor
 - User requested Deep Sea changes be isolated so updating from the original project is easier. Moved Deep Sea runtime state, command formatting, event summary wrapping, side calculation, notification strings, and legacy GenericRadius suppression into `src/handlers/deepSeaHandler.js`.
 - Reverted direct Deep Sea changes to base `RustPlus.js`, `MapMarkers.js`, and `languages/en.json`; the remaining base hook is a minimal polling call to `DeepSeaHandler.install(...)` and `DeepSeaHandler.handler(...)`.
+
+
+## Discord channel permission preservation
+- User reported that restarting the bot made existing rustplusplus Discord channels public again. The startup path was resetting category/channel permission overwrites every time via setup helpers and `resetPermissionsAllChannels`.
+- Changed startup setup so existing category/channels keep their current Discord permission overwrites. Permissions are now applied automatically only when the bot creates a missing channel/category or during first-time setup; explicit `/role` and `/reset` commands can still intentionally recalculate permissions.
