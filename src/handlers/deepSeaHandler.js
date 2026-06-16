@@ -39,6 +39,10 @@ function getDeepSeaSide(markers, correctedMapSize) {
     center.x /= markers.length;
     center.y /= markers.length;
 
+    /*
+        Deep Sea vendor clusters use the same map axes as other Rust+ markers: x is west/east and
+        y is south/north. A cluster with negative x and in-bounds y is west of the map, not south.
+    */
     const distances = [
         { side: 'west', distance: center.x < 0 ? Math.abs(center.x) : 0 },
         { side: 'east', distance: center.x > correctedMapSize ? center.x - correctedMapSize : 0 },
