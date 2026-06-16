@@ -66,3 +66,19 @@
 ## Deep Sea JSON confirmation
 - User provided a live marker payload showing Deep Sea vendors as `type: "VendingMachine"` strings with x around `-4100` and `Casino Bar Shopkeeper`, confirming the west-side off-map vendor-cluster detection. Updated `deepSeaHandler.js` to accept both numeric Rust+ vending type `3` and string `VendingMachine`.
 - Follow-up from the live JSON: Rust+ marker `type` may arrive as enum names like `"VendingMachine"` instead of numeric ids. Deep Sea detection, marker dumps, and `MapMarkers.getMarkersOfType()` now tolerate both string enum names and numeric enum values so existing events and vendor handling keep working with either payload shape.
+
+## Deep Sea side correction
+- Full live payload review corrected the previous interpretation: the Deep Sea vendor cluster with `Casino Bar Shopkeeper` at negative `x` and in-bounds `y` is west of the map, not south. The earlier rotated-axis assumption was wrong.
+- Deep Sea side inference in `src/handlers/deepSeaHandler.js` must use normal Rust+ map axes: `x < 0` reports West, `x > mapSize` reports East, `y < 0` reports South, and `y > mapSize` reports North. The handler continues recomputing/storing side while active so `!deepsea` and the info channel reflect vendor movement before the cluster disappears.
+
+## Events output direction
+- User wants `!events` to be a current per-event summary instead of timestamped notification history. Each line should use relative durations from now, include active/last-seen and next expected information when known, and say the event info is unknown when no data exists.
+- Deep Sea active text should avoid absolute timestamps and say it is active on the side for the next relative duration, e.g. `Deep Sea event is active on the South side for the next 1 hour and 12 minutes.`
+
+## Deep Sea reverification
+- Complete code-path review found the old GenericRadius Deep Sea heuristic still existed in `src/structures/MapMarkers.js` even though vendor-cluster detection had superseded it. Disabled that heuristic so only `src/handlers/deepSeaHandler.js` owns Deep Sea state/notifications.
+- `deepSeaHandler.js` now exposes side-calculation helpers for direct verification and stores `sideDetails` (`center`, `distance`, and `correctedMapSize`) on `rustplus.deepSea`. The handler overwrites `side` and `sideName` on every active poll, not only when the side changes, to prevent stale `South` values from surviving after a fix/reload.
+
+## Deep Sea isolation refactor
+- User requested Deep Sea changes be isolated so updating from the original project is easier. Moved Deep Sea runtime state, command formatting, event summary wrapping, side calculation, notification strings, and legacy GenericRadius suppression into `src/handlers/deepSeaHandler.js`.
+- Reverted direct Deep Sea changes to base `RustPlus.js`, `MapMarkers.js`, and `languages/en.json`; the remaining base hook is a minimal polling call to `DeepSeaHandler.install(...)` and `DeepSeaHandler.handler(...)`.
