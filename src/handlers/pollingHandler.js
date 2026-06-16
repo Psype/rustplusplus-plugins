@@ -18,6 +18,9 @@
 
 */
 
+const Fs = require('fs');
+const DeepSeaHandler = require('./deepSeaHandler.js');
+const EventDebugLogger = require('../util/eventDebugLogger.js');
 const Info = require('../structures/Info');
 const InformationHandler = require('../handlers/informationHandler.js');
 const MapMarkers = require('../structures/MapMarkers.js');
@@ -63,10 +66,40 @@ module.exports = {
 
         rustplus.time.updateTime(time.time);
         rustplus.info.updateInfo(info.info);
+        dumpMapMarkers(rustplus, mapMarkers.mapMarkers);
+        EventDebugLogger.logMapMarkers(rustplus, mapMarkers.mapMarkers, rustplus.map ? rustplus.map.monuments : []);
         rustplus.mapMarkers.updateMapMarkers(mapMarkers.mapMarkers);
+        await DeepSeaHandler.handler(rustplus, client, mapMarkers.mapMarkers);
 
         await InformationHandler.handler(rustplus);
         await StorageMonitorHandler.handler(rustplus, client);
         await SmartAlarmHandler.handler(rustplus, client);
     },
 };
+
+function dumpMapMarkers(rustplus, mapMarkers) {
+    try {
+        const vendingMachineType = rustplus.mapMarkers ? rustplus.mapMarkers.types.VendingMachine : 3;
+        const dump = {
+            dumpedAt: new Date().toISOString(),
+            guildId: rustplus.guildId,
+            serverId: rustplus.serverId,
+            markers: mapMarkers.markers || [],
+            vendors: (mapMarkers.markers || []).filter(marker => isVendingMachineMarker(marker, vendingMachineType)),
+            monuments: rustplus.map ? rustplus.map.monuments : []
+        };
+
+        Fs.mkdirSync('logs', { recursive: true });
+        Fs.writeFileSync('logs/rustplus-markers.json', JSON.stringify(dump, null, 2));
+    }
+    catch (e) {
+        rustplus.log('DEBUG', `Could not dump map markers: ${e}`, 'warning');
+    }
+}
+
+function isVendingMachineMarker(marker, vendingMachineType) {
+    if (marker.type === vendingMachineType) return true;
+    if (typeof marker.type !== 'string') return false;
+
+    return marker.type.replace(/[\s_]/g, '').toLowerCase() === 'vendingmachine';
+}

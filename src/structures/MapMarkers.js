@@ -145,12 +145,25 @@ class MapMarkers {
 
         let markersOfType = [];
         for (let marker of markers) {
-            if (marker.type === type) {
+            if (this.isMarkerType(marker, type)) {
                 markersOfType.push(marker);
             }
         }
 
         return markersOfType;
+    }
+
+    getTypeName(type) {
+        return Object.keys(this.types).find(key => this.types[key] === type);
+    }
+
+    isMarkerType(marker, type) {
+        if (marker.type === type) return true;
+
+        const typeName = this.getTypeName(type);
+        if (!typeName || typeof marker.type !== 'string') return false;
+
+        return marker.type.replace(/[\s_]/g, '').toLowerCase() === typeName.toLowerCase();
     }
 
     getMarkerByTypeId(type, id) {
@@ -310,7 +323,7 @@ class MapMarkers {
 
             marker.location = pos;
 
-            if (!this.rustplus.isFirstPoll) {
+            if (!this.rustplus.isFirstPoll && !Map.isOutsideGridSystem(marker.x, marker.y, mapSize)) {
                 if (!this.knownVendingMachines.some(e => e.x === marker.x && e.y === marker.y)) {
                     this.rustplus.sendEvent(
                         this.rustplus.notificationSettings.vendingMachineDetectedSetting,
