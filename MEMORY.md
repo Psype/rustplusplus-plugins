@@ -97,3 +97,8 @@
 ## Deep Sea dynamic map-size correction
 - User clarified that Deep Sea side inference must be dynamic across different map sizes; a coordinate that looks in-bounds on one map may still be part of an offshore Deep Sea marker on a larger map.
 - Updated `deepSeaHandler.js` to calculate reference bounds from in-map monuments first, falling back to in-map non-Deep-Sea vending-machine markers, other in-map markers, and then server `correctedMapSize`. For single-axis-offshore Deep Sea markers, side is now based on the in-bounds coordinate relative to these observed bounds instead of assuming a fixed map midpoint.
+
+
+## Events approximate next windows and oil-rig grids
+- User wants `!events` to show approximate next event timing from vanilla-default assumptions even when the bot only has last-seen timestamps. Added isolated event-summary helpers in `deepSeaHandler.js` that append vanilla approximate next windows for Cargo, Patrol Helicopter, Chinook, Small Oil Rig, and Large Oil Rig.
+- User also noted modded servers can have multiple oil rigs and wants one `!events` line per rig, not combined names. Small/Large Oil Rig summaries are now split per oil-rig monument grid, e.g. `Large Oil Rig (A1)` and `Large Oil Rig (Z20)`, with each grid keeping its own last-trigger/unlock estimate when the bot has seen that rig.

@@ -12,6 +12,14 @@ const STATE_KEY = '__deepSeaState';
 const OFF_MAP_VENDOR_CLUSTER_SIZE = 3;
 const CASINO_BAR_SHOPKEEPER_REGEX = /casino\s+bar\s+shopkeeper/i;
 const DEFAULT_SETTING = { discord: false, inGame: false, voice: false, image: 'cargoship_logo.png' };
+const GRID_DIAMETER = 146.25;
+const VANILLA_EVENT_WINDOWS = {
+    cargo: { minMs: 2 * 60 * 60 * 1000, maxMs: 4 * 60 * 60 * 1000 },
+    heli: { minMs: 2 * 60 * 60 * 1000, maxMs: 4 * 60 * 60 * 1000 },
+    chinook: { minMs: 2 * 60 * 60 * 1000, maxMs: 4 * 60 * 60 * 1000 },
+    small: { minMs: 30 * 60 * 1000, maxMs: 60 * 60 * 1000 },
+    large: { minMs: 30 * 60 * 1000, maxMs: 60 * 60 * 1000 }
+};
 
 function getInitialState() {
     return {
@@ -23,7 +31,8 @@ function getInitialState() {
         lastSeenAt: null,
         lastEndedAt: null,
         endsAt: null,
-        vendorIds: []
+        vendorIds: [],
+        oilRigEvents: { small: {}, large: {} }
     };
 }
 
@@ -206,11 +215,184 @@ function formatCommand(rustplus, isInfoChannel = false) {
     return `Deep Sea was last seen on the ${sideName} side ${timeSince} ago. Next expected in ${Timer.secondsToFullScale(secondsUntilMin)}-${Timer.secondsToFullScale(secondsUntilMax)}.`;
 }
 
-function getEventSummary(rustplus, event) {
+
+function numberToLetters(num) {
+    const mod = num % 26;
+    let pow = num / 26 | 0;
+    const out = mod ? String.fromCharCode(64 + mod) : (pow--, 'Z');
+    return pow ? numberToLetters(pow) + out : out;
+}
+
+function getGridLetter(x, mapSize) {
+    let counter = 1;
+    for (let startGrid = 0; startGrid < mapSize; startGrid += GRID_DIAMETER) {
+        if (x >= startGrid && x <= (startGrid + GRID_DIAMETER)) return numberToLetters(counter);
+        counter++;
+    }
+
+    return null;
+}
+
+function getGridNumber(y, mapSize) {
+    let counter = 1;
+    const numberOfGrids = Math.floor(mapSize / GRID_DIAMETER);
+    for (let startGrid = 0; startGrid < mapSize; startGrid += GRID_DIAMETER) {
+        if (y >= startGrid && y <= (startGrid + GRID_DIAMETER)) return numberOfGrids - counter;
+        counter++;
+    }
+
+    return null;
+}
+
+function getGridPos(x, y, mapSize) {
+    if (x < 0 || x > mapSize || y < 0 || y > mapSize) return null;
+
+    const letter = getGridLetter(x, mapSize);
+    const number = getGridNumber(y, mapSize);
+    return letter && number !== null ? `${letter}${number}` : null;
+}
+
+function getOilRigMonuments(rustplus, event) {
+    if (!rustplus.map || !Array.isArray(rustplus.map.monuments) || !rustplus.info) return [];
+    const token = event === 'large' ? 'large_oil_rig' : 'oil_rig_small';
+
+    return rustplus.map.monuments
+        .filter(monument => monument.token === token)
+        .map(monument => {
+            return {
+                x: monument.x,
+                y: monument.y,
+                grid: getGridPos(monument.x, monument.y, rustplus.info.correctedMapSize)
+            };
+        })
+        .filter(monument => monument.grid);
+}
+
+function getEventDisplayName(event, oilRigMonument = null) {
     const eventNames = {
         cargo: 'Cargo', heli: 'Patrol Helicopter', chinook: 'Chinook 47', small: 'Small Oil Rig',
         large: 'Large Oil Rig', deepsea: 'Deep Sea'
     };
+
+    if (oilRigMonument && (event === 'small' || event === 'large')) {
+        return `${eventNames[event]} (${oilRigMonument.grid})`;
+    }
+    return eventNames[event] || event;
+}
+
+function getOilRigLocationField(rustplus, event) {
+    if (!rustplus.mapMarkers) return null;
+    return event === 'large' ? rustplus.mapMarkers.crateLargeOilRigLocation :
+        rustplus.mapMarkers.crateSmallOilRigLocation;
+}
+
+function getOilRigLastTriggeredAt(rustplus, event) {
+    if (!rustplus.mapMarkers) return null;
+    return event === 'large' ? rustplus.mapMarkers.timeSinceLargeOilRigWasTriggered :
+        rustplus.mapMarkers.timeSinceSmallOilRigWasTriggered;
+}
+
+function matchesOilRigLocation(location, grid) {
+    if (!location || !grid) return false;
+    return location.toString().toLowerCase().includes(grid.toString().toLowerCase());
+}
+
+function syncOilRigState(rustplus) {
+    const state = ensureState(rustplus);
+
+    ['small', 'large'].forEach(event => {
+        const monuments = getOilRigMonuments(rustplus, event);
+        const location = getOilRigLocationField(rustplus, event);
+        const lastTriggeredAt = getOilRigLastTriggeredAt(rustplus, event);
+
+        monuments.forEach(monument => {
+            if (!state.oilRigEvents[event][monument.grid]) state.oilRigEvents[event][monument.grid] = {};
+            const entry = state.oilRigEvents[event][monument.grid];
+
+            if (lastTriggeredAt && (monuments.length === 1 || matchesOilRigLocation(location, monument.grid))) {
+                entry.lastTriggeredAt = lastTriggeredAt;
+            }
+        });
+    });
+}
+
+function getLastSeenAt(rustplus, event) {
+    if (!rustplus.mapMarkers) return null;
+
+    const lastSeen = {
+        cargo: rustplus.mapMarkers.timeSinceCargoShipWasOut,
+        heli: rustplus.mapMarkers.timeSincePatrolHelicopterWasOnMap,
+        chinook: rustplus.mapMarkers.timeSinceCH47WasOut,
+        small: getOilRigLastTriggeredAt(rustplus, 'small'),
+        large: getOilRigLastTriggeredAt(rustplus, 'large')
+    };
+
+    return lastSeen[event] || null;
+}
+
+function getApproximateNextText(lastSeenAt, event) {
+    const window = VANILLA_EVENT_WINDOWS[event];
+    if (!lastSeenAt || !window) return null;
+
+    const secondsSince = (new Date() - lastSeenAt) / 1000;
+    const secondsUntilMin = (window.minMs / 1000) - secondsSince;
+    const secondsUntilMax = (window.maxMs / 1000) - secondsSince;
+
+    if (secondsUntilMax <= 0) return 'Vanilla next approx any time now.';
+    if (secondsUntilMin <= 0) {
+        return `Vanilla next approx any time within ${Timer.secondsToFullScale(secondsUntilMax)}.`;
+    }
+
+    return `Vanilla next approx in ${Timer.secondsToFullScale(secondsUntilMin)}-${Timer.secondsToFullScale(secondsUntilMax)}.`;
+}
+
+function appendApproximateNext(message, rustplus, event) {
+    const approximateNext = getApproximateNextText(getLastSeenAt(rustplus, event), event);
+    if (!approximateNext) return message;
+    return `${message} ${approximateNext}`;
+}
+
+function getOilRigUnlockMs(rustplus) {
+    if (rustplus.instance && rustplus.instance.server && rustplus.instance.server.oilRigLockedCrateUnlockTimeMs) {
+        return rustplus.instance.server.oilRigLockedCrateUnlockTimeMs;
+    }
+    return Constants.DEFAULT_OIL_RIG_LOCKED_CRATE_UNLOCK_TIME_MS;
+}
+
+function getOilRigSummaryFromEntry(rustplus, event, monument, entry) {
+    const name = getEventDisplayName(event, monument);
+    if (!entry || !entry.lastTriggeredAt) return `${name}: event info is unknown.`;
+
+    const secondsSince = (new Date() - entry.lastTriggeredAt) / 1000;
+    const unlockSecondsLeft = (getOilRigUnlockMs(rustplus) / 1000) - secondsSince;
+    let message;
+
+    if (unlockSecondsLeft > 0) {
+        message = `${Timer.secondsToFullScale(unlockSecondsLeft)} before Locked Crate unlocks.`;
+    }
+    else {
+        message = `${Timer.secondsToFullScale(secondsSince)} since Heavy Scientists last got called.`;
+    }
+
+    const approximateNext = getApproximateNextText(entry.lastTriggeredAt, event);
+    if (approximateNext) message = `${message} ${approximateNext}`;
+    return `${name}: ${message}`;
+}
+
+function getOilRigEventSummaries(rustplus, event) {
+    syncOilRigState(rustplus);
+
+    const monuments = getOilRigMonuments(rustplus, event);
+    if (monuments.length === 0) return [getEventSummary(rustplus, event)];
+
+    const state = ensureState(rustplus);
+    return monuments.map(monument => {
+        const entry = state.oilRigEvents[event][monument.grid];
+        return getOilRigSummaryFromEntry(rustplus, event, monument, entry);
+    });
+}
+
+function getEventSummary(rustplus, event) {
     const getters = {
         cargo: () => rustplus.getCommandCargo(),
         heli: () => rustplus.getCommandHeli(),
@@ -220,16 +402,22 @@ function getEventSummary(rustplus, event) {
         deepsea: () => formatCommand(rustplus)
     };
 
-    const name = eventNames[event] || event;
+    const name = getEventDisplayName(event);
     const getter = getters[event];
     if (!getter) return `${name}: event info is unknown.`;
 
     const value = getter();
-    const message = Array.isArray(value) ? value[0] : value;
+    let message = Array.isArray(value) ? value[0] : value;
 
     if (!message) return `${name}: event info is unknown.`;
+    message = appendApproximateNext(message, rustplus, event);
     if (message.toLowerCase().startsWith(name.toLowerCase())) return message;
     return `${name}: ${message}`;
+}
+
+function getEventSummaries(rustplus, event) {
+    if (event === 'small' || event === 'large') return getOilRigEventSummaries(rustplus, event);
+    return [getEventSummary(rustplus, event)];
 }
 
 function patchCommands(rustplus, client) {
@@ -250,9 +438,10 @@ function patchCommands(rustplus, client) {
                 command.slice(commandEventsLocalized.length).trim() : command.slice(commandEvents.length).trim();
             const event = args.replace(/ .*/, '').toLowerCase();
 
-            if (event === 'deepsea') return [getEventSummary(this, 'deepsea')];
+            if (['small', 'large', 'deepsea'].includes(event)) return getEventSummaries(this, event);
             if (event === '') {
-                return ['cargo', 'heli', 'chinook', 'small', 'large', 'deepsea'].map(e => getEventSummary(this, e));
+                return ['cargo', 'heli', 'chinook', 'small', 'large', 'deepsea']
+                    .flatMap(e => getEventSummaries(this, e));
             }
             return originalGetCommandEvents(command);
         };
