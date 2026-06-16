@@ -41,6 +41,7 @@ async function addTextChannel(name, idName, client, guild, parent, permissionWri
     const instance = client.getInstance(guild.id);
 
     let channel = undefined;
+    let createdChannel = false;
     if (instance.channelId[idName] !== null) {
         channel = DiscordTools.getTextChannelById(guild.id, instance.channelId[idName]);
     }
@@ -48,7 +49,10 @@ async function addTextChannel(name, idName, client, guild, parent, permissionWri
         channel = await DiscordTools.addTextChannel(guild.id, name);
         instance.channelId[idName] = channel.id;
         client.setInstance(guild.id, instance);
+        createdChannel = true;
+    }
 
+    if (createdChannel || instance.firstTime) {
         try {
             channel.setParent(parent.id);
         }
@@ -56,30 +60,22 @@ async function addTextChannel(name, idName, client, guild, parent, permissionWri
             client.log(client.intlGet(null, 'errorCap'),
                 client.intlGet(null, 'couldNotSetParent', { channelId: channel.id }), 'error');
         }
-    }
 
-    if (instance.firstTime) {
+        const perms = PermissionHandler.getPermissionsReset(client, guild, permissionWrite);
+
         try {
-            channel.setParent(parent.id);
+            await channel.permissionOverwrites.set(perms);
         }
         catch (e) {
-            client.log(client.intlGet(null, 'errorCap'),
-                client.intlGet(null, 'couldNotSetParent', { channelId: channel.id }), 'error');
+            /* Ignore */
         }
-    }
-
-    const perms = PermissionHandler.getPermissionsReset(client, guild, permissionWrite);
-
-    try {
-        await channel.permissionOverwrites.set(perms);
-    }
-    catch (e) {
-        /* Ignore */
     }
 
     /* Currently, this halts the entire application... Too lazy to fix...
        It is possible to just remove the channels and let the bot recreate them with correct name language */
     //channel.setName(name);
 
-    channel.lockPermissions();
+    if (createdChannel || instance.firstTime) {
+        channel.lockPermissions();
+    }
 }
