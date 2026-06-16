@@ -222,9 +222,6 @@ class DiscordBot extends Discord.Client {
                 /* Ignore */
             }
         }
-        else {
-            await PermissionHandler.resetPermissionsAllChannels(this, guild);
-        }
 
         require('../util/FcmListener')(this, guild);
         const credentials = InstanceUtils.readCredentialsFile(guild.id);
