@@ -40,9 +40,8 @@ function getDeepSeaSide(markers, correctedMapSize) {
     center.y /= markers.length;
 
     /*
-        Deep Sea vendor markers are emitted in a rotated/offshore coordinate space compared to normal
-        Rust+ map markers. A live south-side cluster was observed with x around -4100 and y inside the
-        playable map range, so use x for the north/south edge and y for the west/east edge here.
+        Deep Sea vendor clusters use the same map axes as other Rust+ markers: x is west/east and
+        y is south/north. A cluster with negative x and in-bounds y is west of the map, not south.
     */
     const distances = [
         { side: 'south', distance: center.x < 0 ? Math.abs(center.x) : 0 },

@@ -68,8 +68,8 @@
 - Follow-up from the live JSON: Rust+ marker `type` may arrive as enum names like `"VendingMachine"` instead of numeric ids. Deep Sea detection, marker dumps, and `MapMarkers.getMarkersOfType()` now tolerate both string enum names and numeric enum values so existing events and vendor handling keep working with either payload shape.
 
 ## Deep Sea side correction
-- User provided a live south-side Deep Sea vendor cluster where `Casino Bar Shopkeeper` and related vendors had `x` around `-4100` while `y` stayed within the playable map range. This proved Deep Sea vendor markers use a rotated/offshore coordinate space for side detection compared with normal Rust+ map markers.
-- Updated Deep Sea side inference in `src/handlers/deepSeaHandler.js` so `x < 0` reports South, `x > mapSize` reports North, `y < 0` reports West, and `y > mapSize` reports East. The handler continues recomputing/storing side while active so `!deepsea` and the info channel reflect vendor movement before the cluster disappears.
+- Full live payload review corrected the previous interpretation: the Deep Sea vendor cluster with `Casino Bar Shopkeeper` at negative `x` and in-bounds `y` is west of the map, not south. The earlier rotated-axis assumption was wrong.
+- Deep Sea side inference in `src/handlers/deepSeaHandler.js` must use normal Rust+ map axes: `x < 0` reports West, `x > mapSize` reports East, `y < 0` reports South, and `y > mapSize` reports North. The handler continues recomputing/storing side while active so `!deepsea` and the info channel reflect vendor movement before the cluster disappears.
 
 ## Events output direction
 - User wants `!events` to be a current per-event summary instead of timestamped notification history. Each line should use relative durations from now, include active/last-seen and next expected information when known, and say the event info is unknown when no data exists.
