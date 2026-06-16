@@ -47,3 +47,12 @@
 ## Raw Rust+ debug logging
 - User reported Deep Sea spawned but the matcher did not detect it. Added newline-delimited raw payload logging for exploration: `/tmp/rustplusplus-events.log` logs every Rust+ `message` event and every polled `getMapMarkers` payload; `/tmp/rustplus-markers-history.log` keeps marker history across polls. Existing `/tmp/rustplus-markers.json` remains as the latest marker snapshot.
 - Use these logs while Deep Sea is active to inspect missed payloads and tighten `isDeepseaMarker()`.
+
+## Raw websocket logging
+- User asked for raw socket data to grep for Deep Sea hints. Added `/tmp/rustplusplus-raw-socket.log` newline-delimited JSON logging for raw inbound and outbound WebSocket frames. Frames are protobuf/binary, so each entry includes byte length plus UTF-8 best-effort, hex, and base64 representations.
+
+## Raw websocket text logging adjustment
+- User clarified raw socket logs should be readable plain text, not JSON/base64/hex. Changed the WebSocket raw log path to `/tmp/rustplusplus-raw-socket.txt` and append best-effort UTF-8 text directly with simple timestamp/direction separators.
+
+## Deep Sea debug workflow documentation
+- Added `docs/deepsea_debugging.md` with recommended grep/jq workflows for raw WebSocket text, decoded events, marker history, before/during snapshot diffing, and how to refine `isDeepseaMarker()` once the actual Deep Sea marker shape is identified.

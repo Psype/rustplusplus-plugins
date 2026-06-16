@@ -19,6 +19,7 @@
 */
 
 const DiscordMessages = require('../discordTools/discordMessages.js');
+const EventDebugLogger = require('../util/eventDebugLogger.js');
 const Info = require('../structures/Info');
 const Map = require('../structures/Map');
 const PollingHandler = require('../handlers/pollingHandler.js');
@@ -27,6 +28,8 @@ module.exports = {
     name: 'connected',
     async execute(rustplus, client) {
         if (!rustplus.isServerAvailable()) return rustplus.deleteThisRustplusInstance();
+
+        EventDebugLogger.attachWebsocketLogger(rustplus);
 
         rustplus.log(client.intlGet(null, 'connectedCap'), client.intlGet(null, 'connectedToServer'));
 
