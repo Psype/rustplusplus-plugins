@@ -102,16 +102,6 @@ class RustPlus extends RustPlusLib {
         };
         this.patrolHelicopterTracers = new Object();
         this.cargoShipTracers = new Object();
-        this.deepSea = {
-            active: false,
-            side: null,
-            sideName: null,
-            startedAt: null,
-            lastSeenAt: null,
-            lastEndedAt: null,
-            endsAt: null,
-            vendorIds: []
-        };
 
         /* Rustplus structures */
         this.map = null;            /* Stores the Map structure. */
@@ -1249,21 +1239,37 @@ class RustPlus extends RustPlusLib {
     }
 
     getCommandDeepsea(isInfoChannel = false) {
-        if (this.deepSea.active) {
-            const now = new Date();
-            const secondsRemaining = Math.max(0, (this.deepSea.endsAt - now) / 1000);
-            return Client.client.intlGet(this.guildId, isInfoChannel ? 'deepseaActiveShort' : 'deepseaActiveAt', {
-                side: this.deepSea.sideName || Client.client.intlGet(this.guildId, 'unknown'),
-                time: Timer.secondsToFullScale(secondsRemaining, isInfoChannel ? 's' : '')
-            });
+        const deepseaMarkers = this.mapMarkers.deepseas;
+        if (deepseaMarkers.length > 0) {
+            const locations = deepseaMarkers.map(marker => marker.location.string).join(', ');
+            if (isInfoChannel) {
+                return Client.client.intlGet(this.guildId, 'deepseaActiveShort', { locations: locations });
+            }
+
+            const seenSince = deepseaMarkers
+                .map(marker => marker.deepseaSeenSince)
+                .filter(seenSince => seenSince !== undefined)
+                .sort((a, b) => a - b)[0] || new Date();
+            const secondsSinceSeen = (new Date() - seenSince) / 1000;
+            const secondsUntilDefaultClose = (Constants.DEFAULT_DEEPSEA_DURATION_MS / 1000) - secondsSinceSeen;
+
+            if (secondsUntilDefaultClose > 0) {
+                return Client.client.intlGet(this.guildId, 'deepseaActiveAtPrediction', {
+                    locations: locations,
+                    elapsed: Timer.secondsToFullScale(secondsSinceSeen),
+                    time: Timer.secondsToFullScale(secondsUntilDefaultClose)
+                });
+            }
+
+            return Client.client.intlGet(this.guildId, 'deepseaActiveAt', { locations: locations });
         }
 
-        if (this.deepSea.lastEndedAt === null) {
+        if (this.mapMarkers.timeSinceDeepseaWasActive === null) {
             return isInfoChannel ? Client.client.intlGet(this.guildId, 'notActive') :
                 Client.client.intlGet(this.guildId, 'deepseaNotActive');
         }
 
-        const secondsSince = (new Date() - this.deepSea.lastEndedAt) / 1000;
+        const secondsSince = (new Date() - this.mapMarkers.timeSinceDeepseaWasActive) / 1000;
         if (isInfoChannel) {
             return Client.client.intlGet(this.guildId, 'timeSinceLast', {
                 time: Timer.secondsToFullScale(secondsSince, 's')

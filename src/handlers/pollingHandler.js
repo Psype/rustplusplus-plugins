@@ -68,6 +68,7 @@ module.exports = {
         rustplus.info.updateInfo(info.info);
         dumpMapMarkers(rustplus, mapMarkers.mapMarkers);
         EventDebugLogger.logMapMarkers(rustplus, mapMarkers.mapMarkers, rustplus.map ? rustplus.map.monuments : []);
+        DeepSeaHandler.install(rustplus, client);
         rustplus.mapMarkers.updateMapMarkers(mapMarkers.mapMarkers);
         await DeepSeaHandler.handler(rustplus, client, mapMarkers.mapMarkers);
 
