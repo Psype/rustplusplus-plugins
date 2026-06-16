@@ -44,10 +44,10 @@ function getDeepSeaSide(markers, correctedMapSize) {
         y is south/north. A cluster with negative x and in-bounds y is west of the map, not south.
     */
     const distances = [
-        { side: 'west', distance: center.x < 0 ? Math.abs(center.x) : 0 },
-        { side: 'east', distance: center.x > correctedMapSize ? center.x - correctedMapSize : 0 },
-        { side: 'south', distance: center.y < 0 ? Math.abs(center.y) : 0 },
-        { side: 'north', distance: center.y > correctedMapSize ? center.y - correctedMapSize : 0 }
+        { side: 'south', distance: center.x < 0 ? Math.abs(center.x) : 0 },
+        { side: 'north', distance: center.x > correctedMapSize ? center.x - correctedMapSize : 0 },
+        { side: 'west', distance: center.y < 0 ? Math.abs(center.y) : 0 },
+        { side: 'east', distance: center.y > correctedMapSize ? center.y - correctedMapSize : 0 }
     ];
 
     distances.sort((a, b) => b.distance - a.distance);
