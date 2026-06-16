@@ -102,3 +102,7 @@
 ## Events approximate next windows and oil-rig grids
 - User wants `!events` to show approximate next event timing from vanilla-default assumptions even when the bot only has last-seen timestamps. Added isolated event-summary helpers in `deepSeaHandler.js` that append vanilla approximate next windows for Cargo, Patrol Helicopter, Chinook, Small Oil Rig, and Large Oil Rig.
 - User also noted modded servers can have multiple oil rigs and wants one `!events` line per rig, not combined names. Small/Large Oil Rig summaries are now split per oil-rig monument grid, e.g. `Large Oil Rig (A1)` and `Large Oil Rig (Z20)`, with each grid keeping its own last-trigger/unlock estimate when the bot has seen that rig.
+
+## Deep Sea map-size confirmation
+- User provided a Rust+ info payload with `mapSize: 4263` and a Deep Sea `Casino Bar Shopkeeper` marker at `x=-3821.7485`, `y=2147.4407`. With corrected map size `4241.25`, the marker is single-axis offshore (`x < 0`) and `y` is just north of midpoint (`2120.625`), so the current side inference correctly reports North.
+- `deepSeaHandler.js` now falls back to calculating corrected map size from `rustplus.info.mapSize` if `correctedMapSize` is not already present, keeping Deep Sea edge checks tied to the live server map dimensions exposed by Rust+ info payloads.

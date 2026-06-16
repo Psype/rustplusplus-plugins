@@ -252,8 +252,19 @@ function getGridPos(x, y, mapSize) {
     return letter && number !== null ? `${letter}${number}` : null;
 }
 
+function getCorrectedMapSize(rustplus) {
+    if (!rustplus.info) return null;
+    if (Number.isFinite(rustplus.info.correctedMapSize)) return rustplus.info.correctedMapSize;
+    if (!Number.isFinite(rustplus.info.mapSize)) return null;
+
+    const remainder = rustplus.info.mapSize % GRID_DIAMETER;
+    const offset = GRID_DIAMETER - remainder;
+    return remainder < 120 ? rustplus.info.mapSize - remainder : rustplus.info.mapSize + offset;
+}
+
 function getOilRigMonuments(rustplus, event) {
-    if (!rustplus.map || !Array.isArray(rustplus.map.monuments) || !rustplus.info) return [];
+    const correctedMapSize = getCorrectedMapSize(rustplus);
+    if (!rustplus.map || !Array.isArray(rustplus.map.monuments) || !correctedMapSize) return [];
     const token = event === 'large' ? 'large_oil_rig' : 'oil_rig_small';
 
     return rustplus.map.monuments
@@ -262,7 +273,7 @@ function getOilRigMonuments(rustplus, event) {
             return {
                 x: monument.x,
                 y: monument.y,
-                grid: getGridPos(monument.x, monument.y, rustplus.info.correctedMapSize)
+                grid: getGridPos(monument.x, monument.y, correctedMapSize)
             };
         })
         .filter(monument => monument.grid);
@@ -494,7 +505,8 @@ module.exports = {
         install(rustplus, client);
 
         const state = ensureState(rustplus);
-        const correctedMapSize = rustplus.info.correctedMapSize;
+        const correctedMapSize = getCorrectedMapSize(rustplus);
+        if (!correctedMapSize) return;
         const vendingMachineType = getVendingMachineType(rustplus);
         const offMapVendors = (mapMarkers.markers || [])
             .filter(marker => isVendingMachineMarker(marker, vendingMachineType))
