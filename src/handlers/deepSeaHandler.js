@@ -51,7 +51,54 @@ function isCasinoBarShopkeeper(marker) {
     return typeof marker.name === 'string' && CASINO_BAR_SHOPKEEPER_REGEX.test(marker.name);
 }
 
-function getDeepSeaSideDetails(markers, correctedMapSize) {
+function buildBounds(referenceMarkers, source) {
+    return referenceMarkers.reduce((bounds, marker) => {
+        bounds.minX = Math.min(bounds.minX, marker.x);
+        bounds.maxX = Math.max(bounds.maxX, marker.x);
+        bounds.minY = Math.min(bounds.minY, marker.y);
+        bounds.maxY = Math.max(bounds.maxY, marker.y);
+        return bounds;
+    }, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, source: source });
+}
+
+function getReferenceBounds(rustplus, allMarkers, correctedMapSize, deepSeaVendorIds = []) {
+    const deepSeaVendorIdSet = new Set(deepSeaVendorIds);
+    const inMap = marker => !isOffMap(marker, correctedMapSize);
+
+    if (rustplus.map && Array.isArray(rustplus.map.monuments)) {
+        const monuments = rustplus.map.monuments.filter(inMap);
+        if (monuments.length >= 2) return buildBounds(monuments, 'monuments');
+    }
+
+    const vendingMachineType = getVendingMachineType(rustplus);
+    const vendors = (allMarkers || [])
+        .filter(marker => !deepSeaVendorIdSet.has(marker.id))
+        .filter(marker => isVendingMachineMarker(marker, vendingMachineType))
+        .filter(inMap);
+    if (vendors.length >= 2) return buildBounds(vendors, 'vendors');
+
+    const markers = (allMarkers || [])
+        .filter(marker => !deepSeaVendorIdSet.has(marker.id))
+        .filter(inMap);
+    if (markers.length >= 2) return buildBounds(markers, 'markers');
+
+    return { minX: 0, maxX: correctedMapSize, minY: 0, maxY: correctedMapSize, source: 'mapSize' };
+}
+
+function getReferenceMidpoint(bounds, axis, fallback) {
+    if (!bounds) return fallback;
+
+    if (axis === 'x' && Number.isFinite(bounds.minX) && Number.isFinite(bounds.maxX)) {
+        return (bounds.minX + bounds.maxX) / 2;
+    }
+    if (axis === 'y' && Number.isFinite(bounds.minY) && Number.isFinite(bounds.maxY)) {
+        return (bounds.minY + bounds.maxY) / 2;
+    }
+
+    return fallback;
+}
+
+function getDeepSeaSideDetails(markers, correctedMapSize, referenceBounds = null) {
     const center = markers.reduce((acc, marker) => {
         acc.x += marker.x;
         acc.y += marker.y;
@@ -60,29 +107,54 @@ function getDeepSeaSideDetails(markers, correctedMapSize) {
     center.x /= markers.length;
     center.y /= markers.length;
 
-    /*
-        Deep Sea vendor clusters use the same map axes as other Rust+ markers: x is west/east and
-        y is south/north. A cluster with negative x and in-bounds y is west of the map, not south.
-    */
-    const distances = [
-        { side: 'south', distance: center.x < 0 ? Math.abs(center.x) : 0 },
-        { side: 'north', distance: center.x > correctedMapSize ? center.x - correctedMapSize : 0 },
-        { side: 'west', distance: center.y < 0 ? Math.abs(center.y) : 0 },
-        { side: 'east', distance: center.y > correctedMapSize ? center.y - correctedMapSize : 0 }
-    ];
+    const mapMidpoint = correctedMapSize / 2;
+    const referenceMidX = getReferenceMidpoint(referenceBounds, 'x', mapMidpoint);
+    const referenceMidY = getReferenceMidpoint(referenceBounds, 'y', mapMidpoint);
+    const xOutside = center.x < 0 || center.x > correctedMapSize;
+    const yOutside = center.y < 0 || center.y > correctedMapSize;
+    let side = null;
+    let distance = 0;
 
-    distances.sort((a, b) => b.distance - a.distance);
+    /*
+        Deep Sea vendors can report one coordinate far outside the map while the other coordinate stays
+        inside the map. For those markers, the outside coordinate is only the offshore distance; the
+        in-bounds coordinate decides which half of the playable/vendor spread the event is on.
+    */
+    if (xOutside && !yOutside) {
+        side = center.y >= referenceMidY ? 'north' : 'south';
+        distance = center.x < 0 ? Math.abs(center.x) : center.x - correctedMapSize;
+    }
+    else if (yOutside && !xOutside) {
+        side = center.x >= referenceMidX ? 'east' : 'west';
+        distance = center.y < 0 ? Math.abs(center.y) : center.y - correctedMapSize;
+    }
+    else {
+        const distances = [
+            { side: 'west', distance: center.x < 0 ? Math.abs(center.x) : 0 },
+            { side: 'east', distance: center.x > correctedMapSize ? center.x - correctedMapSize : 0 },
+            { side: 'south', distance: center.y < 0 ? Math.abs(center.y) : 0 },
+            { side: 'north', distance: center.y > correctedMapSize ? center.y - correctedMapSize : 0 }
+        ];
+
+        distances.sort((a, b) => b.distance - a.distance);
+        side = distances[0].distance > 0 ? distances[0].side : null;
+        distance = distances[0].distance;
+    }
 
     return {
-        side: distances[0].distance > 0 ? distances[0].side : null,
+        side: side,
         center: center,
-        distance: distances[0].distance,
-        correctedMapSize: correctedMapSize
+        distance: distance,
+        correctedMapSize: correctedMapSize,
+        mapMidpoint: mapMidpoint,
+        referenceMidX: referenceMidX,
+        referenceMidY: referenceMidY,
+        referenceBounds: referenceBounds
     };
 }
 
-function getDeepSeaSide(markers, correctedMapSize) {
-    return getDeepSeaSideDetails(markers, correctedMapSize).side;
+function getDeepSeaSide(markers, correctedMapSize, referenceBounds = null) {
+    return getDeepSeaSideDetails(markers, correctedMapSize, referenceBounds).side;
 }
 
 function getSideName(side) {
@@ -224,6 +296,7 @@ module.exports = {
     install: install,
     getDeepSeaSide: getDeepSeaSide,
     getDeepSeaSideDetails: getDeepSeaSideDetails,
+    getReferenceBounds: getReferenceBounds,
     formatCommand: formatCommand,
 
     handler: async function (rustplus, client, mapMarkers) {
@@ -244,7 +317,9 @@ module.exports = {
         const active = deepSeaVendors.length > 0;
 
         if (active) {
-            const sideDetails = getDeepSeaSideDetails(deepSeaVendors, correctedMapSize);
+            const referenceBounds = getReferenceBounds(rustplus, mapMarkers.markers || [], correctedMapSize,
+                deepSeaVendors.map(marker => marker.id));
+            const sideDetails = getDeepSeaSideDetails(deepSeaVendors, correctedMapSize, referenceBounds);
             const side = sideDetails.side;
             const sideName = getSideName(side);
             const now = new Date();

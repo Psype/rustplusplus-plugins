@@ -87,3 +87,13 @@
 ## Discord channel permission preservation
 - User reported that restarting the bot made existing rustplusplus Discord channels public again. The startup path was resetting category/channel permission overwrites every time via setup helpers and `resetPermissionsAllChannels`.
 - Changed startup setup so existing category/channels keep their current Discord permission overwrites. Permissions are now applied automatically only when the bot creates a missing channel/category or during first-time setup; explicit `/role` and `/reset` commands can still intentionally recalculate permissions.
+
+
+## Deep Sea side inference update
+- User provided another server where `Casino Bar Shopkeeper` at `x=-3827.1997`, `y=2065.6836` is actually North. This shows the far-outside coordinate on Deep Sea vendors can be offshore distance, not the side itself.
+- Updated `deepSeaHandler.js` side inference: if exactly one axis is outside the map and the other is in-bounds, use the in-bounds coordinate relative to the map midpoint (`y >= midpoint` => North, `y < midpoint` => South; `x >= midpoint` => East, `x < midpoint` => West). Fall back to outside-edge distance only when both axes are outside or neither gives the single-axis pattern.
+
+
+## Deep Sea dynamic map-size correction
+- User clarified that Deep Sea side inference must be dynamic across different map sizes; a coordinate that looks in-bounds on one map may still be part of an offshore Deep Sea marker on a larger map.
+- Updated `deepSeaHandler.js` to calculate reference bounds from in-map monuments first, falling back to in-map non-Deep-Sea vending-machine markers, other in-map markers, and then server `correctedMapSize`. For single-axis-offshore Deep Sea markers, side is now based on the in-bounds coordinate relative to these observed bounds instead of assuming a fixed map midpoint.
