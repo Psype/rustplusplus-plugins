@@ -1280,17 +1280,20 @@ class RustPlus extends RustPlusLib {
         const secondsUntilMax = (Constants.DEFAULT_DEEPSEA_COOLDOWN_MAX_MS / 1000) - secondsSince;
         if (secondsUntilMax <= 0) {
             return Client.client.intlGet(this.guildId, 'timeSinceDeepseaActiveOverdue', {
+                side: side,
                 time: Timer.secondsToFullScale(secondsSince)
             });
         }
         else if (secondsUntilMin <= 0) {
             return Client.client.intlGet(this.guildId, 'timeSinceDeepseaActiveSoon', {
+                side: side,
                 time: Timer.secondsToFullScale(secondsSince),
                 maxTime: Timer.secondsToFullScale(secondsUntilMax)
             });
         }
 
         return Client.client.intlGet(this.guildId, 'timeSinceDeepseaActivePrediction', {
+            side: side,
             time: Timer.secondsToFullScale(secondsSince),
             minTime: Timer.secondsToFullScale(secondsUntilMin),
             maxTime: Timer.secondsToFullScale(secondsUntilMax)
@@ -1430,19 +1433,41 @@ class RustPlus extends RustPlusLib {
             } break;
         }
 
-        const strings = [];
-        let counter = 0;
-        for (const e of this.events[event]) {
-            if (counter === 5 || counter === number) break;
-            strings.push(e);
-            counter += 1;
+        if (event !== 'all') {
+            return [this.getEventSummary(event)];
         }
 
-        if (strings.length === 0) {
-            return Client.client.intlGet(this.guildId, 'noRegisteredEvents');
-        }
+        return ['cargo', 'heli', 'chinook', 'small', 'large', 'deepsea'].map(e => this.getEventSummary(e));
+    }
 
-        return strings;
+    getEventSummary(event) {
+        const eventNames = {
+            cargo: 'Cargo',
+            heli: 'Patrol Helicopter',
+            chinook: 'Chinook 47',
+            small: 'Small Oil Rig',
+            large: 'Large Oil Rig',
+            deepsea: 'Deep Sea'
+        };
+        const getters = {
+            cargo: () => this.getCommandCargo(),
+            heli: () => this.getCommandHeli(),
+            chinook: () => this.getCommandChinook(),
+            small: () => this.getCommandSmall(),
+            large: () => this.getCommandLarge(),
+            deepsea: () => this.getCommandDeepsea()
+        };
+
+        const name = eventNames[event] || event;
+        const getter = getters[event];
+        if (!getter) return `${name}: ${Client.client.intlGet(this.guildId, 'eventInfoUnknown')}`;
+
+        const value = getter();
+        const message = Array.isArray(value) ? value[0] : value;
+
+        if (!message) return `${name}: ${Client.client.intlGet(this.guildId, 'eventInfoUnknown')}`;
+        if (message.toLowerCase().startsWith(name.toLowerCase())) return message;
+        return `${name}: ${message}`;
     }
 
     getCommandHeli(isInfoChannel = false) {
