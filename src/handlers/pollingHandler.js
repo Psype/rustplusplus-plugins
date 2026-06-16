@@ -18,6 +18,8 @@
 
 */
 
+const Fs = require('fs');
+const EventDebugLogger = require('../util/eventDebugLogger.js');
 const Info = require('../structures/Info');
 const InformationHandler = require('../handlers/informationHandler.js');
 const MapMarkers = require('../structures/MapMarkers.js');
@@ -63,6 +65,8 @@ module.exports = {
 
         rustplus.time.updateTime(time.time);
         rustplus.info.updateInfo(info.info);
+        dumpMapMarkers(rustplus, mapMarkers.mapMarkers);
+        EventDebugLogger.logMapMarkers(rustplus, mapMarkers.mapMarkers, rustplus.map ? rustplus.map.monuments : []);
         rustplus.mapMarkers.updateMapMarkers(mapMarkers.mapMarkers);
 
         await InformationHandler.handler(rustplus);
@@ -70,3 +74,22 @@ module.exports = {
         await SmartAlarmHandler.handler(rustplus, client);
     },
 };
+
+function dumpMapMarkers(rustplus, mapMarkers) {
+    try {
+        const vendingMachineType = rustplus.mapMarkers ? rustplus.mapMarkers.types.VendingMachine : 3;
+        const dump = {
+            dumpedAt: new Date().toISOString(),
+            guildId: rustplus.guildId,
+            serverId: rustplus.serverId,
+            markers: mapMarkers.markers || [],
+            vendors: (mapMarkers.markers || []).filter(marker => marker.type === vendingMachineType),
+            monuments: rustplus.map ? rustplus.map.monuments : []
+        };
+
+        Fs.writeFileSync('/tmp/rustplus-markers.json', JSON.stringify(dump, null, 2));
+    }
+    catch (e) {
+        rustplus.log('DEBUG', `Could not dump map markers: ${e}`, 'warning');
+    }
+}

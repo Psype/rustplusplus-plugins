@@ -33,6 +33,7 @@
 - **craft** - Display the cost to craft an item.
 - **death/deaths** - Display latest deaths.
 - **decay** - Display the decay time of an item.
+- **deepsea** - Track Deep Sea activity and predict open/close windows when the server exposes its Rust+ map marker.
 - **events** - Get recent events.
 - **heli** - Get information regarding Patrol Helicopter.
 - **large** - Get information regarding Large Oil Rig.

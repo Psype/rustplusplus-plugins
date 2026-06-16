@@ -353,6 +353,7 @@ In-Game Command | Description
 [**craft**](commands.md#craft-ingame) | Display the cost to craft an item.
 [**death/deaths**](commands.md#deathdeaths) | Get recent death events.
 [**decay**](commands.md#decay-ingame) | Display the decay time of an item.
+[**deepsea**](commands.md#deepsea) | Track Deep Sea activity from the Rust+ map marker when exposed by the server.
 [**events**](commands.md#events) | Get recent events.
 [**heli**](commands.md#heli) | Get information about Patrol Helicopter (Location, time since last downed, time since last on map).
 [**large**](commands.md#large) | Get information about Large Oil Rig (Time till crate unlocks, time since last trigger).
@@ -437,6 +438,12 @@ In-Game Command | Description
 ![In-Game Command craft Image](images/ingame_commands/craft_ingame.png)
 
 
+## **deepsea**
+
+> **Track Deep Sea activity from the Rust+ map marker when exposed by the server.** When the Deep Sea generic radius marker appears, the bot records it like other map events and `!deepsea` reports active location, last seen time, and an estimated next/open-close window from default Deep Sea timing.
+<br>Command: `!deepsea`
+
+
 ## **death/deaths**
 
 > **Get recent death events of the team or from a specific teammate.**
@@ -459,7 +466,7 @@ In-Game Command | Description
 
 ## **events**
 
-> **Get recent In-Game events.** Available events are cargo, heli, small, large, chinook
+> **Get recent In-Game events.** Available events are cargo, heli, small, large, chinook/ch47, deepsea. Compatibility aliases include oil_rig_small and large_oil_rig.
 <br>Command: `!events` - Get last 5 events
 <br>Command: `!events 3` - Get last 3 events
 <br>Command: `!events cargo` - Get last 5 events from cargo
