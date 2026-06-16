@@ -1,19 +1,27 @@
 /*
     Debug logger for raw Rust+ payload exploration.
-    Writes newline-delimited JSON to /tmp so missed event/marker payloads can be inspected offline.
+    Writes debug logs to ./logs so missed event/marker payloads can be inspected offline.
 */
 
 const Fs = require('fs');
 
-const EVENT_LOG_PATH = '/tmp/rustplusplus-events.log';
-const MARKER_HISTORY_PATH = '/tmp/rustplus-markers-history.log';
-const RAW_SOCKET_LOG_PATH = '/tmp/rustplusplus-raw-socket.txt';
+const Path = require('path');
+
+const LOG_DIR = Path.join(process.cwd(), 'logs');
+const EVENT_LOG_PATH = Path.join(LOG_DIR, 'rustplusplus-events.log');
+const MARKER_HISTORY_PATH = Path.join(LOG_DIR, 'rustplus-markers-history.log');
+const RAW_SOCKET_LOG_PATH = Path.join(LOG_DIR, 'rustplusplus-raw-socket.txt');
 
 function stringify(value) {
     return JSON.stringify(value, (_key, val) => typeof val === 'bigint' ? val.toString() : val);
 }
 
+function ensureLogDir() {
+    Fs.mkdirSync(LOG_DIR, { recursive: true });
+}
+
 function appendJsonLine(path, data) {
+    ensureLogDir();
     Fs.appendFileSync(path, `${stringify(data)}\n`);
 }
 
@@ -26,6 +34,7 @@ function appendRawSocketText(rustplus, direction, data) {
     const buffer = getRawDataBuffer(data);
     const header = `\n--- ${new Date().toISOString()} ${direction} guild=${rustplus.guildId} ` +
         `server=${rustplus.serverId} bytes=${buffer.length} ---\n`;
+    ensureLogDir();
     Fs.appendFileSync(RAW_SOCKET_LOG_PATH, header);
     Fs.appendFileSync(RAW_SOCKET_LOG_PATH, buffer.toString('utf8'));
     Fs.appendFileSync(RAW_SOCKET_LOG_PATH, '\n');

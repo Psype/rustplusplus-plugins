@@ -440,7 +440,7 @@ In-Game Command | Description
 
 ## **deepsea**
 
-> **Track Deep Sea activity from the Rust+ map marker when exposed by the server.** When the Deep Sea generic radius marker appears, the bot records it like other map events and `!deepsea` reports active location, last seen time, and an estimated next/open-close window from default Deep Sea timing.
+> **Track Deep Sea activity from the Rust+ map marker when exposed by the server.** When an off-map Deep Sea vendor cluster appears, the bot records it like other map events and `!deepsea` reports the active side, remaining time, last seen time, and an estimated next open window from default Deep Sea timing.
 <br>Command: `!deepsea`
 
 

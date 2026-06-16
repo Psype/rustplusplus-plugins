@@ -22,12 +22,12 @@
 
 ## Follow-up Deep Sea tracking notes
 - User clarified that they want Deep Sea tracked like Cargo/Heli if possible because the game plays a notification when Deep Sea opens.
-- Implemented best-effort tracking using Rust+ `GenericRadius` map markers whose marker name matches `/deep\s*sea/i`. If Facepunch exposes the Deep Sea map marker through Rust+, the bot now sends open/close notifications, records it in event history, includes it in event info, and makes `!deepsea` report active location or time since last active.
+- Earlier GenericRadius-based Deep Sea tracking was superseded after live data showed the useful signal is off-map vending-machine clusters, especially `Casino Bar Shopkeeper`.
 - If vanilla Rust only plays a client-side sound and does not expose this marker/name through Rust+, this tracker will not fire until the actual Rust+ marker payload is captured and matched.
 
 ## Discovery dump update
-- Added `/tmp/rustplus-markers.json` dump on each polling refresh. It includes `markers`, vending-machine `vendors`, `monuments`, plus guild/server/timestamp metadata so the user can compare before/while Deep Sea is active.
-- Updated the Deep Sea candidate matcher to scan serialized GenericRadius marker payloads for `deep|sea|floating|ghost|naval`, matching the requested jq discovery keywords while still limiting state changes to GenericRadius marker appearance/disappearance.
+- Added `logs/rustplus-markers.json` dump on each polling refresh. It includes `markers`, vending-machine `vendors`, `monuments`, plus guild/server/timestamp metadata so the user can compare before/while Deep Sea is active.
+- Deep Sea matching now relies on `src/handlers/deepSeaHandler.js`: `Casino Bar Shopkeeper` off-map vendors or an off-map vending-machine cluster (>=3 vendors), with state changes based on cluster appearance/disappearance.
 - Extended `!events` compatibility toward RustPlusBot naming by recording `vendor` events and accepting `ch47`, `oil_rig_small`, and `large_oil_rig` aliases in addition to existing Cargo/Heli/Oil/Chinook/Deep Sea names.
 
 ## Battlemetrics noise suppression
@@ -45,14 +45,24 @@
 - Implemented prediction in `!deepsea`: while active, it estimates remaining time from first marker sighting against a 3h default window; after close, it predicts the next opening window using 1.5h-2.5h default cooldown.
 
 ## Raw Rust+ debug logging
-- User reported Deep Sea spawned but the matcher did not detect it. Added newline-delimited raw payload logging for exploration: `/tmp/rustplusplus-events.log` logs every Rust+ `message` event and every polled `getMapMarkers` payload; `/tmp/rustplus-markers-history.log` keeps marker history across polls. Existing `/tmp/rustplus-markers.json` remains as the latest marker snapshot.
-- Use these logs while Deep Sea is active to inspect missed payloads and tighten `isDeepseaMarker()`.
+- User reported Deep Sea spawned but the matcher did not detect it. Added newline-delimited raw payload logging for exploration: `logs/rustplusplus-events.log` logs every Rust+ `message` event and every polled `getMapMarkers` payload; `logs/rustplus-markers-history.log` keeps marker history across polls. Existing `logs/rustplus-markers.json` remains as the latest marker snapshot.
+- Use these logs while Deep Sea is active to inspect missed payloads and tighten `deepSeaHandler.js`.
 
 ## Raw websocket logging
-- User asked for raw socket data to grep for Deep Sea hints. Added `/tmp/rustplusplus-raw-socket.log` newline-delimited JSON logging for raw inbound and outbound WebSocket frames. Frames are protobuf/binary, so each entry includes byte length plus UTF-8 best-effort, hex, and base64 representations.
+- User asked for raw socket data to grep for Deep Sea hints. Added `logs/rustplusplus-raw-socket.txt` plain-text best-effort UTF-8 logging for raw inbound and outbound WebSocket frames.
 
 ## Raw websocket text logging adjustment
-- User clarified raw socket logs should be readable plain text, not JSON/base64/hex. Changed the WebSocket raw log path to `/tmp/rustplusplus-raw-socket.txt` and append best-effort UTF-8 text directly with simple timestamp/direction separators.
+- User clarified raw socket logs should be readable plain text, not JSON/base64/hex. Changed the WebSocket raw log path to `logs/rustplusplus-raw-socket.txt` and append best-effort UTF-8 text directly with simple timestamp/direction separators.
 
 ## Deep Sea debug workflow documentation
-- Added `docs/deepsea_debugging.md` with recommended grep/jq workflows for raw WebSocket text, decoded events, marker history, before/during snapshot diffing, and how to refine `isDeepseaMarker()` once the actual Deep Sea marker shape is identified.
+- Added `docs/deepsea_debugging.md` with recommended grep/jq workflows for raw WebSocket text, decoded events, marker history, before/during snapshot diffing, and how to refine `deepSeaHandler.js` once the actual Deep Sea vendor marker shape is identified.
+
+## Deep Sea vendor-cluster detection
+- User found Deep Sea opening creates a cluster of off-map vending-machine markers, including `Casino Bar Shopkeeper`. Removed previous GenericRadius Deep Sea matching and added `src/handlers/deepSeaHandler.js`, called from polling, to detect Casino Bar Shopkeeper or any off-map vendor cluster (>=3 vendors), infer side from off-map coordinates, track a 3h active window, and close when those vendors disappear.
+- Moved debug outputs from `/tmp` into the project `logs/` directory.
+
+- Suppressed generic `new vending machine` notifications for off-map vendors so Deep Sea shopkeeper clusters do not spam vending-machine alerts; Deep Sea uses its own state-change notification.
+
+## Deep Sea JSON confirmation
+- User provided a live marker payload showing Deep Sea vendors as `type: "VendingMachine"` strings with x around `-4100` and `Casino Bar Shopkeeper`, confirming the west-side off-map vendor-cluster detection. Updated `deepSeaHandler.js` to accept both numeric Rust+ vending type `3` and string `VendingMachine`.
+- Follow-up from the live JSON: Rust+ marker `type` may arrive as enum names like `"VendingMachine"` instead of numeric ids. Deep Sea detection, marker dumps, and `MapMarkers.getMarkersOfType()` now tolerate both string enum names and numeric enum values so existing events and vendor handling keep working with either payload shape.

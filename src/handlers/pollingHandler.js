@@ -19,6 +19,7 @@
 */
 
 const Fs = require('fs');
+const DeepSeaHandler = require('./deepSeaHandler.js');
 const EventDebugLogger = require('../util/eventDebugLogger.js');
 const Info = require('../structures/Info');
 const InformationHandler = require('../handlers/informationHandler.js');
@@ -68,6 +69,7 @@ module.exports = {
         dumpMapMarkers(rustplus, mapMarkers.mapMarkers);
         EventDebugLogger.logMapMarkers(rustplus, mapMarkers.mapMarkers, rustplus.map ? rustplus.map.monuments : []);
         rustplus.mapMarkers.updateMapMarkers(mapMarkers.mapMarkers);
+        await DeepSeaHandler.handler(rustplus, client, mapMarkers.mapMarkers);
 
         await InformationHandler.handler(rustplus);
         await StorageMonitorHandler.handler(rustplus, client);
@@ -83,13 +85,21 @@ function dumpMapMarkers(rustplus, mapMarkers) {
             guildId: rustplus.guildId,
             serverId: rustplus.serverId,
             markers: mapMarkers.markers || [],
-            vendors: (mapMarkers.markers || []).filter(marker => marker.type === vendingMachineType),
+            vendors: (mapMarkers.markers || []).filter(marker => isVendingMachineMarker(marker, vendingMachineType)),
             monuments: rustplus.map ? rustplus.map.monuments : []
         };
 
-        Fs.writeFileSync('/tmp/rustplus-markers.json', JSON.stringify(dump, null, 2));
+        Fs.mkdirSync('logs', { recursive: true });
+        Fs.writeFileSync('logs/rustplus-markers.json', JSON.stringify(dump, null, 2));
     }
     catch (e) {
         rustplus.log('DEBUG', `Could not dump map markers: ${e}`, 'warning');
     }
+}
+
+function isVendingMachineMarker(marker, vendingMachineType) {
+    if (marker.type === vendingMachineType) return true;
+    if (typeof marker.type !== 'string') return false;
+
+    return marker.type.replace(/[\s_]/g, '').toLowerCase() === 'vendingmachine';
 }
