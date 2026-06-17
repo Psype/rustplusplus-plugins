@@ -25,6 +25,7 @@ module.exports = async (client, guild) => {
     const instance = client.getInstance(guild.id);
 
     let category = undefined;
+    let createdCategory = false;
     if (instance.channelId.category !== null) {
         category = DiscordTools.getCategoryById(guild.id, instance.channelId.category);
     }
@@ -32,15 +33,18 @@ module.exports = async (client, guild) => {
         category = await DiscordTools.addCategory(guild.id, 'rustplusplus');
         instance.channelId.category = category.id;
         client.setInstance(guild.id, instance);
+        createdCategory = true;
     }
 
-    const perms = PermissionHandler.getPermissionsReset(client, guild, false);
+    if (createdCategory || instance.firstTime) {
+        const perms = PermissionHandler.getPermissionsReset(client, guild, false);
 
-    try {
-        await category.permissionOverwrites.set(perms);
-    }
-    catch (e) {
-        /* Ignore */
+        try {
+            await category.permissionOverwrites.set(perms);
+        }
+        catch (e) {
+            /* Ignore */
+        }
     }
 
     return category;
