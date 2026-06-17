@@ -125,24 +125,24 @@ function getDeepSeaSideDetails(markers, correctedMapSize, referenceBounds = null
     let distance = 0;
 
     /*
-        Deep Sea vendors can report one coordinate far outside the map while the other coordinate stays
-        inside the map. For those markers, the outside coordinate is only the offshore distance; the
-        in-bounds coordinate decides which half of the playable/vendor spread the event is on.
+        Rust+ Deep Sea marker coordinates use X as the vertical axis and Y as the horizontal axis.
+        Therefore negative X is South, X past the map is North, negative Y is West, and Y past the
+        map is East. Do not swap to normal map-grid X/Y when deciding the offshore side.
     */
     if (xOutside && !yOutside) {
-        side = center.y >= referenceMidY ? 'north' : 'south';
+        side = center.x < 0 ? 'south' : 'north';
         distance = center.x < 0 ? Math.abs(center.x) : center.x - correctedMapSize;
     }
     else if (yOutside && !xOutside) {
-        side = center.x >= referenceMidX ? 'east' : 'west';
+        side = center.y < 0 ? 'west' : 'east';
         distance = center.y < 0 ? Math.abs(center.y) : center.y - correctedMapSize;
     }
     else {
         const distances = [
-            { side: 'west', distance: center.x < 0 ? Math.abs(center.x) : 0 },
-            { side: 'east', distance: center.x > correctedMapSize ? center.x - correctedMapSize : 0 },
-            { side: 'south', distance: center.y < 0 ? Math.abs(center.y) : 0 },
-            { side: 'north', distance: center.y > correctedMapSize ? center.y - correctedMapSize : 0 }
+            { side: 'south', distance: center.x < 0 ? Math.abs(center.x) : 0 },
+            { side: 'north', distance: center.x > correctedMapSize ? center.x - correctedMapSize : 0 },
+            { side: 'west', distance: center.y < 0 ? Math.abs(center.y) : 0 },
+            { side: 'east', distance: center.y > correctedMapSize ? center.y - correctedMapSize : 0 }
         ];
 
         distances.sort((a, b) => b.distance - a.distance);
@@ -175,8 +175,8 @@ function getNotificationSetting(rustplus, settingName, fallbackName) {
     return rustplus.notificationSettings[settingName] || rustplus.notificationSettings[fallbackName] || DEFAULT_SETTING;
 }
 
-function formatOpened(sideName) {
-    return `Deep Sea event is active on the ${sideName} side.`;
+function formatOpened() {
+    return 'Deep Sea event is active.';
 }
 
 function formatClosed() {
@@ -189,8 +189,8 @@ function formatCommand(rustplus, isInfoChannel = false) {
     if (state.active) {
         const secondsRemaining = Math.max(0, (state.endsAt - new Date()) / 1000);
         const time = Timer.secondsToFullScale(secondsRemaining, isInfoChannel ? 's' : '');
-        if (isInfoChannel) return `${state.sideName || 'Unknown'} | ${time}`;
-        return `Deep Sea event is active on the ${state.sideName || 'Unknown'} side for the next ${time}.`;
+        if (isInfoChannel) return `Active | ${time}`;
+        return `Deep Sea event is active for the next ${time}.`;
     }
 
     if (state.lastEndedAt === null) {
@@ -200,19 +200,18 @@ function formatCommand(rustplus, isInfoChannel = false) {
     const secondsSince = (new Date() - state.lastEndedAt) / 1000;
     if (isInfoChannel) return `${Timer.secondsToFullScale(secondsSince, 's')} since last`;
 
-    const sideName = state.sideName || 'Unknown';
     const secondsUntilMin = (Constants.DEFAULT_DEEPSEA_COOLDOWN_MIN_MS / 1000) - secondsSince;
     const secondsUntilMax = (Constants.DEFAULT_DEEPSEA_COOLDOWN_MAX_MS / 1000) - secondsSince;
     const timeSince = Timer.secondsToFullScale(secondsSince);
 
     if (secondsUntilMax <= 0) {
-        return `Deep Sea was last seen on the ${sideName} side ${timeSince} ago. Next expected any time now.`;
+        return `Deep Sea was last seen ${timeSince} ago. Next expected any time now.`;
     }
     if (secondsUntilMin <= 0) {
-        return `Deep Sea was last seen on the ${sideName} side ${timeSince} ago. Next expected any time within ${Timer.secondsToFullScale(secondsUntilMax)}.`;
+        return `Deep Sea was last seen ${timeSince} ago. Next expected any time within ${Timer.secondsToFullScale(secondsUntilMax)}.`;
     }
 
-    return `Deep Sea was last seen on the ${sideName} side ${timeSince} ago. Next expected in ${Timer.secondsToFullScale(secondsUntilMin)}-${Timer.secondsToFullScale(secondsUntilMax)}.`;
+    return `Deep Sea was last seen ${timeSince} ago. Next expected in ${Timer.secondsToFullScale(secondsUntilMin)}-${Timer.secondsToFullScale(secondsUntilMax)}.`;
 }
 
 
@@ -466,10 +465,10 @@ function disableLegacyGenericRadiusDeepSea(rustplus) {
     rustplus.mapMarkers.__deepSeaLegacyDisabled = true;
 }
 
-async function sendDeepSeaOpened(rustplus, sideName) {
+async function sendDeepSeaOpened(rustplus) {
     await rustplus.sendEvent(
         getNotificationSetting(rustplus, 'deepseaDetectedSetting', 'cargoShipDetectedSetting'),
-        formatOpened(sideName),
+        formatOpened(),
         'deepsea',
         Constants.COLOR_DEEPSEA_OPENED,
         rustplus.isFirstPoll,
@@ -529,7 +528,7 @@ module.exports = {
                 state.active = true;
                 state.startedAt = now;
                 state.endsAt = new Date(now.getTime() + Constants.DEFAULT_DEEPSEA_DURATION_MS);
-                await sendDeepSeaOpened(rustplus, sideName);
+                await sendDeepSeaOpened(rustplus);
             }
 
             state.side = side;

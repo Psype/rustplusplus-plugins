@@ -104,5 +104,8 @@
 - User also noted modded servers can have multiple oil rigs and wants one `!events` line per rig, not combined names. Small/Large Oil Rig summaries are now split per oil-rig monument grid, e.g. `Large Oil Rig (A1)` and `Large Oil Rig (Z20)`, with each grid keeping its own last-trigger/unlock estimate when the bot has seen that rig.
 
 ## Deep Sea map-size confirmation
-- User provided a Rust+ info payload with `mapSize: 4263` and a Deep Sea `Casino Bar Shopkeeper` marker at `x=-3821.7485`, `y=2147.4407`. With corrected map size `4241.25`, the marker is single-axis offshore (`x < 0`) and `y` is just north of midpoint (`2120.625`), so the current side inference correctly reports North.
+- Superseded correction: user clarified from another live South Deep Sea payload that Rust+ Deep Sea marker coordinates use `X` as vertical and `Y` as horizontal. A `Casino Bar Shopkeeper` marker at `x=-3455.9019`, `y=2101.2419` is South; therefore negative `x` must report South, positive off-map `x` North, negative `y` West, and positive off-map `y` East.
 - `deepSeaHandler.js` now falls back to calculating corrected map size from `rustplus.info.mapSize` if `correctedMapSize` is not already present, keeping Deep Sea edge checks tied to the live server map dimensions exposed by Rust+ info payloads.
+
+## Deep Sea message direction suppression
+- User asked to keep the side/direction calculation code for later debugging, but stop showing Deep Sea direction in bot-facing messages until the coordinate behavior is fully trusted. Deep Sea open, active, info-channel, and last-seen messages should only show active/remaining/next-timer text, not North/South/East/West.
