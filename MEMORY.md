@@ -109,3 +109,16 @@
 
 ## Deep Sea message direction suppression
 - User asked to keep the side/direction calculation code for later debugging, but stop showing Deep Sea direction in bot-facing messages until the coordinate behavior is fully trusted. Deep Sea open, active, info-channel, and last-seen messages should only show active/remaining/next-timer text, not North/South/East/West.
+
+## Deep Sea localization update
+- Moved the newer isolated Deep Sea command, notification, and event-summary user-facing strings in `src/handlers/deepSeaHandler.js` behind language keys instead of hardcoded English.
+- Added the new Deep Sea/event-summary localization keys to the language JSON files and added `src/languages/zh.json` as a Chinese language file. The Chinese Deep Sea strings use Simplified Chinese wording for the Rust Deep Sea timed event, prediction windows, notifications, and oil-rig/event-summary helpers.
+- Added `commandSyntaxDeepsea` to the reserved in-game keyword list so the localized `!deepsea` command is treated like the other localized commands.
+
+## Full Chinese language file
+- User clarified they need the whole bot usable in Chinese for Chinese-speaking in-game teammates, not only Deep Sea strings.
+- Expanded `src/languages/zh.json` from a mostly-English copy into a full Simplified Chinese language file covering general bot output, in-game/team messages, event notifications, command descriptions, settings, smart devices, market subscriptions, timers, Battlemetrics, and Deep Sea strings. Command syntax values intentionally remain command-like ASCII unless already customized, so existing commands stay predictable.
+
+## Language parity expectation
+- User clarified that new language keys must not be left in English inside non-English language files. When adding localization keys, translate those keys into each existing language file's respective language; do not translate command syntax values unless that is already the standard/procedure for that language.
+- Chinese (`zh`) is being added as one language option among the existing language choices, not because the user specifically wants a Chinese-only bot.

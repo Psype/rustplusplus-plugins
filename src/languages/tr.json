@@ -786,5 +786,21 @@
     "wipeDetected": "Wipe tespit edildi!",
     "yield": "Teslim Ol",
     "youAreAlreadyLeader": "Zaten lidersin.",
-    "youAreNotPairedWithServer": "Sunucuyla eşleşmediğiniz için lider komutu çalışmıyor."
+    "youAreNotPairedWithServer": "Sunucuyla eşleşmediğiniz için lider komutu çalışmıyor.",
+    "deepseaOpened": "Deep Sea etkinliği aktif.",
+    "deepseaActiveRemaining": "Deep Sea etkinliği {time} daha aktif kalacak.",
+    "deepseaActiveShortRemaining": "Aktif | {time}",
+    "deepseaInfoUnknown": "Deep Sea bilgisi bilinmiyor.",
+    "deepseaSinceLastShort": "son görülmeden beri {time}",
+    "deepseaLastSeenPrediction": "Deep Sea en son {time} önce görüldü. Sonraki {minTime}-{maxTime} içinde bekleniyor.",
+    "deepseaLastSeenSoon": "Deep Sea en son {time} önce görüldü. Sonraki {maxTime} içinde herhangi bir anda bekleniyor.",
+    "deepseaLastSeenOverdue": "Deep Sea en son {time} önce görüldü. Sonraki her an bekleniyor.",
+    "eventNameWithGrid": "{event} ({grid})",
+    "eventSummary": "{event}: {message}",
+    "eventInfoUnknown": "{event}: etkinlik bilgisi bilinmiyor.",
+    "vanillaNextApproxPrediction": "Vanilla tahmini: sonraki {minTime}-{maxTime} içinde.",
+    "vanillaNextApproxSoon": "Vanilla tahmini: sonraki {maxTime} içinde herhangi bir anda.",
+    "vanillaNextApproxOverdue": "Vanilla tahmini: sonraki her an.",
+    "beforeLockedCrateUnlocks": "Kilitli sandığın açılmasına {time}.",
+    "sinceHeavyScientistsCalled": "Ağır bilim insanları son çağrıldığından beri {time} geçti."
 }

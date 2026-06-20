@@ -786,5 +786,21 @@
     "wipeDetected": "Wipe detetado!",
     "yield": "Rendimento",
     "youAreAlreadyLeader": "Você já é o líder.",
-    "youAreNotPairedWithServer": "O comando Líder não funciona porque você não está emparelhado com o servidor."
+    "youAreNotPairedWithServer": "O comando Líder não funciona porque você não está emparelhado com o servidor.",
+    "deepseaOpened": "O evento Deep Sea está ativo.",
+    "deepseaActiveRemaining": "O evento Deep Sea ficará ativo por mais {time}.",
+    "deepseaActiveShortRemaining": "Ativo | {time}",
+    "deepseaInfoUnknown": "As informações do Deep Sea são desconhecidas.",
+    "deepseaSinceLastShort": "{time} desde o último",
+    "deepseaLastSeenPrediction": "Deep Sea foi visto pela última vez há {time}. Próximo esperado em {minTime}-{maxTime}.",
+    "deepseaLastSeenSoon": "Deep Sea foi visto pela última vez há {time}. Próximo esperado a qualquer momento dentro de {maxTime}.",
+    "deepseaLastSeenOverdue": "Deep Sea foi visto pela última vez há {time}. Próximo esperado a qualquer momento.",
+    "eventNameWithGrid": "{event} ({grid})",
+    "eventSummary": "{event}: {message}",
+    "eventInfoUnknown": "{event}: as informações do evento são desconhecidas.",
+    "vanillaNextApproxPrediction": "Próximo vanilla aprox. em {minTime}-{maxTime}.",
+    "vanillaNextApproxSoon": "Próximo vanilla aprox. a qualquer momento dentro de {maxTime}.",
+    "vanillaNextApproxOverdue": "Próximo vanilla aprox. a qualquer momento.",
+    "beforeLockedCrateUnlocks": "{time} antes de a caixa trancada desbloquear.",
+    "sinceHeavyScientistsCalled": "{time} desde que os Cientistas Pesados foram chamados pela última vez."
 }
