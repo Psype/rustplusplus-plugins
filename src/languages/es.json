@@ -786,5 +786,21 @@
     "wipeDetected": "¡Wipe detectado!",
     "yield": "Yield",
     "youAreAlreadyLeader": "Ya eres líder.",
-    "youAreNotPairedWithServer": "El comando líder no funciona porque no está emparejado con el servidor."
+    "youAreNotPairedWithServer": "El comando líder no funciona porque no está emparejado con el servidor.",
+    "deepseaOpened": "Deep Sea event is active.",
+    "deepseaActiveRemaining": "Deep Sea event is active for the next {time}.",
+    "deepseaActiveShortRemaining": "Active | {time}",
+    "deepseaInfoUnknown": "Deep Sea info is unknown.",
+    "deepseaSinceLastShort": "{time} since last",
+    "deepseaLastSeenPrediction": "Deep Sea was last seen {time} ago. Next expected in {minTime}-{maxTime}.",
+    "deepseaLastSeenSoon": "Deep Sea was last seen {time} ago. Next expected any time within {maxTime}.",
+    "deepseaLastSeenOverdue": "Deep Sea was last seen {time} ago. Next expected any time now.",
+    "eventNameWithGrid": "{event} ({grid})",
+    "eventSummary": "{event}: {message}",
+    "eventInfoUnknown": "{event}: event info is unknown.",
+    "vanillaNextApproxPrediction": "Vanilla next approx in {minTime}-{maxTime}.",
+    "vanillaNextApproxSoon": "Vanilla next approx any time within {maxTime}.",
+    "vanillaNextApproxOverdue": "Vanilla next approx any time now.",
+    "beforeLockedCrateUnlocks": "{time} before Locked Crate unlocks.",
+    "sinceHeavyScientistsCalled": "{time} since Heavy Scientists last got called."
 }
