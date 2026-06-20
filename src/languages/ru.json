@@ -786,5 +786,21 @@
     "wipeDetected": "Обнаружен Wipe!",
     "yield": "Урожай",
     "youAreAlreadyLeader": "Вы уже лидер.",
-    "youAreNotPairedWithServer": "Команда лидера не работает, потому что вы не подключены к серверу."
+    "youAreNotPairedWithServer": "Команда лидера не работает, потому что вы не подключены к серверу.",
+    "deepseaOpened": "Событие Deep Sea активно.",
+    "deepseaActiveRemaining": "Событие Deep Sea будет активно ещё {time}.",
+    "deepseaActiveShortRemaining": "Активно | {time}",
+    "deepseaInfoUnknown": "Информация о Deep Sea неизвестна.",
+    "deepseaSinceLastShort": "{time} с последнего раза",
+    "deepseaLastSeenPrediction": "Deep Sea в последний раз был замечен {time} назад. Следующий ожидается через {minTime}-{maxTime}.",
+    "deepseaLastSeenSoon": "Deep Sea в последний раз был замечен {time} назад. Следующий ожидается в любой момент в течение {maxTime}.",
+    "deepseaLastSeenOverdue": "Deep Sea в последний раз был замечен {time} назад. Следующий ожидается в любой момент.",
+    "eventNameWithGrid": "{event} ({grid})",
+    "eventSummary": "{event}: {message}",
+    "eventInfoUnknown": "{event}: информация о событии неизвестна.",
+    "vanillaNextApproxPrediction": "Примерно по vanilla: следующее через {minTime}-{maxTime}.",
+    "vanillaNextApproxSoon": "Примерно по vanilla: следующее в любой момент в течение {maxTime}.",
+    "vanillaNextApproxOverdue": "Примерно по vanilla: следующее в любой момент.",
+    "beforeLockedCrateUnlocks": "{time} до открытия запертого ящика.",
+    "sinceHeavyScientistsCalled": "{time} с последнего вызова тяжёлых учёных."
 }

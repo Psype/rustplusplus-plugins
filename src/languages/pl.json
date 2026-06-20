@@ -786,5 +786,21 @@
     "wipeDetected": "Wipe detected!",
     "yield": "Plon",
     "youAreAlreadyLeader": "You are already leader.",
-    "youAreNotPairedWithServer": "Leader command does not work because you're not paired with the server."
+    "youAreNotPairedWithServer": "Leader command does not work because you're not paired with the server.",
+    "deepseaOpened": "Wydarzenie Deep Sea jest aktywne.",
+    "deepseaActiveRemaining": "Wydarzenie Deep Sea będzie aktywne jeszcze przez {time}.",
+    "deepseaActiveShortRemaining": "Aktywne | {time}",
+    "deepseaInfoUnknown": "Informacje o Deep Sea są nieznane.",
+    "deepseaSinceLastShort": "{time} od ostatniego razu",
+    "deepseaLastSeenPrediction": "Deep Sea było ostatnio widziane {time} temu. Następne oczekiwane za {minTime}-{maxTime}.",
+    "deepseaLastSeenSoon": "Deep Sea było ostatnio widziane {time} temu. Następne oczekiwane w dowolnym momencie w ciągu {maxTime}.",
+    "deepseaLastSeenOverdue": "Deep Sea było ostatnio widziane {time} temu. Następne oczekiwane w każdej chwili.",
+    "eventNameWithGrid": "{event} ({grid})",
+    "eventSummary": "{event}: {message}",
+    "eventInfoUnknown": "{event}: informacje o wydarzeniu są nieznane.",
+    "vanillaNextApproxPrediction": "Vanilla: następne przybliżenie za {minTime}-{maxTime}.",
+    "vanillaNextApproxSoon": "Vanilla: następne przybliżenie w dowolnym momencie w ciągu {maxTime}.",
+    "vanillaNextApproxOverdue": "Vanilla: następne przybliżenie w każdej chwili.",
+    "beforeLockedCrateUnlocks": "{time} do odblokowania zamkniętej skrzyni.",
+    "sinceHeavyScientistsCalled": "{time} od ostatniego wezwania ciężkich naukowców."
 }

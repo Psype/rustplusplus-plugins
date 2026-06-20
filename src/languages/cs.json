@@ -786,5 +786,21 @@
     "wipeDetected": "Wipe byl detekován!",
     "yield": "Úrodnost",
     "youAreAlreadyLeader": "Už jsi vůdce.",
-    "youAreNotPairedWithServer": "Příkaz na vůdce nefunguje, protože nejsi spárován se serverem."
+    "youAreNotPairedWithServer": "Příkaz na vůdce nefunguje, protože nejsi spárován se serverem.",
+    "deepseaOpened": "Událost Deep Sea je aktivní.",
+    "deepseaActiveRemaining": "Událost Deep Sea bude aktivní ještě {time}.",
+    "deepseaActiveShortRemaining": "Aktivní | {time}",
+    "deepseaInfoUnknown": "Informace o Deep Sea nejsou známé.",
+    "deepseaSinceLastShort": "{time} od poslední",
+    "deepseaLastSeenPrediction": "Deep Sea bylo naposledy viděno před {time}. Další se očekává za {minTime}-{maxTime}.",
+    "deepseaLastSeenSoon": "Deep Sea bylo naposledy viděno před {time}. Další se očekává kdykoli během {maxTime}.",
+    "deepseaLastSeenOverdue": "Deep Sea bylo naposledy viděno před {time}. Další se očekává kdykoli teď.",
+    "eventNameWithGrid": "{event} ({grid})",
+    "eventSummary": "{event}: {message}",
+    "eventInfoUnknown": "{event}: informace o události nejsou známé.",
+    "vanillaNextApproxPrediction": "Vanilla odhad další události za {minTime}-{maxTime}.",
+    "vanillaNextApproxSoon": "Vanilla odhad další události kdykoli během {maxTime}.",
+    "vanillaNextApproxOverdue": "Vanilla odhad další události kdykoli teď.",
+    "beforeLockedCrateUnlocks": "{time} do odemčení Locked Crate.",
+    "sinceHeavyScientistsCalled": "{time} od posledního přivolání Heavy Scientists."
 }
