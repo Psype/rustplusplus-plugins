@@ -109,3 +109,8 @@
 
 ## Deep Sea message direction suppression
 - User asked to keep the side/direction calculation code for later debugging, but stop showing Deep Sea direction in bot-facing messages until the coordinate behavior is fully trusted. Deep Sea open, active, info-channel, and last-seen messages should only show active/remaining/next-timer text, not North/South/East/West.
+
+## Deep Sea localization update
+- Moved the newer isolated Deep Sea command, notification, and event-summary user-facing strings in `src/handlers/deepSeaHandler.js` behind language keys instead of hardcoded English.
+- Added the new Deep Sea/event-summary localization keys to the language JSON files and added `src/languages/zh.json` as a Chinese language file. The Chinese Deep Sea strings use Simplified Chinese wording for the Rust Deep Sea timed event, prediction windows, notifications, and oil-rig/event-summary helpers.
+- Added `commandSyntaxDeepsea` to the reserved in-game keyword list so the localized `!deepsea` command is treated like the other localized commands.
