@@ -122,3 +122,7 @@
 ## Language parity expectation
 - User clarified that new language keys must not be left in English inside non-English language files. When adding localization keys, translate those keys into each existing language file's respective language; do not translate command syntax values unless that is already the standard/procedure for that language.
 - Chinese (`zh`) is being added as one language option among the existing language choices, not because the user specifically wants a Chinese-only bot.
+
+## Guild language default behavior
+- User logs showed bot log titles in Chinese but guild event/in-game messages still in English after reboot. The cause is that `Config.general.language` controls the bot/default logger intl, while per-guild event and in-game command text uses each instance's `generalSettings.language` loaded into `guildIntl`.
+- To make global non-English configuration apply to existing default-English guild instances after restart, `DiscordBot.loadGuildIntl()` now promotes an instance language of `en` to `Config.general.language` when the config language is non-English, persists it to the instance file, and then loads that language for guild event/in-game text.
