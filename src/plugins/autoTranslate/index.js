@@ -4,6 +4,7 @@ const Translate = require('translate');
 
 const Languages = require('../../util/languages.js');
 const LanguageDetector = require('../../util/languageDetector.js');
+const TeammateLanguageDatabase = require('../teammateLanguageDatabase/index.js');
 
 const CONFIG_DIR = Path.join(__dirname, '..', '..', '..', 'config');
 const SETTINGS_PATH = Path.join(CONFIG_DIR, 'autotranslate-settings.json');
@@ -39,6 +40,12 @@ async function translateMessage(rustplus, message) {
     if (!settings.enabled) return null;
 
     const source = LanguageDetector.detectLanguage(message.message);
+    if (!source) return null;
+    const knownLanguage = TeammateLanguageDatabase.getKnownLanguage(rustplus, message.steamId);
+    // strict mode: unknown player = no translation
+    if (!knownLanguage) return null;
+    // strict mode: only translate when player speaks their registered language
+    if (source !== knownLanguage) return null;
     const target = chooseTarget(source, settings.targets);
     if (!target || target === source) return null;
 
