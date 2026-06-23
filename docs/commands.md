@@ -396,7 +396,7 @@ Command | Description
 
 ## **autotranslate**
 
-> **Automatically translate Rust team-chat messages relayed to Discord.** `!autotranslate on` defaults to English. You can pass one target language, or two languages separated by a comma. With two targets, if the detected source language already matches one target, the other target is used; for example `!autotranslate on en,zh` translates Chinese messages to English and English messages to Chinese. Language names from the existing translation command are accepted, such as `english,chinese`, as well as language codes such as `en,zh`.
+> **Automatically translate Rust team-chat messages back into team chat and into the Discord relay.** `!autotranslate on` defaults to English. You can pass one target language, or two languages separated by a comma. With two targets, if the detected source language already matches one target, the other target is used; for example `!autotranslate on en,zh` translates Chinese messages to English and English messages to Chinese. Language names from the existing translation command are accepted, such as `english,chinese`, as well as language codes such as `en,zh`.
 <br>Command: `!autotranslate on [language[,language...]]`
 <br>Command: `!autotranslate off`
 
@@ -546,7 +546,7 @@ Subcommand | Description | Required
 
 ## **logs**
 
-> **Show, enable, or disable bot file/debug logging.** This command works from in-game team chat and from the Discord command chat with the configured prefix. Console output continues, but file writes under `logs/` stop while disabled, including normal log files, raw Rust+ WebSocket text, event payload logs, marker history, and marker snapshots.
+> **Show, enable, or disable bot file/debug logging.** This command works from in-game team chat and from the Discord command chat with the configured prefix. Console output continues, but file writes under `logs/` stop while disabled, including normal log files, raw Rust+ WebSocket text, event payload logs, marker history, and marker snapshots. The toggle is stored in `config/logging-settings.json`.
 <br>Command: `!logs` - Show the current logging status.
 <br>Command: `!logs off` - Disable file/debug logging.
 <br>Command: `!logs on` - Enable file/debug logging.
