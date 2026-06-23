@@ -836,5 +836,10 @@
     "commandSyntaxCommands": "commands",
     "commandsList": "Komutlar: {commands}",
     "commandsUsage": "{usage} - {description}",
-    "commandsUnknown": "Bilinmeyen komut: {command}."
+    "commandsUnknown": "Bilinmeyen komut: {command}.",
+    "commandSyntaxAutoTranslate": "autotranslate",
+    "autotranslateUsage": "Kullanım: !autotranslate on [dil[,dil...]] veya !autotranslate off.",
+    "autotranslateLanguageNotFound": "Otomatik çeviri için desteklenen hedef dil bulunamadı.",
+    "autotranslateEnabled": "Otomatik çeviri şu hedefler için açıldı: {languages}.",
+    "autotranslateDisabled": "Otomatik çeviri kapatıldı."
 }

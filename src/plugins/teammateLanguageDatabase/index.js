@@ -7,6 +7,7 @@
 
 const Fs = require('fs');
 const Path = require('path');
+const LanguageDetector = require('../../util/languageDetector.js');
 
 const DATA_DIR = Path.join(__dirname, '..', '..', '..', 'data', 'teammate-language-database');
 const CSV_HEADER = ['steamid', 'date', 'name', 'language'];
@@ -29,7 +30,7 @@ function recordTeamMessage(rustplus, teamMessage) {
     recordPlayer(rustplus, {
         steamId: teamMessage.steamId,
         name: teamMessage.name,
-        language: guessLanguage(teamMessage.message)
+        language: LanguageDetector.detectLanguage(teamMessage.message)
     });
 }
 
@@ -139,19 +140,6 @@ function getLastRowForSteamId(rows, steamId) {
     return null;
 }
 
-function guessLanguage(message) {
-    if (!message) return null;
-    if (/\p{Script=Han}/u.test(message)) return 'zh';
-    if (/\p{Script=Hiragana}|\p{Script=Katakana}/u.test(message)) return 'ja';
-    if (/\p{Script=Hangul}/u.test(message)) return 'ko';
-    if (/\p{Script=Cyrillic}/u.test(message)) return 'ru';
-    if (/\p{Script=Arabic}/u.test(message)) return 'ar';
-    if (/\p{Script=Thai}/u.test(message)) return 'th';
-    if (/\p{Script=Greek}/u.test(message)) return 'el';
-    if (/\p{Script=Hebrew}/u.test(message)) return 'he';
-    return null;
-}
-
 function normalizeSteamId(steamId) {
     if (steamId === undefined || steamId === null) return null;
     const value = steamId.toString().trim();
@@ -211,6 +199,5 @@ module.exports = {
     recordTeamInfo,
     recordTeamMessage,
     recordManual,
-    getKnownPseudonyms,
-    guessLanguage
+    getKnownPseudonyms
 };

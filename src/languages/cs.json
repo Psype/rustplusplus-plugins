@@ -836,5 +836,10 @@
     "commandSyntaxCommands": "commands",
     "commandsList": "Příkazy: {commands}",
     "commandsUsage": "{usage} - {description}",
-    "commandsUnknown": "Neznámý příkaz: {command}."
+    "commandsUnknown": "Neznámý příkaz: {command}.",
+    "commandSyntaxAutoTranslate": "autotranslate",
+    "autotranslateUsage": "Použití: !autotranslate on [jazyk[,jazyk...]] nebo !autotranslate off.",
+    "autotranslateLanguageNotFound": "Nebyl nalezen žádný podporovaný cílový jazyk pro automatický překlad.",
+    "autotranslateEnabled": "Automatický překlad zapnut pro: {languages}.",
+    "autotranslateDisabled": "Automatický překlad vypnut."
 }

@@ -836,5 +836,10 @@
     "commandSyntaxCommands": "commands",
     "commandsList": "Kommandon: {commands}",
     "commandsUsage": "{usage} - {description}",
-    "commandsUnknown": "Okänt kommando: {command}."
+    "commandsUnknown": "Okänt kommando: {command}.",
+    "commandSyntaxAutoTranslate": "autotranslate",
+    "autotranslateUsage": "Användning: !autotranslate on [språk[,språk...]] eller !autotranslate off.",
+    "autotranslateLanguageNotFound": "Kunde inte hitta något målsspråk som stöds för automatisk översättning.",
+    "autotranslateEnabled": "Automatisk översättning aktiverad för: {languages}.",
+    "autotranslateDisabled": "Automatisk översättning inaktiverad."
 }

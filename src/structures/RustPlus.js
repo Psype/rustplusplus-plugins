@@ -33,6 +33,7 @@ const DiscordTools = require('../discordTools/discordTools.js');
 const InGameChatHandler = require('../handlers/inGameChatHandler.js');
 const InstanceUtils = require('../util/instanceUtils.js');
 const Languages = require('../util/languages.js');
+const AutoTranslate = require('../plugins/autoTranslate');
 const Logger = require('./Logger.js');
 const Map = require('../util/map.js');
 const RustPlusLite = require('../structures/RustPlusLite');
@@ -2627,6 +2628,21 @@ class RustPlus extends RustPlusLib {
                 return null;
             } break;
         }
+    }
+
+
+    getCommandAutoTranslate(command) {
+        const result = AutoTranslate.parseCommand(this, command);
+        if (result.error === 'usage') return Client.client.intlGet(this.guildId, 'autotranslateUsage');
+        if (result.error === 'language') return Client.client.intlGet(this.guildId, 'autotranslateLanguageNotFound');
+
+        if (result.enabled) {
+            return Client.client.intlGet(this.guildId, 'autotranslateEnabled', {
+                languages: result.targets.join(',')
+            });
+        }
+
+        return Client.client.intlGet(this.guildId, 'autotranslateDisabled');
     }
 
     async getCommandTranslateTo(command) {

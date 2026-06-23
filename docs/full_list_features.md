@@ -27,6 +27,7 @@
 ## In-Game and Discord Commands
 - **afk** - `!afk` - Display AFK teammates.
 - **alive** - `!alive` - Display who has been alive longest.
+- **autotranslate** - `!autotranslate on [language[,language...]]` or `!autotranslate off` - Automatically translate relayed team-chat messages in Discord.
 - **cargo** - `!cargo` - Display information regarding Cargoship.
 - **chinook** - `!chinook` - Display information regarding Chinook 47.
 - **commands [command]** - `!commands [command]` - List all commands or show one-line usage for one command.

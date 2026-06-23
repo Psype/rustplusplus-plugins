@@ -150,3 +150,8 @@
 ## Runtime `!commands` catalog
 - Added a `!commands [command]` runtime help command for both in-game team chat and the Discord commands channel. With no argument it lists command names separated by commas; with a command argument it returns a one-line usage/description.
 - The catalog parser lives in `src/util/commandCatalog.js` and reads the `## In-Game and Discord Commands` section of `docs/full_list_features.md` at runtime, so the command list/help text has one documentation-backed source instead of being separately hardcoded in handlers.
+
+## Generic language detection and autotranslate
+- Added reusable silent language detection in `src/util/languageDetector.js`. It detects major scripts such as Han, Japanese kana, Hangul, Cyrillic, Arabic, Thai, Greek, Hebrew, and Devanagari, plus a lightweight English word heuristic for short team-chat messages.
+- The teammate language CSV database now uses the shared detector instead of its local one-off language guesser, preserving existing non-`XX` language values as before.
+- Added `!autotranslate on [language[,language...]]` / `!autotranslate off` for in-game and Discord command channels. Settings persist per guild/server in `data/autotranslate-settings.json`. When enabled, team-chat messages relayed to Discord get an additional translated relay message. `!autotranslate on` defaults to English; two targets such as `en,zh` make English messages translate to Chinese and Chinese/non-English messages translate to English where detected.

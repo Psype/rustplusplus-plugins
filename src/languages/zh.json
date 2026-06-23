@@ -836,5 +836,10 @@
     "commandSyntaxCommands": "commands",
     "commandsList": "命令：{commands}",
     "commandsUsage": "{usage} - {description}",
-    "commandsUnknown": "未知命令：{command}。"
+    "commandsUnknown": "未知命令：{command}。",
+    "commandSyntaxAutoTranslate": "autotranslate",
+    "autotranslateUsage": "用法：!autotranslate on [语言[,语言...]] 或 !autotranslate off。",
+    "autotranslateLanguageNotFound": "找不到任何支持的自动翻译目标语言。",
+    "autotranslateEnabled": "已启用自动翻译，目标语言：{languages}。",
+    "autotranslateDisabled": "已禁用自动翻译。"
 }

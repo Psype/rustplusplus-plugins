@@ -836,5 +836,10 @@
     "commandSyntaxCommands": "commands",
     "commandsList": "Comandos: {commands}",
     "commandsUsage": "{usage} - {description}",
-    "commandsUnknown": "Comando desconhecido: {command}."
+    "commandsUnknown": "Comando desconhecido: {command}.",
+    "commandSyntaxAutoTranslate": "autotranslate",
+    "autotranslateUsage": "Uso: !autotranslate on [idioma[,idioma...]] ou !autotranslate off.",
+    "autotranslateLanguageNotFound": "Não foi encontrado nenhum idioma de destino suportado para a tradução automática.",
+    "autotranslateEnabled": "Tradução automática ativada para: {languages}.",
+    "autotranslateDisabled": "Tradução automática desativada."
 }
