@@ -109,3 +109,28 @@
 
 ## Deep Sea message direction suppression
 - User asked to keep the side/direction calculation code for later debugging, but stop showing Deep Sea direction in bot-facing messages until the coordinate behavior is fully trusted. Deep Sea open, active, info-channel, and last-seen messages should only show active/remaining/next-timer text, not North/South/East/West.
+
+## Deep Sea localization update
+- Moved the newer isolated Deep Sea command, notification, and event-summary user-facing strings in `src/handlers/deepSeaHandler.js` behind language keys instead of hardcoded English.
+- Added the new Deep Sea/event-summary localization keys to the language JSON files and added `src/languages/zh.json` as a Chinese language file. The Chinese Deep Sea strings use Simplified Chinese wording for the Rust Deep Sea timed event, prediction windows, notifications, and oil-rig/event-summary helpers.
+- Added `commandSyntaxDeepsea` to the reserved in-game keyword list so the localized `!deepsea` command is treated like the other localized commands.
+
+## Full Chinese language file
+- User clarified they need the whole bot usable in Chinese for Chinese-speaking in-game teammates, not only Deep Sea strings.
+- Expanded `src/languages/zh.json` from a mostly-English copy into a full Simplified Chinese language file covering general bot output, in-game/team messages, event notifications, command descriptions, settings, smart devices, market subscriptions, timers, Battlemetrics, and Deep Sea strings. Command syntax values intentionally remain command-like ASCII unless already customized, so existing commands stay predictable.
+
+## Language parity expectation
+- User clarified that new language keys must not be left in English inside non-English language files. When adding localization keys, translate those keys into each existing language file's respective language; do not translate command syntax values unless that is already the standard/procedure for that language.
+- Chinese (`zh`) is being added as one language option among the existing language choices, not because the user specifically wants a Chinese-only bot.
+
+## Guild language default behavior
+- User logs showed bot log titles in Chinese but guild event/in-game messages still in English after reboot. The cause is that `Config.general.language` controls the bot/default logger intl, while per-guild event and in-game command text uses each instance's `generalSettings.language` loaded into `guildIntl`.
+- To make global non-English configuration apply to existing default-English guild instances after restart, `DiscordBot.loadGuildIntl()` now promotes an instance language of `en` to `Config.general.language` when the config language is non-English, persists it to the instance file, and then loads that language for guild event/in-game text.
+
+## Runtime logging toggle
+- User reported that log writing consumes too much disk. Added a `!logs` command that works both in-game and in Discord command chat; `!logs off` disables file/debug writes and `!logs on` enables them again. The setting persists in `logs/logging-settings.json`.
+- The toggle leaves console output intact but suppresses Winston file writes, raw Rust+ WebSocket/event debug logs, marker history, and marker snapshot dumps while disabled.
+
+## Deep Sea and raid-alert delivery fixes
+- Deep Sea open/close notifications are no longer suppressed as first-poll events, so a restart while Deep Sea is active should still be able to post the Deep Sea event into Discord when detected.
+- Raid alarm plugin messages now translate the standard `You're getting raided!` title through `baseIsUnderAttack` and translate `X destroyed at Y` payloads through `raidAlarmDestroyedAt`; item names from the plugin remain as provided by FCM because the payload does not include stable item IDs.

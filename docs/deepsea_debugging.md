@@ -51,7 +51,7 @@ jq -s '.[1].markers - .[0].markers' \
 2. Identify the exact marker fields that changed: `type`, `name`, `radius`, `color`, `x/y`, or any new field.
 3. Refine `src/handlers/deepSeaHandler.js` once the exact vendor cluster marker shape is known.
 4. Keep notifications state-change based only: inactive -> active and active -> inactive. Do not notify on every poll.
-5. Keep raw socket logging temporary or rotate/delete logs regularly because raw WebSocket text can grow quickly.
+5. Keep raw socket logging temporary or rotate/delete logs regularly because raw WebSocket text can grow quickly. You can also run `!logs off` from in-game chat or Discord command chat to stop file/debug logging, then `!logs on` when you need captures again.
 
 ## What to send back for implementation
 
