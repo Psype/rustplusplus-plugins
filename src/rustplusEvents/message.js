@@ -25,6 +25,7 @@ const EventDebugLogger = require('../util/eventDebugLogger.js');
 const InGameChatHandler = require('../handlers/inGameChatHandler.js');
 const SmartSwitchGroupHandler = require('../handlers/smartSwitchGroupHandler.js');
 const TeamChatHandler = require("../handlers/teamChatHandler.js");
+const TeammateLanguageDatabase = require('../plugins/teammateLanguageDatabase');
 const TeamHandler = require('../handlers/teamHandler.js');
 
 module.exports = {
@@ -65,6 +66,7 @@ async function messageBroadcast(rustplus, client, message) {
 }
 
 async function messageBroadcastTeamChanged(rustplus, client, message) {
+    TeammateLanguageDatabase.recordTeamInfo(rustplus, message.broadcast.teamChanged.teamInfo);
     TeamHandler.handler(rustplus, client, message.broadcast.teamChanged.teamInfo);
     const changed = rustplus.team.isLeaderSteamIdChanged(message.broadcast.teamChanged.teamInfo);
     rustplus.team.updateTeam(message.broadcast.teamChanged.teamInfo);
@@ -94,6 +96,8 @@ async function messageBroadcastTeamMessage(rustplus, client, message) {
     tempMessage = tempMessage.replace(/<\/color><\/size>$/, '');      /* Rustafied */
     tempMessage = tempMessage.replace(/^<color.+?<\/color>/g, '');      /* Unknown */
     message.broadcast.teamMessage.message.message = tempMessage;
+
+    TeammateLanguageDatabase.recordTeamMessage(rustplus, message.broadcast.teamMessage.message);
 
     if (instance.blacklist['steamIds'].includes(`${steamId}`)) {
         rustplus.log(client.intlGet(null, 'infoCap'), client.intlGet(null, `userPartOfBlacklistInGame`, {

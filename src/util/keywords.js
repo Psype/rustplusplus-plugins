@@ -25,6 +25,7 @@ module.exports = {
             client.intlGet(guildId, 'commandSyntaxAlive'),
             client.intlGet(guildId, 'commandSyntaxCargo'),
             client.intlGet(guildId, 'commandSyntaxChinook'),
+            client.intlGet(guildId, 'commandSyntaxCommands'),
             client.intlGet(guildId, 'commandSyntaxConnection'),
             client.intlGet(guildId, 'commandSyntaxConnections'),
             client.intlGet(guildId, 'commandSyntaxCraft'),
@@ -52,6 +53,7 @@ module.exports = {
             client.intlGet(guildId, 'commandSyntaxProx'),
             client.intlGet(guildId, 'commandSyntaxRecycle'),
             client.intlGet(guildId, 'commandSyntaxResearch'),
+            client.intlGet(guildId, 'commandSyntaxRecord'),
             client.intlGet(guildId, 'commandSyntaxSend'),
             client.intlGet(guildId, 'commandSyntaxSmall'),
             client.intlGet(guildId, 'commandSyntaxStack'),
@@ -67,10 +69,12 @@ module.exports = {
             client.intlGet(guildId, 'commandSyntaxUpkeep'),
             client.intlGet(guildId, 'commandSyntaxUptime'),
             client.intlGet(guildId, 'commandSyntaxWipe'),
+            client.intlGet(guildId, 'commandSyntaxWho'),
             client.intlGet('en', 'commandSyntaxAfk'),
             client.intlGet('en', 'commandSyntaxAlive'),
             client.intlGet('en', 'commandSyntaxCargo'),
             client.intlGet('en', 'commandSyntaxChinook'),
+            client.intlGet('en', 'commandSyntaxCommands'),
             client.intlGet('en', 'commandSyntaxConnection'),
             client.intlGet('en', 'commandSyntaxConnections'),
             client.intlGet('en', 'commandSyntaxCraft'),
@@ -98,6 +102,7 @@ module.exports = {
             client.intlGet('en', 'commandSyntaxProx'),
             client.intlGet('en', 'commandSyntaxRecycle'),
             client.intlGet('en', 'commandSyntaxResearch'),
+            client.intlGet('en', 'commandSyntaxRecord'),
             client.intlGet('en', 'commandSyntaxSend'),
             client.intlGet('en', 'commandSyntaxSmall'),
             client.intlGet('en', 'commandSyntaxStack'),
@@ -112,7 +117,8 @@ module.exports = {
             client.intlGet('en', 'commandSyntaxUnmute'),
             client.intlGet('en', 'commandSyntaxUpkeep'),
             client.intlGet('en', 'commandSyntaxUptime'),
-            client.intlGet('en', 'commandSyntaxWipe')
+            client.intlGet('en', 'commandSyntaxWipe'),
+            client.intlGet('en', 'commandSyntaxWho')
         ];
     },
 

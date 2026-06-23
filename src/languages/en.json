@@ -825,5 +825,16 @@
     "raidAlarmDestroyedAt": "{item} destroyed at {location}.",
     "languageCurrentlySet": "Current bot language is {language}. Supported languages: {languages}.",
     "languageNotSupportedWithList": "The language {language} is not supported. Supported languages: {languages}.",
-    "setBotLanguageConfigUpdated": "Set the bot language to: {language}. The guild instance and config file were updated."
+    "setBotLanguageConfigUpdated": "Set the bot language to: {language}. The guild instance and config file were updated.",
+    "commandSyntaxRecord": "record",
+    "commandSyntaxWho": "who",
+    "recordUsage": "Usage: !record [steamid] [pseudonym]",
+    "recordSaved": "Recorded {name} for SteamID {steamid}.",
+    "whoUsage": "Usage: !who [steamid]",
+    "whoNoPseudonyms": "No known pseudonyms for SteamID {steamid}.",
+    "whoPseudonyms": "Known pseudonyms for SteamID {steamid}: {names}",
+    "commandSyntaxCommands": "commands",
+    "commandsList": "Commands: {commands}",
+    "commandsUsage": "{usage} - {description}",
+    "commandsUnknown": "Unknown command: {command}."
 }

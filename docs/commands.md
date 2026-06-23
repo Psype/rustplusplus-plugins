@@ -3,7 +3,7 @@
 > Commands can be executed via Discord or In-Game Team Chat. To be able to run Slash Commands in Discord, you need to be part of the designated Discord Role for the bot. If no role is set for the bot then everyone should be able to use the Slash Commands by default. To be able to run In-Game Commands, you need to be in the same In-Game Team as the hoster. In-Game Commands can only be run from Team Chat, not global chat. You can also run In-Game commands from the Discord Text-Channel `commands`.
 
 - [Discord Slash Commands](commands.md#discord-slash-commands)
-- [In-Game Commands](commands.md#in-game-commands)
+- [In-Game and Discord Commands](commands.md#in-game-and-discord-commands)
 
 # Discord Slash Commands
 
@@ -341,14 +341,17 @@ Subcommand | Options | Description | Required
 ![Discord Slash Command uptime Image](images/slash_commands/voice.png)
 
 
-# In-Game Commands
+# In-Game and Discord Commands
 
-In-Game Command | Description
---------------- | -----------
+These commands work in Rust team chat and in the configured Discord commands channel unless a command section says otherwise.
+
+Command | Description
+------- | -----------
 [**afk**](commands.md#afk) | Get the currently afk players in your team.
 [**alive**](commands.md#alive) | Get the player with the longest time alive.
 [**cargo**](commands.md#cargo) | Get information about CargoShip (Location, time till enters egress stage, time since last on map).
 [**chinook**](commands.md#chinook) | Get information about Chinook 47 (Location, time since last on map).
+[**commands**](commands.md#commands) | List available commands or show one-line usage for a command.
 [**connection/connections**](commands.md#connectionconnections) | Get recent connection events.
 [**craft**](commands.md#craft-ingame) | Display the cost to craft an item.
 [**death/deaths**](commands.md#deathdeaths) | Get recent death events.
@@ -371,6 +374,7 @@ In-Game Command | Description
 [**prox**](commands.md#prox) | Get the distance to the three closest teammates.
 [**recycle**](commands.md#recycle-ingame) | Display the output of recycling an item.
 [**research**](commands.md#research-ingame) | Display the cost to research an item.
+[**record**](commands.md#record) | Manually record a SteamID and pseudonym in the teammate language CSV database.
 [**send**](commands.md#send) | Send a message to a discord user.
 [**small**](commands.md#small) | Get information about Small Oil Rig (Time till crate unlocks, time since last trigger).
 [**steamid**](commands.md#steamid) | Get the steamid of a teammate.
@@ -385,6 +389,7 @@ In-Game Command | Description
 [**uptime**](commands.md#uptime-ingame) | Display uptime of the bot and server.
 [**vendor**](commands.md#vendor) | Get information about the Traveling Vendor (Current Location, Time since last vendor)
 [**wipe**](commands.md#wipe) | Get the time since it was wiped.
+[**who**](commands.md#who) | List all known pseudonyms for a SteamID from the teammate language CSV database.
 
 
 
@@ -421,6 +426,12 @@ In-Game Command | Description
 ![In-Game Command chinook Image](images/ingame_commands/chinook_ingame.png)
 
 
+
+## **commands**
+
+> **List available commands or show one-line usage for one command.** The command catalog is parsed from `docs/full_list_features.md` at runtime so command help and documentation stay in one place. Works from in-game team chat and from the Discord commands channel.
+<br>Command: `!commands [command]`
+
 ## **connection/connections**
 
 > **Get recent connection events of the team or from a specific teammate.**
@@ -442,7 +453,7 @@ In-Game Command | Description
 
 ## **deepsea**
 
-> **Track Deep Sea activity from the Rust+ map marker when exposed by the server.** When an off-map Deep Sea vendor cluster appears, the bot records it like other map events and `!deepsea` reports the active side, remaining time, last seen time, and an estimated next open window from default Deep Sea timing.
+> **Track Deep Sea activity from the Rust+ map marker when exposed by the server.** When an off-map Deep Sea vendor cluster appears, the bot records it like other map events and `!deepsea` reports active/remaining status, last seen time, and an estimated next open window from default Deep Sea timing. Works from in-game team chat and from the Discord commands channel.
 <br>Command: `!deepsea`
 
 
@@ -631,6 +642,17 @@ Subcommand | Description | Required
 
 ![In-Game Command research Image](images/ingame_commands/research_ingame.png)
 
+
+
+## **record**
+
+> **Manually record a SteamID and pseudonym in the teammate language CSV database.** The pseudonym is everything after the SteamID, so spaces are allowed. Existing language values for that SteamID are inherited and not overwritten. Works from in-game team chat and from the Discord commands channel.
+<br>Command: `!record [steamid] [pseudonym]`
+
+## **who**
+
+> **List all known pseudonyms for a SteamID from the teammate language CSV database.** Results include the first recorded date for each known pseudonym and the current language code stored for that SteamID. Works from in-game team chat and from the Discord commands channel.
+<br>Command: `!who [steamid]`
 
 ## **send**
 

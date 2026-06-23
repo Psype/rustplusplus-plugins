@@ -30,6 +30,7 @@ const SmartSwitchHandler = require('../handlers/smartSwitchHandler.js');
 const StorageMonitorHandler = require('../handlers/storageMonitorHandler.js');
 const Team = require('../structures/Team');
 const TeamHandler = require('../handlers/teamHandler.js');
+const TeammateLanguageDatabase = require('../plugins/teammateLanguageDatabase');
 const Time = require('../structures/Time');
 const TimeHandler = require('../handlers/timeHandler.js');
 const VendingMachines = require('../handlers/vendingMachineHandler.js');
@@ -58,6 +59,7 @@ module.exports = {
     },
 
     handlers: async function (rustplus, client, info, mapMarkers, teamInfo, time) {
+        TeammateLanguageDatabase.recordTeamInfo(rustplus, teamInfo.teamInfo);
         await TeamHandler.handler(rustplus, client, teamInfo.teamInfo);
         rustplus.team.updateTeam(teamInfo.teamInfo);
 

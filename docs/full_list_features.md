@@ -24,45 +24,51 @@
 - **/uptime** - Get the current uptime for rustplusplus.
 - **/voice** - Let rustplusplus join voicechat.
 
-## In-Game Commands
-- **afk** - Display afk teammates.
-- **alive** - Display who has been alive longest.
-- **cargo** - Display information regarding Cargoship.
-- **chinook** - Display information regarding Chinook 47.
-- **connection/connections** - Display latest team connections.
-- **craft** - Display the cost to craft an item.
-- **death/deaths** - Display latest deaths.
-- **decay** - Display the decay time of an item.
-- **deepsea** - Track Deep Sea activity from off-map vendor clusters and predict open/close windows.
-- **events** - Get recent events.
-- **heli** - Get information regarding Patrol Helicopter.
-- **large** - Get information regarding Large Oil Rig.
-- **leader** - Transfer leadership.
-- **marker/markers** - Set markers to navigate to.
-- **market** - Search for or subscribe to items in vending machines.
-- **mute** - Mute rustplusplus In-Game.
-- **note/notes** - Add notes.
-- **offline** - Display offline teammates.
-- **online** - Display online teammates.
-- **player/players** - Get Battlemetrics information about players.
-- **pop** - Get population of the server.
-- **prox** - Display teammates that are nearby.
-- **recycle** - Display the output of recycling an item.
-- **research** - Display the cost to research an item.
-- **send** - Send a message through rustplusplus to a person on Discord.
-- **small** - Get information regarding Small Oil Rig.
-- **steamid** - Get teammate steamid.
-- **team** - Get team information (names of all teammates).
-- **time** - Get In-Game time.
-- **timer/timers** - Setup timers.
-- **tr** - Translate from English to another language.
-- **trf** - Translate from one language to another.
-- **tts** - Text-To-Speech (Need to have teamchat open in Discord).
-- **unmute** - Unmute rustplusplus In-Game.
-- **upkeep** - Check upkeep of Storage Monitor Tool Cupboards.
-- **uptime** - Display the uptime of rustplusplus and currently connected server.
-- **vendor** - Get information regarding the Traveling Vendor
-- **wipe** - Display time since wipe.
+## In-Game and Discord Commands
+- **afk** - `!afk` - Display AFK teammates.
+- **alive** - `!alive` - Display who has been alive longest.
+- **cargo** - `!cargo` - Display information regarding Cargoship.
+- **chinook** - `!chinook` - Display information regarding Chinook 47.
+- **commands [command]** - `!commands [command]` - List all commands or show one-line usage for one command.
+- **connection/connections** - `!connection [steamid]` or `!connections` - Display latest team connections.
+- **craft** - `!craft [item] [quantity]` - Display the cost to craft an item.
+- **death/deaths** - `!death [steamid]` or `!deaths` - Display latest deaths.
+- **decay** - `!decay [item]` - Display the decay time of an item.
+- **deepsea** - `!deepsea` - Track Deep Sea activity from off-map vendor clusters and predict open/close windows.
+- **events** - `!events [event]` - Get recent events and event timing summaries.
+- **heli** - `!heli` - Get information regarding Patrol Helicopter.
+- **language** - `!language [code]` - Show or change the bot language for this server.
+- **large** - `!large` - Get information regarding Large Oil Rig.
+- **leader** - `!leader [teammate]` - Transfer leadership.
+- **logs** - `!logs [on|off]` - Show, enable, or disable bot file/debug logging.
+- **marker/markers** - `!marker [name]` or `!markers` - Set markers to navigate to.
+- **market** - `!market [item]` - Search for or subscribe to items in vending machines.
+- **mute** - `!mute` - Mute rustplusplus in-game.
+- **note/notes** - `!note [text]` or `!notes` - Add or list notes.
+- **offline** - `!offline` - Display offline teammates.
+- **online** - `!online` - Display online teammates.
+- **player/players** - `!player [name]` or `!players` - Get Battlemetrics information about players.
+- **pop** - `!pop` - Get population of the server.
+- **prox** - `!prox` - Display teammates that are nearby.
+- **record** - `!record [steamid] [pseudonym]` - Add a pseudonym to the teammate language CSV database.
+- **recycle** - `!recycle [item] [quantity]` - Display the output of recycling an item.
+- **research** - `!research [item]` - Display the cost to research an item.
+- **send** - `!send [discord user] [message]` - Send a message through rustplusplus to a person on Discord.
+- **small** - `!small` - Get information regarding Small Oil Rig.
+- **stack** - `!stack [item]` - Display stack size information for an item.
+- **steamid** - `!steamid [teammate]` - Get teammate SteamID.
+- **team** - `!team` - Get team information (names of all teammates).
+- **time** - `!time` - Get in-game time.
+- **timer/timers** - `!timer [duration] [message]` or `!timers` - Set or list timers.
+- **tr** - `!tr [language] [text]` - Translate from English to another language.
+- **trf** - `!trf [from] [to] [text]` - Translate from one language to another.
+- **tts** - `!tts [message]` - Send text-to-speech to Discord teamchat.
+- **unmute** - `!unmute` - Unmute rustplusplus in-game.
+- **upkeep** - `!upkeep` - Check upkeep of Storage Monitor Tool Cupboards.
+- **uptime** - `!uptime` - Display the uptime of rustplusplus and currently connected server.
+- **vendor** - `!vendor` - Get information regarding the Traveling Vendor.
+- **who** - `!who [steamid]` - List known pseudonyms for a SteamID from the teammate language CSV database.
+- **wipe** - `!wipe` - Display time since wipe.
 
 ## Smart Devices
 > Pair Smart Devices such as `Smart Switches`, `Smart Alarms`, `Storage Monitors` and control them from Discord or In-Game teamchat.

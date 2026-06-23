@@ -138,3 +138,15 @@
 ## Runtime language command
 - User found that changing `Config.general.language` back to `en` is not enough when a guild instance already persisted another language. Added `!language <code>` for in-game and Discord command chat so the live guild instance, RustPlus runtime settings, guild intl cache, bot intl cache, and `config/index.js` fallback are updated together.
 - `!language` with no argument reports the current guild language and supported language codes. `!language en` is the intended way to switch a server back to English without manually editing instance JSON. If `RPP_LANGUAGE` is set in the environment, it still overrides the config file fallback on restart.
+
+## Teammate language CSV database
+- Added an isolated teammate language CSV database plugin in `src/plugins/teammateLanguageDatabase/index.js`. It stores per-guild/server CSV files under `data/teammate-language-database` with columns `steamid,date,name,language`, uses `XX` as unknown, preserves any existing non-`XX` language as source of truth, and appends new rows when a SteamID is seen with a new nickname.
+- The plugin records observations from Rust+ polling team info, team-change broadcasts, and team-chat messages. It also provides manual commands now: `!record [steamid] [pseudonym with spaces allowed]` adds a manual nickname row, and `!who [steamid]` lists known pseudonyms with dates/language. Both commands are intended to work in in-game team chat and in the Discord commands channel, with localization keys added across language files.
+
+## Command/localization parity audit
+- After adding the teammate CSV commands, ran a parity/refactor pass: Discord command handling now includes `!deepsea` so it matches in-game command coverage, all language JSON files have the same key set as English, and Deep Sea localization keys were filled into the non-English language files instead of being present only in English/Chinese.
+- `docs/commands.md` now describes the command table as both in-game and Discord commands where supported, with Deep Sea, `!record`, and `!who` explicitly documented as available from Rust team chat and the Discord commands channel.
+
+## Runtime `!commands` catalog
+- Added a `!commands [command]` runtime help command for both in-game team chat and the Discord commands channel. With no argument it lists command names separated by commas; with a command argument it returns a one-line usage/description.
+- The catalog parser lives in `src/util/commandCatalog.js` and reads the `## In-Game and Discord Commands` section of `docs/full_list_features.md` at runtime, so the command list/help text has one documentation-backed source instead of being separately hardcoded in handlers.
