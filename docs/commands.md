@@ -357,9 +357,11 @@ In-Game Command | Description
 [**events**](commands.md#events) | Get recent events.
 [**heli**](commands.md#heli) | Get information about Patrol Helicopter (Location, time since last downed, time since last on map).
 [**large**](commands.md#large) | Get information about Large Oil Rig (Time till crate unlocks, time since last trigger).
+[**language**](commands.md#language) | Show or change the bot language for this server and config file.
 [**leader**](commands.md#leader-1) | Give/Take the Team Leadership.
 [**marker**](commands.md#marker) | Set custom markers anywhere on the map.
 [**market**](commands.md#market-ingame) | Search for items in vending machines or subscribe/unsubscribe to items.
+[**logs**](commands.md#logs) | Show, enable, or disable bot file/debug logging.
 [**mute**](commands.md#mute) | Mute the bot from the In-Game Team Chat.
 [**note/notes**](commands.md#notenotes) | Create notes about meaningful things.
 [**offline**](commands.md#offline) | Get the currently offline players in your team.
@@ -491,6 +493,14 @@ In-Game Command | Description
 ![In-Game Command large Image](images/ingame_commands/large_ingame.png)
 
 
+## **language**
+
+> **Show or change the bot language.** This command works from in-game team chat and from Discord command chat with the configured prefix. It updates the current guild instance immediately and also rewrites the `config/index.js` language fallback, so switching back to English is `!language en`. If `RPP_LANGUAGE` is set in the environment, that environment variable still overrides the config file on restart.
+<br>Command: `!language` - Show the current language and supported language codes.
+<br>Command: `!language en` - Change this guild and the config fallback to English.
+<br>Command: `!language zh` - Change this guild and the config fallback to Simplified Chinese.
+
+
 ## **leader**
 
 > **Give/Take the Team Leadership.** Calling the leader command alone will give the caller leadership. You can also give the leadership to a team member by writing the name or part of the name after the command.
@@ -514,6 +524,14 @@ Subcommand | Description | Required
 `<marker_name>` | Calling with the name of the marker will let you navigate to that marker (`!marker <name>`). | `False`
 
 ![In-Game Command marker Image](images/ingame_commands/marker_ingame.png)
+
+
+## **logs**
+
+> **Show, enable, or disable bot file/debug logging.** This command works from in-game team chat and from the Discord command chat with the configured prefix. Console output continues, but file writes under `logs/` stop while disabled, including normal log files, raw Rust+ WebSocket text, event payload logs, marker history, and marker snapshots.
+<br>Command: `!logs` - Show the current logging status.
+<br>Command: `!logs off` - Disable file/debug logging.
+<br>Command: `!logs on` - Enable file/debug logging.
 
 
 ## **market ingame**

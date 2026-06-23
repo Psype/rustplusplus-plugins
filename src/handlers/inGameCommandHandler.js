@@ -21,6 +21,8 @@
 const SmartAlarmHandler = require('./smartAlarmHandler.js');
 const SmartSwitchGroupHandler = require('./smartSwitchGroupHandler.js');
 const SmartSwitchHandler = require('./smartSwitchHandler.js');
+const LoggingSettings = require('../util/loggingSettings.js');
+const LanguageSettings = require('../util/languageSettings.js');
 
 module.exports = {
     inGameCommandHandler: async function (rustplus, client, message) {
@@ -95,6 +97,10 @@ module.exports = {
             commandLowerCase === `${prefix}${client.intlGet(guildId, 'commandSyntaxHeli')}`) {
             rustplus.sendInGameMessage(rustplus.getCommandHeli());
         }
+        else if (matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet('en', 'commandSyntaxLanguage')) ||
+            matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet(guildId, 'commandSyntaxLanguage'))) {
+            rustplus.sendInGameMessage(getCommandLanguage(client, guildId, command));
+        }
         else if (commandLowerCase === `${prefix}${client.intlGet('en', 'commandSyntaxLarge')}` ||
             commandLowerCase === `${prefix}${client.intlGet(guildId, 'commandSyntaxLarge')}`) {
             rustplus.sendInGameMessage(rustplus.getCommandLarge());
@@ -112,6 +118,10 @@ module.exports = {
         else if (commandLowerCase.startsWith(`${prefix}${client.intlGet('en', 'commandSyntaxMarket')} `) ||
             commandLowerCase.startsWith(`${prefix}${client.intlGet(guildId, 'commandSyntaxMarket')} `)) {
             rustplus.sendInGameMessage(rustplus.getCommandMarket(command));
+        }
+        else if (matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet('en', 'commandSyntaxLogs')) ||
+            matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet(guildId, 'commandSyntaxLogs'))) {
+            rustplus.sendInGameMessage(getCommandLogs(client, guildId, command));
         }
         else if (commandLowerCase === `${prefix}${client.intlGet('en', 'commandSyntaxMute')}` ||
             commandLowerCase === `${prefix}${client.intlGet(guildId, 'commandSyntaxMute')}`) {
@@ -239,5 +249,49 @@ module.exports = {
         rustplus.logInGameCommand('Default', message);
 
         return true;
-    },
+    }
 };
+
+function matchesCommandWithOptionalArgs(commandLowerCase, prefix, syntax) {
+    const expected = `${prefix}${syntax}`.toLowerCase();
+    return commandLowerCase === expected || commandLowerCase.startsWith(`${expected} `);
+}
+
+function getCommandLogs(client, guildId, command) {
+    const args = command.trim().split(/\s+/);
+    const action = (args[1] || 'status').toLowerCase();
+
+    if ([client.intlGet('en', 'commandSyntaxOn'), client.intlGet(guildId, 'commandSyntaxOn'), 'enable', 'enabled'].includes(action)) {
+        LoggingSettings.setEnabled(true);
+        return client.intlGet(guildId, 'logsEnabled');
+    }
+    if ([client.intlGet('en', 'commandSyntaxOff'), client.intlGet(guildId, 'commandSyntaxOff'), 'disable', 'disabled'].includes(action)) {
+        LoggingSettings.setEnabled(false);
+        return client.intlGet(guildId, 'logsDisabled');
+    }
+
+    return client.intlGet(guildId, LoggingSettings.isEnabled() ? 'logsCurrentlyEnabled' : 'logsCurrentlyDisabled');
+}
+
+function getCommandLanguage(client, guildId, command) {
+    const args = command.trim().split(/\s+/);
+    const language = LanguageSettings.normalizeLanguage(args[1] || '');
+
+    if (language === '') {
+        const instance = client.getInstance(guildId);
+        return client.intlGet(guildId, 'languageCurrentlySet', {
+            language: instance.generalSettings.language,
+            languages: LanguageSettings.getSupportedLanguages().join(', ')
+        });
+    }
+
+    if (!LanguageSettings.isSupportedLanguage(language)) {
+        return client.intlGet(guildId, 'languageNotSupportedWithList', {
+            language: language,
+            languages: LanguageSettings.getSupportedLanguages().join(', ')
+        });
+    }
+
+    LanguageSettings.setLanguage(client, guildId, language);
+    return client.intlGet(guildId, 'setBotLanguageConfigUpdated', { language: language });
+}

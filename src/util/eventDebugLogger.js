@@ -6,6 +6,7 @@
 const Fs = require('fs');
 
 const Path = require('path');
+const LoggingSettings = require('./loggingSettings.js');
 
 const LOG_DIR = Path.join(process.cwd(), 'logs');
 const EVENT_LOG_PATH = Path.join(LOG_DIR, 'rustplusplus-events.log');
@@ -21,6 +22,7 @@ function ensureLogDir() {
 }
 
 function appendJsonLine(path, data) {
+    if (!LoggingSettings.isEnabled()) return;
     ensureLogDir();
     Fs.appendFileSync(path, `${stringify(data)}\n`);
 }
@@ -31,6 +33,7 @@ function getRawDataBuffer(data) {
 }
 
 function appendRawSocketText(rustplus, direction, data) {
+    if (!LoggingSettings.isEnabled()) return;
     const buffer = getRawDataBuffer(data);
     const header = `\n--- ${new Date().toISOString()} ${direction} guild=${rustplus.guildId} ` +
         `server=${rustplus.serverId} bytes=${buffer.length} ---\n`;

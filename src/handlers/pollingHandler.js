@@ -21,6 +21,7 @@
 const Fs = require('fs');
 const DeepSeaHandler = require('./deepSeaHandler.js');
 const EventDebugLogger = require('../util/eventDebugLogger.js');
+const LoggingSettings = require('../util/loggingSettings.js');
 const Info = require('../structures/Info');
 const InformationHandler = require('../handlers/informationHandler.js');
 const MapMarkers = require('../structures/MapMarkers.js');
@@ -79,6 +80,7 @@ module.exports = {
 };
 
 function dumpMapMarkers(rustplus, mapMarkers) {
+    if (!LoggingSettings.isEnabled()) return;
     try {
         const vendingMachineType = rustplus.mapMarkers ? rustplus.mapMarkers.types.VendingMachine : 3;
         const dump = {

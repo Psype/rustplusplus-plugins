@@ -131,7 +131,15 @@ class DiscordBot extends Discord.Client {
 
     loadGuildIntl(guildId) {
         const instance = InstanceUtils.readInstanceFile(guildId);
-        const language = instance.generalSettings.language;
+        let language = instance.generalSettings.language;
+
+        if (language === 'en' && Config.general.language !== 'en') {
+            language = Config.general.language;
+            instance.generalSettings.language = language;
+            this.instances[guildId] = instance;
+            InstanceUtils.writeInstanceFile(guildId, instance);
+        }
+
         const path = Path.join(__dirname, '..', 'languages', `${language}.json`);
         const messages = JSON.parse(Fs.readFileSync(path, 'utf8'));
         const cache = FormatJS.createIntlCache();
