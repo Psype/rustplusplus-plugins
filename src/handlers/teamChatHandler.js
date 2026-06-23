@@ -19,7 +19,16 @@
 */
 
 const DiscordMessages = require('../discordTools/discordMessages.js');
+const AutoTranslate = require('../plugins/autoTranslate');
 
 module.exports = async function (rustplus, client, message) {
     await DiscordMessages.sendTeamChatMessage(rustplus.guildId, message);
+
+    const translation = await AutoTranslate.translateMessage(rustplus, message);
+    if (translation) {
+        await DiscordMessages.sendTeamChatMessage(rustplus.guildId, {
+            ...message,
+            message: `[${translation.source || 'auto'}→${translation.target}] ${translation.translated}`
+        });
+    }
 }

@@ -836,5 +836,10 @@
     "commandSyntaxCommands": "commands",
     "commandsList": "Команды: {commands}",
     "commandsUsage": "{usage} - {description}",
-    "commandsUnknown": "Неизвестная команда: {command}."
+    "commandsUnknown": "Неизвестная команда: {command}.",
+    "commandSyntaxAutoTranslate": "autotranslate",
+    "autotranslateUsage": "Использование: !autotranslate on [язык[,язык...]] или !autotranslate off.",
+    "autotranslateLanguageNotFound": "Не найден поддерживаемый целевой язык для автоперевода.",
+    "autotranslateEnabled": "Автоперевод включен для: {languages}.",
+    "autotranslateDisabled": "Автоперевод отключен."
 }
