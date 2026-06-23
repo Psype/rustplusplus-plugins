@@ -61,6 +61,16 @@ function getKnownPseudonyms(rustplus, steamId) {
         }));
 }
 
+function getKnownLanguage(rustplus, steamId) {
+    const normalizedSteamId = normalizeSteamId(steamId);
+    if (!normalizedSteamId) return null;
+
+    const csvPath = getCsvPath(rustplus);
+    const rows = readRows(csvPath);
+
+    return getLanguageForSteamId(rows, normalizedSteamId);
+}
+
 function recordPlayer(rustplus, player) {
     const steamId = normalizeSteamId(player.steamId);
     const name = normalizeName(player.name);
@@ -199,5 +209,6 @@ module.exports = {
     recordTeamInfo,
     recordTeamMessage,
     recordManual,
-    getKnownPseudonyms
+    getKnownPseudonyms,
+    getKnownLanguage
 };
