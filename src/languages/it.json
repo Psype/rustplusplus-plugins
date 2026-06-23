@@ -802,5 +802,11 @@
     "vanillaNextApproxSoon": "Prossimo vanilla circa in qualsiasi momento entro {maxTime}.",
     "vanillaNextApproxOverdue": "Prossimo vanilla circa in qualsiasi momento.",
     "beforeLockedCrateUnlocks": "{time} prima dello sblocco della cassa chiusa.",
-    "sinceHeavyScientistsCalled": "{time} da quando sono stati chiamati per l’ultima volta gli scienziati pesanti."
+    "sinceHeavyScientistsCalled": "{time} da quando sono stati chiamati per l’ultima volta gli scienziati pesanti.",
+    "commandSyntaxLogs": "logs",
+    "logsEnabled": "Il logging su file è ora abilitato.",
+    "logsDisabled": "Il logging su file è ora disabilitato. L’output console continuerà.",
+    "logsCurrentlyEnabled": "Il logging su file è attualmente abilitato.",
+    "logsCurrentlyDisabled": "Il logging su file è attualmente disabilitato. L’output console resta attivo.",
+    "raidAlarmDestroyedAt": "{item} distrutto a {location}."
 }

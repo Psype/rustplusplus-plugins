@@ -22,6 +22,7 @@ const Colors = require("colors");
 const Winston = require("winston");
 
 const Config = require('../../config');
+const LoggingSettings = require('../util/loggingSettings.js');
 
 class Logger {
     constructor(logFilePath, type) {
@@ -62,10 +63,12 @@ class Logger {
         switch (this.type) {
             case 'default': {
                 text = `${title}: ${text}`;
-                this.logger.log({
-                    level: level,
-                    message: `${time} | ${text}`
-                });
+                if (LoggingSettings.isEnabled()) {
+                    this.logger.log({
+                        level: level,
+                        message: `${time} | ${text}`
+                    });
+                }
 
                 console.log(
                     Colors.green(`${time} `) +
@@ -74,7 +77,9 @@ class Logger {
 
                 if (level === 'error' && Config.general.showCallStackError) {
                     for (let line of (new Error().stack.split(/\r?\n/))) {
-                        this.logger.log({ level: level, message: `${time} | ${line}` });
+                        if (LoggingSettings.isEnabled()) {
+                            this.logger.log({ level: level, message: `${time} | ${line}` });
+                        }
                         console.log(Colors.green(`${time} `) + Colors.red(line));
                     }
                 }
@@ -83,10 +88,12 @@ class Logger {
             case 'guild': {
                 text = `${title}: ${text}`;
 
-                this.logger.log({
-                    level: level,
-                    message: `${time} | ${this.guildId} | ${this.serverName} | ${text}`
-                });
+                if (LoggingSettings.isEnabled()) {
+                    this.logger.log({
+                        level: level,
+                        message: `${time} | ${this.guildId} | ${this.serverName} | ${text}`
+                    });
+                }
 
                 console.log(
                     Colors.green(`${time} `) +
@@ -97,10 +104,12 @@ class Logger {
 
                 if (level === 'error' && Config.general.showCallStackError) {
                     for (let line of (new Error().stack.split(/\r?\n/))) {
-                        this.logger.log({
-                            level: level,
-                            message: `${time} | ${this.guildId} | ${this.serverName} | ${line}`
-                        });
+                        if (LoggingSettings.isEnabled()) {
+                            this.logger.log({
+                                level: level,
+                                message: `${time} | ${this.guildId} | ${this.serverName} | ${line}`
+                            });
+                        }
                         console.log(
                             Colors.green(`${time} `) +
                             Colors.cyan(`${this.guildId} `) +

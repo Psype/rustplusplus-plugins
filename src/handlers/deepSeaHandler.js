@@ -484,7 +484,7 @@ async function sendDeepSeaOpened(rustplus) {
         formatOpened(rustplus),
         'deepsea',
         Constants.COLOR_DEEPSEA_OPENED,
-        rustplus.isFirstPoll,
+        false,
         'cargoship_logo.png');
 }
 
@@ -494,7 +494,7 @@ async function sendDeepSeaClosed(rustplus) {
         formatClosed(rustplus),
         'deepsea',
         Constants.COLOR_DEEPSEA_CLOSED,
-        rustplus.isFirstPoll,
+        false,
         'cargoship_logo.png');
 }
 

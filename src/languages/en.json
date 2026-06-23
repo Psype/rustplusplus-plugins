@@ -816,5 +816,11 @@
     "vanillaNextApproxSoon": "Vanilla next approx any time within {maxTime}.",
     "vanillaNextApproxOverdue": "Vanilla next approx any time now.",
     "beforeLockedCrateUnlocks": "{time} before Locked Crate unlocks.",
-    "sinceHeavyScientistsCalled": "{time} since Heavy Scientists last got called."
+    "sinceHeavyScientistsCalled": "{time} since Heavy Scientists last got called.",
+    "commandSyntaxLogs": "logs",
+    "logsEnabled": "File logging is now enabled.",
+    "logsDisabled": "File logging is now disabled. Console output will continue.",
+    "logsCurrentlyEnabled": "File logging is currently enabled.",
+    "logsCurrentlyDisabled": "File logging is currently disabled. Console output is still enabled.",
+    "raidAlarmDestroyedAt": "{item} destroyed at {location}."
 }

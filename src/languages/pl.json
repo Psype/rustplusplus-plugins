@@ -802,5 +802,11 @@
     "vanillaNextApproxSoon": "Vanilla: następne przybliżenie w dowolnym momencie w ciągu {maxTime}.",
     "vanillaNextApproxOverdue": "Vanilla: następne przybliżenie w każdej chwili.",
     "beforeLockedCrateUnlocks": "{time} do odblokowania zamkniętej skrzyni.",
-    "sinceHeavyScientistsCalled": "{time} od ostatniego wezwania ciężkich naukowców."
+    "sinceHeavyScientistsCalled": "{time} od ostatniego wezwania ciężkich naukowców.",
+    "commandSyntaxLogs": "logs",
+    "logsEnabled": "Logowanie do pliku jest włączone.",
+    "logsDisabled": "Logowanie do pliku jest wyłączone. Wyjście konsoli pozostanie aktywne.",
+    "logsCurrentlyEnabled": "Logowanie do pliku jest obecnie włączone.",
+    "logsCurrentlyDisabled": "Logowanie do pliku jest obecnie wyłączone. Wyjście konsoli nadal jest aktywne.",
+    "raidAlarmDestroyedAt": "{item} zniszczono w {location}."
 }

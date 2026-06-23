@@ -802,5 +802,11 @@
     "vanillaNextApproxSoon": "Vanilla nästa ungefär när som helst inom {maxTime}.",
     "vanillaNextApproxOverdue": "Vanilla nästa ungefär när som helst nu.",
     "beforeLockedCrateUnlocks": "{time} tills den låsta lådan öppnas.",
-    "sinceHeavyScientistsCalled": "{time} sedan Heavy Scientists senast kallades in."
+    "sinceHeavyScientistsCalled": "{time} sedan Heavy Scientists senast kallades in.",
+    "commandSyntaxLogs": "logs",
+    "logsEnabled": "Filloggning är nu aktiverad.",
+    "logsDisabled": "Filloggning är nu inaktiverad. Konsolutskrift fortsätter.",
+    "logsCurrentlyEnabled": "Filloggning är för närvarande aktiverad.",
+    "logsCurrentlyDisabled": "Filloggning är för närvarande inaktiverad. Konsolutskrift är fortfarande aktiv.",
+    "raidAlarmDestroyedAt": "{item} förstörd vid {location}."
 }

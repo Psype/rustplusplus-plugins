@@ -802,5 +802,11 @@
     "vanillaNextApproxSoon": "Próximo vanilla aprox. en cualquier momento dentro de {maxTime}.",
     "vanillaNextApproxOverdue": "Próximo vanilla aprox. en cualquier momento.",
     "beforeLockedCrateUnlocks": "{time} antes de que se desbloquee la caja cerrada.",
-    "sinceHeavyScientistsCalled": "{time} desde que se llamó por última vez a los científicos pesados."
+    "sinceHeavyScientistsCalled": "{time} desde que se llamó por última vez a los científicos pesados.",
+    "commandSyntaxLogs": "logs",
+    "logsEnabled": "El registro en archivo está activado.",
+    "logsDisabled": "El registro en archivo está desactivado. La salida de consola continuará.",
+    "logsCurrentlyEnabled": "El registro en archivo está actualmente activado.",
+    "logsCurrentlyDisabled": "El registro en archivo está actualmente desactivado. La salida de consola sigue activada.",
+    "raidAlarmDestroyedAt": "{item} destruido en {location}."
 }

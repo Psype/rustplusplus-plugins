@@ -802,5 +802,11 @@
     "vanillaNextApproxSoon": "Vanilla-Schätzung: nächstes jederzeit innerhalb von {maxTime}.",
     "vanillaNextApproxOverdue": "Vanilla-Schätzung: nächstes jederzeit ab jetzt.",
     "beforeLockedCrateUnlocks": "{time} bis die Locked Crate freigeschaltet wird.",
-    "sinceHeavyScientistsCalled": "{time} seit dem letzten Ruf der Heavy Scientists."
+    "sinceHeavyScientistsCalled": "{time} seit dem letzten Ruf der Heavy Scientists.",
+    "commandSyntaxLogs": "logs",
+    "logsEnabled": "Datei-Logging ist jetzt aktiviert.",
+    "logsDisabled": "Datei-Logging ist jetzt deaktiviert. Konsolenausgabe läuft weiter.",
+    "logsCurrentlyEnabled": "Datei-Logging ist derzeit aktiviert.",
+    "logsCurrentlyDisabled": "Datei-Logging ist derzeit deaktiviert. Konsolenausgabe bleibt aktiv.",
+    "raidAlarmDestroyedAt": "{item} bei {location} zerstört."
 }

@@ -360,6 +360,7 @@ In-Game Command | Description
 [**leader**](commands.md#leader-1) | Give/Take the Team Leadership.
 [**marker**](commands.md#marker) | Set custom markers anywhere on the map.
 [**market**](commands.md#market-ingame) | Search for items in vending machines or subscribe/unsubscribe to items.
+[**logs**](commands.md#logs) | Show, enable, or disable bot file/debug logging.
 [**mute**](commands.md#mute) | Mute the bot from the In-Game Team Chat.
 [**note/notes**](commands.md#notenotes) | Create notes about meaningful things.
 [**offline**](commands.md#offline) | Get the currently offline players in your team.
@@ -514,6 +515,14 @@ Subcommand | Description | Required
 `<marker_name>` | Calling with the name of the marker will let you navigate to that marker (`!marker <name>`). | `False`
 
 ![In-Game Command marker Image](images/ingame_commands/marker_ingame.png)
+
+
+## **logs**
+
+> **Show, enable, or disable bot file/debug logging.** This command works from in-game team chat and from the Discord command chat with the configured prefix. Console output continues, but file writes under `logs/` stop while disabled, including normal log files, raw Rust+ WebSocket text, event payload logs, marker history, and marker snapshots.
+<br>Command: `!logs` - Show the current logging status.
+<br>Command: `!logs off` - Disable file/debug logging.
+<br>Command: `!logs on` - Enable file/debug logging.
 
 
 ## **market ingame**

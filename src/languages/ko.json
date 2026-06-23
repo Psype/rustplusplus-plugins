@@ -802,5 +802,11 @@
     "vanillaNextApproxSoon": "바닐라 기준 다음 예상: {maxTime} 이내 언제든지.",
     "vanillaNextApproxOverdue": "바닐라 기준 다음 예상: 지금 언제든지.",
     "beforeLockedCrateUnlocks": "잠긴 상자 해제까지 {time}.",
-    "sinceHeavyScientistsCalled": "중무장 과학자가 마지막으로 호출된 지 {time} 지났습니다."
+    "sinceHeavyScientistsCalled": "중무장 과학자가 마지막으로 호출된 지 {time} 지났습니다.",
+    "commandSyntaxLogs": "logs",
+    "logsEnabled": "파일 로그가 활성화되었습니다.",
+    "logsDisabled": "파일 로그가 비활성화되었습니다. 콘솔 출력은 계속됩니다.",
+    "logsCurrentlyEnabled": "파일 로그가 현재 활성화되어 있습니다.",
+    "logsCurrentlyDisabled": "파일 로그가 현재 비활성화되어 있습니다. 콘솔 출력은 계속 활성화되어 있습니다.",
+    "raidAlarmDestroyedAt": "{item} 이(가) {location}에서 파괴되었습니다."
 }

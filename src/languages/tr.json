@@ -802,5 +802,11 @@
     "vanillaNextApproxSoon": "Vanilla tahmini: sonraki {maxTime} içinde herhangi bir anda.",
     "vanillaNextApproxOverdue": "Vanilla tahmini: sonraki her an.",
     "beforeLockedCrateUnlocks": "Kilitli sandığın açılmasına {time}.",
-    "sinceHeavyScientistsCalled": "Ağır bilim insanları son çağrıldığından beri {time} geçti."
+    "sinceHeavyScientistsCalled": "Ağır bilim insanları son çağrıldığından beri {time} geçti.",
+    "commandSyntaxLogs": "logs",
+    "logsEnabled": "Dosya günlükleri artık etkin.",
+    "logsDisabled": "Dosya günlükleri artık devre dışı. Konsol çıktısı devam edecek.",
+    "logsCurrentlyEnabled": "Dosya günlükleri şu anda etkin.",
+    "logsCurrentlyDisabled": "Dosya günlükleri şu anda devre dışı. Konsol çıktısı hâlâ etkin.",
+    "raidAlarmDestroyedAt": "{item}, {location} konumunda yok edildi."
 }

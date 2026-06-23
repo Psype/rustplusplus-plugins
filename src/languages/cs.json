@@ -802,5 +802,11 @@
     "vanillaNextApproxSoon": "Vanilla odhad další události kdykoli během {maxTime}.",
     "vanillaNextApproxOverdue": "Vanilla odhad další události kdykoli teď.",
     "beforeLockedCrateUnlocks": "{time} do odemčení Locked Crate.",
-    "sinceHeavyScientistsCalled": "{time} od posledního přivolání Heavy Scientists."
+    "sinceHeavyScientistsCalled": "{time} od posledního přivolání Heavy Scientists.",
+    "commandSyntaxLogs": "logs",
+    "logsEnabled": "Souborové logování je nyní zapnuto.",
+    "logsDisabled": "Souborové logování je nyní vypnuto. Výstup do konzole bude pokračovat.",
+    "logsCurrentlyEnabled": "Souborové logování je aktuálně zapnuto.",
+    "logsCurrentlyDisabled": "Souborové logování je aktuálně vypnuto. Výstup do konzole zůstává zapnutý.",
+    "raidAlarmDestroyedAt": "{item} zničeno na {location}."
 }

@@ -816,5 +816,11 @@
     "vanillaNextApproxSoon": "按原版默认设置估算，下次会在 {maxTime} 内随时发生。",
     "vanillaNextApproxOverdue": "按原版默认设置估算，下次现在随时可能发生。",
     "beforeLockedCrateUnlocks": "距离上锁箱解锁还有 {time}。",
-    "sinceHeavyScientistsCalled": "距离上次呼叫重装科学家已过 {time}。"
+    "sinceHeavyScientistsCalled": "距离上次呼叫重装科学家已过 {time}。",
+    "commandSyntaxLogs": "logs",
+    "logsEnabled": "文件日志已启用。",
+    "logsDisabled": "文件日志已禁用。控制台输出仍会继续。",
+    "logsCurrentlyEnabled": "文件日志当前已启用。",
+    "logsCurrentlyDisabled": "文件日志当前已禁用。控制台输出仍然启用。",
+    "raidAlarmDestroyedAt": "{item} 已在 {location} 被摧毁。"
 }

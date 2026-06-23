@@ -802,5 +802,11 @@
     "vanillaNextApproxSoon": "Примерно по vanilla: следующее в любой момент в течение {maxTime}.",
     "vanillaNextApproxOverdue": "Примерно по vanilla: следующее в любой момент.",
     "beforeLockedCrateUnlocks": "{time} до открытия запертого ящика.",
-    "sinceHeavyScientistsCalled": "{time} с последнего вызова тяжёлых учёных."
+    "sinceHeavyScientistsCalled": "{time} с последнего вызова тяжёлых учёных.",
+    "commandSyntaxLogs": "logs",
+    "logsEnabled": "Запись логов в файл включена.",
+    "logsDisabled": "Запись логов в файл отключена. Вывод в консоль продолжится.",
+    "logsCurrentlyEnabled": "Запись логов в файл сейчас включена.",
+    "logsCurrentlyDisabled": "Запись логов в файл сейчас отключена. Вывод в консоль остаётся включённым.",
+    "raidAlarmDestroyedAt": "{item} уничтожен в {location}."
 }

@@ -481,17 +481,38 @@ async function alarmRaidAlarm(client, guild, title, message, body) {
     }
 
     const content = {
-        embeds: [DiscordEmbeds.getAlarmRaidAlarmEmbed({ title: title, message: message }, body)],
+        embeds: [DiscordEmbeds.getAlarmRaidAlarmEmbed(getRaidAlarmText(client, guild, title, message), body)],
         content: '@everyone',
         files: files
     }
 
     if (rustplus && (serverId === rustplus.serverId)) {
         await DiscordMessages.sendMessage(guild.id, content, null, instance.channelId.activity);
-        rustplus.sendInGameMessage(`${title}: ${message}`);
+        const raidText = getRaidAlarmText(client, guild, title, message);
+        rustplus.sendInGameMessage(`${raidText.title}: ${raidText.message}`);
     }
 
-    client.log(client.intlGet(null, 'infoCap'), `${title} ${message}`);
+    const raidText = getRaidAlarmText(client, guild, title, message);
+    client.log(client.intlGet(null, 'infoCap'), `${raidText.title} ${raidText.message}`);
+}
+
+function getRaidAlarmText(client, guild, title, message) {
+    let translatedTitle = title;
+    let translatedMessage = message;
+
+    if (title === 'You\'re getting raided!') {
+        translatedTitle = client.intlGet(guild.id, 'baseIsUnderAttack');
+    }
+
+    const destroyedMatch = /^(.*) destroyed at (.*)$/i.exec(message);
+    if (destroyedMatch) {
+        translatedMessage = client.intlGet(guild.id, 'raidAlarmDestroyedAt', {
+            item: destroyedMatch[1],
+            location: destroyedMatch[2]
+        });
+    }
+
+    return { title: translatedTitle, message: translatedMessage };
 }
 
 async function playerDeath(client, guild, title, message, body, discordUserId) {
