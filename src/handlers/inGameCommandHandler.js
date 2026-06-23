@@ -23,6 +23,8 @@ const SmartSwitchGroupHandler = require('./smartSwitchGroupHandler.js');
 const SmartSwitchHandler = require('./smartSwitchHandler.js');
 const LoggingSettings = require('../util/loggingSettings.js');
 const LanguageSettings = require('../util/languageSettings.js');
+const TeammateLanguageDatabase = require('../plugins/teammateLanguageDatabase');
+const CommandCatalog = require('../util/commandCatalog.js');
 
 module.exports = {
     inGameCommandHandler: async function (rustplus, client, message) {
@@ -56,6 +58,10 @@ module.exports = {
         else if (commandLowerCase === `${prefix}${client.intlGet('en', 'commandSyntaxCargo')}` ||
             commandLowerCase === `${prefix}${client.intlGet(guildId, 'commandSyntaxCargo')}`) {
             rustplus.sendInGameMessage(rustplus.getCommandCargo());
+        }
+        else if (matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet('en', 'commandSyntaxCommands')) ||
+            matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet(guildId, 'commandSyntaxCommands'))) {
+            rustplus.sendInGameMessage(getCommandCommands(client, guildId, command));
         }
         else if (commandLowerCase === `${prefix}${client.intlGet('en', 'commandSyntaxChinook')}` ||
             commandLowerCase === `${prefix}${client.intlGet(guildId, 'commandSyntaxChinook')}`) {
@@ -118,6 +124,14 @@ module.exports = {
         else if (commandLowerCase.startsWith(`${prefix}${client.intlGet('en', 'commandSyntaxMarket')} `) ||
             commandLowerCase.startsWith(`${prefix}${client.intlGet(guildId, 'commandSyntaxMarket')} `)) {
             rustplus.sendInGameMessage(rustplus.getCommandMarket(command));
+        }
+        else if (matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet('en', 'commandSyntaxRecord')) ||
+            matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet(guildId, 'commandSyntaxRecord'))) {
+            rustplus.sendInGameMessage(getCommandRecord(rustplus, client, guildId, command));
+        }
+        else if (matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet('en', 'commandSyntaxWho')) ||
+            matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet(guildId, 'commandSyntaxWho'))) {
+            rustplus.sendInGameMessage(getCommandWho(rustplus, client, guildId, command));
         }
         else if (matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet('en', 'commandSyntaxLogs')) ||
             matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet(guildId, 'commandSyntaxLogs'))) {
@@ -294,4 +308,62 @@ function getCommandLanguage(client, guildId, command) {
 
     LanguageSettings.setLanguage(client, guildId, language);
     return client.intlGet(guildId, 'setBotLanguageConfigUpdated', { language: language });
+}
+function getCommandRecord(rustplus, client, guildId, command) {
+    const parsed = parseRecordCommand(command);
+    if (!parsed) return client.intlGet(guildId, 'recordUsage');
+
+    TeammateLanguageDatabase.recordManual(rustplus, parsed.steamId, parsed.name);
+    return client.intlGet(guildId, 'recordSaved', {
+        steamid: parsed.steamId,
+        name: parsed.name
+    });
+}
+
+function getCommandWho(rustplus, client, guildId, command) {
+    const args = command.trim().split(/\s+/);
+    const steamId = args[1];
+    if (!steamId) return client.intlGet(guildId, 'whoUsage');
+
+    const pseudonyms = TeammateLanguageDatabase.getKnownPseudonyms(rustplus, steamId);
+    if (pseudonyms.length === 0) {
+        return client.intlGet(guildId, 'whoNoPseudonyms', { steamid: steamId });
+    }
+
+    return client.intlGet(guildId, 'whoPseudonyms', {
+        steamid: steamId,
+        names: pseudonyms.map(entry => `${entry.name} (${entry.date}) [${entry.language}]`).join(', ')
+    });
+}
+
+function parseRecordCommand(command) {
+    const match = /^\S+\s+(\S+)\s+([\s\S]+)$/.exec(command.trim());
+    if (!match) return null;
+
+    const steamId = match[1].trim();
+    const name = match[2].trim();
+    if (!steamId || !name) return null;
+
+    return { steamId, name };
+}
+function getCommandCommands(client, guildId, command) {
+    const args = command.trim().split(/\s+/);
+    const commandName = args[1];
+
+    if (!commandName) {
+        return client.intlGet(guildId, 'commandsList', {
+            commands: CommandCatalog.getCommandNames().join(', ')
+        });
+    }
+
+    const commandDetails = CommandCatalog.getCommand(commandName);
+    if (!commandDetails) {
+        return client.intlGet(guildId, 'commandsUnknown', { command: commandName });
+    }
+
+    return client.intlGet(guildId, 'commandsUsage', {
+        command: commandDetails.name,
+        usage: commandDetails.usage,
+        description: commandDetails.description
+    });
 }
