@@ -26,9 +26,11 @@ module.exports = async function (rustplus, client, message) {
 
     const translation = await AutoTranslate.translateMessage(rustplus, message);
     if (translation) {
+        const translatedMessage = `[${translation.source || 'auto'}→${translation.target}] ${translation.translated}`;
         await DiscordMessages.sendTeamChatMessage(rustplus.guildId, {
             ...message,
-            message: `[${translation.source || 'auto'}→${translation.target}] ${translation.translated}`
+            message: translatedMessage
         });
+        rustplus.sendInGameMessage(translatedMessage);
     }
 }

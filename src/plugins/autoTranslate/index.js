@@ -5,8 +5,9 @@ const Translate = require('translate');
 const Languages = require('../../util/languages.js');
 const LanguageDetector = require('../../util/languageDetector.js');
 
-const DATA_DIR = Path.join(__dirname, '..', '..', '..', 'data');
-const SETTINGS_PATH = Path.join(DATA_DIR, 'autotranslate-settings.json');
+const CONFIG_DIR = Path.join(__dirname, '..', '..', '..', 'config');
+const SETTINGS_PATH = Path.join(CONFIG_DIR, 'autotranslate-settings.json');
+const LEGACY_SETTINGS_PATH = Path.join(__dirname, '..', '..', '..', 'data', 'autotranslate-settings.json');
 const DEFAULT_SETTINGS = { enabled: false, targets: ['en'] };
 
 function getSettings(rustplus) {
@@ -65,14 +66,22 @@ function resolveLanguage(value) {
 }
 
 function readAll() {
+    migrateLegacySettings();
     if (!Fs.existsSync(SETTINGS_PATH)) return {};
     try { return JSON.parse(Fs.readFileSync(SETTINGS_PATH, 'utf8')); }
     catch (e) { return {}; }
 }
 
 function writeAll(settings) {
-    if (!Fs.existsSync(DATA_DIR)) Fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (!Fs.existsSync(CONFIG_DIR)) Fs.mkdirSync(CONFIG_DIR, { recursive: true });
     Fs.writeFileSync(SETTINGS_PATH, `${JSON.stringify(settings, null, 4)}\n`);
+}
+
+function migrateLegacySettings() {
+    if (Fs.existsSync(SETTINGS_PATH) || !Fs.existsSync(LEGACY_SETTINGS_PATH)) return;
+
+    Fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    Fs.copyFileSync(LEGACY_SETTINGS_PATH, SETTINGS_PATH);
 }
 
 function getKey(rustplus) { return `${rustplus.guildId}:${rustplus.serverId}`; }

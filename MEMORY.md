@@ -128,7 +128,7 @@
 - To make global non-English configuration apply to existing default-English guild instances after restart, `DiscordBot.loadGuildIntl()` now promotes an instance language of `en` to `Config.general.language` when the config language is non-English, persists it to the instance file, and then loads that language for guild event/in-game text.
 
 ## Runtime logging toggle
-- User reported that log writing consumes too much disk. Added a `!logs` command that works both in-game and in Discord command chat; `!logs off` disables file/debug writes and `!logs on` enables them again. The setting persists in `logs/logging-settings.json`.
+- User reported that log writing consumes too much disk. Added a `!logs` command that works both in-game and in Discord command chat; `!logs off` disables file/debug writes and `!logs on` enables them again. The setting persists in `config/logging-settings.json`; legacy `logs/logging-settings.json` is migrated automatically when present.
 - The toggle leaves console output intact but suppresses Winston file writes, raw Rust+ WebSocket/event debug logs, marker history, and marker snapshot dumps while disabled.
 
 ## Deep Sea and raid-alert delivery fixes
@@ -154,4 +154,9 @@
 ## Generic language detection and autotranslate
 - Added reusable silent language detection in `src/util/languageDetector.js`. It detects major scripts such as Han, Japanese kana, Hangul, Cyrillic, Arabic, Thai, Greek, Hebrew, and Devanagari, plus a lightweight English word heuristic for short team-chat messages.
 - The teammate language CSV database now uses the shared detector instead of its local one-off language guesser, preserving existing non-`XX` language values as before.
-- Added `!autotranslate on [language[,language...]]` / `!autotranslate off` for in-game and Discord command channels. Settings persist per guild/server in `data/autotranslate-settings.json`. When enabled, team-chat messages relayed to Discord get an additional translated relay message. `!autotranslate on` defaults to English; two targets such as `en,zh` make English messages translate to Chinese and Chinese/non-English messages translate to English where detected.
+- Added `!autotranslate on [language[,language...]]` / `!autotranslate off` for in-game and Discord command channels. Settings persist per guild/server in `config/autotranslate-settings.json`; legacy `data/autotranslate-settings.json` is migrated automatically when present. When enabled, team-chat messages get an additional translated Discord relay message and are repeated back into Rust team chat. `!autotranslate on` defaults to English; two targets such as `en,zh` make English messages translate to Chinese and Chinese/non-English messages translate to English where detected.
+
+## Config path cleanup and autotranslate delivery
+- Runtime settings now live under `config/`: `config/logging-settings.json` for `!logs` and `config/autotranslate-settings.json` for `!autotranslate`, with automatic copy-forward from the old `logs/`/`data/` locations.
+- The teammate SteamID/nickname/language CSV database remains data, not config: per-guild/server CSV files are under `data/teammate-language-database/<guildId>-<serverId>.csv`.
+- Autotranslate now posts translations both to the Discord team-chat relay and back into Rust team chat, so `!autotranslate on en,zh` should repeat Chinese as English and English as Chinese in-game.
