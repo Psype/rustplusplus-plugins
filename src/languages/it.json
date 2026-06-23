@@ -808,5 +808,8 @@
     "logsDisabled": "Il logging su file è ora disabilitato. L’output console continuerà.",
     "logsCurrentlyEnabled": "Il logging su file è attualmente abilitato.",
     "logsCurrentlyDisabled": "Il logging su file è attualmente disabilitato. L’output console resta attivo.",
-    "raidAlarmDestroyedAt": "{item} distrutto a {location}."
+    "raidAlarmDestroyedAt": "{item} distrutto a {location}.",
+    "languageCurrentlySet": "La lingua attuale del bot è {language}. Lingue supportate: {languages}.",
+    "languageNotSupportedWithList": "La lingua {language} non è supportata. Lingue supportate: {languages}.",
+    "setBotLanguageConfigUpdated": "Lingua del bot impostata su: {language}. L’istanza del server Discord e il file di configurazione sono stati aggiornati."
 }

@@ -808,5 +808,8 @@
     "logsDisabled": "La journalisation fichier est maintenant désactivée. La sortie console continue.",
     "logsCurrentlyEnabled": "La journalisation fichier est actuellement activée.",
     "logsCurrentlyDisabled": "La journalisation fichier est actuellement désactivée. La sortie console reste activée.",
-    "raidAlarmDestroyedAt": "{item} détruit à {location}."
+    "raidAlarmDestroyedAt": "{item} détruit à {location}.",
+    "languageCurrentlySet": "La langue actuelle du bot est {language}. Langues prises en charge : {languages}.",
+    "languageNotSupportedWithList": "La langue {language} n’est pas prise en charge. Langues prises en charge : {languages}.",
+    "setBotLanguageConfigUpdated": "Langue du bot définie sur : {language}. L’instance de guilde et le fichier de configuration ont été mis à jour."
 }

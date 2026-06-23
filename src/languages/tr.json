@@ -808,5 +808,8 @@
     "logsDisabled": "Dosya günlükleri artık devre dışı. Konsol çıktısı devam edecek.",
     "logsCurrentlyEnabled": "Dosya günlükleri şu anda etkin.",
     "logsCurrentlyDisabled": "Dosya günlükleri şu anda devre dışı. Konsol çıktısı hâlâ etkin.",
-    "raidAlarmDestroyedAt": "{item}, {location} konumunda yok edildi."
+    "raidAlarmDestroyedAt": "{item}, {location} konumunda yok edildi.",
+    "languageCurrentlySet": "Botun mevcut dili {language}. Desteklenen diller: {languages}.",
+    "languageNotSupportedWithList": "{language} dili desteklenmiyor. Desteklenen diller: {languages}.",
+    "setBotLanguageConfigUpdated": "Bot dili {language} olarak ayarlandı. Sunucu örneği ve yapılandırma dosyası güncellendi."
 }

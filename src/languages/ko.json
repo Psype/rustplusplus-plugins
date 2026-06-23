@@ -808,5 +808,8 @@
     "logsDisabled": "파일 로그가 비활성화되었습니다. 콘솔 출력은 계속됩니다.",
     "logsCurrentlyEnabled": "파일 로그가 현재 활성화되어 있습니다.",
     "logsCurrentlyDisabled": "파일 로그가 현재 비활성화되어 있습니다. 콘솔 출력은 계속 활성화되어 있습니다.",
-    "raidAlarmDestroyedAt": "{item} 이(가) {location}에서 파괴되었습니다."
+    "raidAlarmDestroyedAt": "{item} 이(가) {location}에서 파괴되었습니다.",
+    "languageCurrentlySet": "현재 봇 언어는 {language}입니다. 지원 언어: {languages}.",
+    "languageNotSupportedWithList": "{language} 언어는 지원되지 않습니다. 지원 언어: {languages}.",
+    "setBotLanguageConfigUpdated": "봇 언어를 {language}(으)로 설정했습니다. 길드 인스턴스와 설정 파일이 업데이트되었습니다."
 }

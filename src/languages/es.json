@@ -808,5 +808,8 @@
     "logsDisabled": "El registro en archivo está desactivado. La salida de consola continuará.",
     "logsCurrentlyEnabled": "El registro en archivo está actualmente activado.",
     "logsCurrentlyDisabled": "El registro en archivo está actualmente desactivado. La salida de consola sigue activada.",
-    "raidAlarmDestroyedAt": "{item} destruido en {location}."
+    "raidAlarmDestroyedAt": "{item} destruido en {location}.",
+    "languageCurrentlySet": "El idioma actual del bot es {language}. Idiomas compatibles: {languages}.",
+    "languageNotSupportedWithList": "El idioma {language} no es compatible. Idiomas compatibles: {languages}.",
+    "setBotLanguageConfigUpdated": "Idioma del bot establecido en: {language}. Se actualizaron la instancia del servidor y el archivo de configuración."
 }

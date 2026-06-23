@@ -357,6 +357,7 @@ In-Game Command | Description
 [**events**](commands.md#events) | Get recent events.
 [**heli**](commands.md#heli) | Get information about Patrol Helicopter (Location, time since last downed, time since last on map).
 [**large**](commands.md#large) | Get information about Large Oil Rig (Time till crate unlocks, time since last trigger).
+[**language**](commands.md#language) | Show or change the bot language for this server and config file.
 [**leader**](commands.md#leader-1) | Give/Take the Team Leadership.
 [**marker**](commands.md#marker) | Set custom markers anywhere on the map.
 [**market**](commands.md#market-ingame) | Search for items in vending machines or subscribe/unsubscribe to items.
@@ -490,6 +491,14 @@ In-Game Command | Description
 <br>Command: `!large`
 
 ![In-Game Command large Image](images/ingame_commands/large_ingame.png)
+
+
+## **language**
+
+> **Show or change the bot language.** This command works from in-game team chat and from Discord command chat with the configured prefix. It updates the current guild instance immediately and also rewrites the `config/index.js` language fallback, so switching back to English is `!language en`. If `RPP_LANGUAGE` is set in the environment, that environment variable still overrides the config file on restart.
+<br>Command: `!language` - Show the current language and supported language codes.
+<br>Command: `!language en` - Change this guild and the config fallback to English.
+<br>Command: `!language zh` - Change this guild and the config fallback to Simplified Chinese.
 
 
 ## **leader**

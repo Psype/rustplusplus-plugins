@@ -822,5 +822,8 @@
     "logsDisabled": "File logging is now disabled. Console output will continue.",
     "logsCurrentlyEnabled": "File logging is currently enabled.",
     "logsCurrentlyDisabled": "File logging is currently disabled. Console output is still enabled.",
-    "raidAlarmDestroyedAt": "{item} destroyed at {location}."
+    "raidAlarmDestroyedAt": "{item} destroyed at {location}.",
+    "languageCurrentlySet": "Current bot language is {language}. Supported languages: {languages}.",
+    "languageNotSupportedWithList": "The language {language} is not supported. Supported languages: {languages}.",
+    "setBotLanguageConfigUpdated": "Set the bot language to: {language}. The guild instance and config file were updated."
 }

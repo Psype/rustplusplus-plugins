@@ -808,5 +808,8 @@
     "logsDisabled": "Filloggning är nu inaktiverad. Konsolutskrift fortsätter.",
     "logsCurrentlyEnabled": "Filloggning är för närvarande aktiverad.",
     "logsCurrentlyDisabled": "Filloggning är för närvarande inaktiverad. Konsolutskrift är fortfarande aktiv.",
-    "raidAlarmDestroyedAt": "{item} förstörd vid {location}."
+    "raidAlarmDestroyedAt": "{item} förstörd vid {location}.",
+    "languageCurrentlySet": "Botens aktuella språk är {language}. Språk som stöds: {languages}.",
+    "languageNotSupportedWithList": "Språket {language} stöds inte. Språk som stöds: {languages}.",
+    "setBotLanguageConfigUpdated": "Botens språk har ställts in till: {language}. Guild-instansen och konfigurationsfilen har uppdaterats."
 }

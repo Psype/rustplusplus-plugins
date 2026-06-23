@@ -808,5 +808,8 @@
     "logsDisabled": "Logowanie do pliku jest wyłączone. Wyjście konsoli pozostanie aktywne.",
     "logsCurrentlyEnabled": "Logowanie do pliku jest obecnie włączone.",
     "logsCurrentlyDisabled": "Logowanie do pliku jest obecnie wyłączone. Wyjście konsoli nadal jest aktywne.",
-    "raidAlarmDestroyedAt": "{item} zniszczono w {location}."
+    "raidAlarmDestroyedAt": "{item} zniszczono w {location}.",
+    "languageCurrentlySet": "Obecny język bota to {language}. Obsługiwane języki: {languages}.",
+    "languageNotSupportedWithList": "Język {language} nie jest obsługiwany. Obsługiwane języki: {languages}.",
+    "setBotLanguageConfigUpdated": "Ustawiono język bota na: {language}. Zaktualizowano instancję gildii i plik konfiguracji."
 }

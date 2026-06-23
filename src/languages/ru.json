@@ -808,5 +808,8 @@
     "logsDisabled": "Запись логов в файл отключена. Вывод в консоль продолжится.",
     "logsCurrentlyEnabled": "Запись логов в файл сейчас включена.",
     "logsCurrentlyDisabled": "Запись логов в файл сейчас отключена. Вывод в консоль остаётся включённым.",
-    "raidAlarmDestroyedAt": "{item} уничтожен в {location}."
+    "raidAlarmDestroyedAt": "{item} уничтожен в {location}.",
+    "languageCurrentlySet": "Текущий язык бота: {language}. Поддерживаемые языки: {languages}.",
+    "languageNotSupportedWithList": "Язык {language} не поддерживается. Поддерживаемые языки: {languages}.",
+    "setBotLanguageConfigUpdated": "Язык бота установлен на: {language}. Экземпляр гильдии и файл конфигурации обновлены."
 }

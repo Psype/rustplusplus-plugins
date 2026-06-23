@@ -134,3 +134,7 @@
 ## Deep Sea and raid-alert delivery fixes
 - Deep Sea open/close notifications are no longer suppressed as first-poll events, so a restart while Deep Sea is active should still be able to post the Deep Sea event into Discord when detected.
 - Raid alarm plugin messages now translate the standard `You're getting raided!` title through `baseIsUnderAttack` and translate `X destroyed at Y` payloads through `raidAlarmDestroyedAt`; item names from the plugin remain as provided by FCM because the payload does not include stable item IDs.
+
+## Runtime language command
+- User found that changing `Config.general.language` back to `en` is not enough when a guild instance already persisted another language. Added `!language <code>` for in-game and Discord command chat so the live guild instance, RustPlus runtime settings, guild intl cache, bot intl cache, and `config/index.js` fallback are updated together.
+- `!language` with no argument reports the current guild language and supported language codes. `!language en` is the intended way to switch a server back to English without manually editing instance JSON. If `RPP_LANGUAGE` is set in the environment, it still overrides the config file fallback on restart.

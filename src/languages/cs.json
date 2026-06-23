@@ -808,5 +808,8 @@
     "logsDisabled": "Souborové logování je nyní vypnuto. Výstup do konzole bude pokračovat.",
     "logsCurrentlyEnabled": "Souborové logování je aktuálně zapnuto.",
     "logsCurrentlyDisabled": "Souborové logování je aktuálně vypnuto. Výstup do konzole zůstává zapnutý.",
-    "raidAlarmDestroyedAt": "{item} zničeno na {location}."
+    "raidAlarmDestroyedAt": "{item} zničeno na {location}.",
+    "languageCurrentlySet": "Aktuální jazyk bota je {language}. Podporované jazyky: {languages}.",
+    "languageNotSupportedWithList": "Jazyk {language} není podporován. Podporované jazyky: {languages}.",
+    "setBotLanguageConfigUpdated": "Jazyk bota nastaven na: {language}. Instance guildy a konfigurační soubor byly aktualizovány."
 }

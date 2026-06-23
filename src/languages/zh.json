@@ -822,5 +822,8 @@
     "logsDisabled": "文件日志已禁用。控制台输出仍会继续。",
     "logsCurrentlyEnabled": "文件日志当前已启用。",
     "logsCurrentlyDisabled": "文件日志当前已禁用。控制台输出仍然启用。",
-    "raidAlarmDestroyedAt": "{item} 已在 {location} 被摧毁。"
+    "raidAlarmDestroyedAt": "{item} 已在 {location} 被摧毁。",
+    "languageCurrentlySet": "当前机器人语言为 {language}。支持的语言：{languages}。",
+    "languageNotSupportedWithList": "不支持语言 {language}。支持的语言：{languages}。",
+    "setBotLanguageConfigUpdated": "已将机器人语言设置为：{language}。已更新服务器实例和配置文件。"
 }

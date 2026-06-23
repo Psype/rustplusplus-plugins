@@ -808,5 +808,8 @@
     "logsDisabled": "Datei-Logging ist jetzt deaktiviert. Konsolenausgabe läuft weiter.",
     "logsCurrentlyEnabled": "Datei-Logging ist derzeit aktiviert.",
     "logsCurrentlyDisabled": "Datei-Logging ist derzeit deaktiviert. Konsolenausgabe bleibt aktiv.",
-    "raidAlarmDestroyedAt": "{item} bei {location} zerstört."
+    "raidAlarmDestroyedAt": "{item} bei {location} zerstört.",
+    "languageCurrentlySet": "Die aktuelle Bot-Sprache ist {language}. Unterstützte Sprachen: {languages}.",
+    "languageNotSupportedWithList": "Die Sprache {language} wird nicht unterstützt. Unterstützte Sprachen: {languages}.",
+    "setBotLanguageConfigUpdated": "Bot-Sprache auf {language} gesetzt. Die Guild-Instanz und die Konfigurationsdatei wurden aktualisiert."
 }

@@ -21,6 +21,7 @@
 const DiscordMessages = require('../discordTools/discordMessages.js');
 const DiscordTools = require('../discordTools/discordTools');
 const LoggingSettings = require('../util/loggingSettings.js');
+const LanguageSettings = require('../util/languageSettings.js');
 
 module.exports = {
     discordCommandHandler: async function (rustplus, client, message) {
@@ -84,6 +85,10 @@ module.exports = {
         else if (commandLowerCase === `${prefix}${client.intlGet('en', 'commandSyntaxHeli')}` ||
             commandLowerCase === `${prefix}${client.intlGet(guildId, 'commandSyntaxHeli')}`) {
             response = rustplus.getCommandHeli();
+        }
+        else if (matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet('en', 'commandSyntaxLanguage')) ||
+            matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet(guildId, 'commandSyntaxLanguage'))) {
+            response = getCommandLanguage(client, guildId, command);
         }
         else if (commandLowerCase === `${prefix}${client.intlGet('en', 'commandSyntaxLarge')}` ||
             commandLowerCase === `${prefix}${client.intlGet(guildId, 'commandSyntaxLarge')}`) {
@@ -249,4 +254,27 @@ function getCommandLogs(client, guildId, command) {
     }
 
     return client.intlGet(guildId, LoggingSettings.isEnabled() ? 'logsCurrentlyEnabled' : 'logsCurrentlyDisabled');
+}
+
+function getCommandLanguage(client, guildId, command) {
+    const args = command.trim().split(/\s+/);
+    const language = LanguageSettings.normalizeLanguage(args[1] || '');
+
+    if (language === '') {
+        const instance = client.getInstance(guildId);
+        return client.intlGet(guildId, 'languageCurrentlySet', {
+            language: instance.generalSettings.language,
+            languages: LanguageSettings.getSupportedLanguages().join(', ')
+        });
+    }
+
+    if (!LanguageSettings.isSupportedLanguage(language)) {
+        return client.intlGet(guildId, 'languageNotSupportedWithList', {
+            language: language,
+            languages: LanguageSettings.getSupportedLanguages().join(', ')
+        });
+    }
+
+    LanguageSettings.setLanguage(client, guildId, language);
+    return client.intlGet(guildId, 'setBotLanguageConfigUpdated', { language: language });
 }
