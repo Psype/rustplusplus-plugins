@@ -360,6 +360,7 @@ Command | Description
 [**deepsea**](commands.md#deepsea) | Track Deep Sea activity from the Rust+ map marker when exposed by the server.
 [**events**](commands.md#events) | Get recent events.
 [**heli**](commands.md#heli) | Get information about Patrol Helicopter (Location, time since last downed, time since last on map).
+[**hidden vendors**](commands.md#hidden-vendors) | Show former vendor locations grouped by grid; `!hvw` filters short-lived water suspects and `!hvt` sorts by shortest broadcast time.
 [**large**](commands.md#large) | Get information about Large Oil Rig (Time till crate unlocks, time since last trigger).
 [**language**](commands.md#language) | Show or change the bot language for this server and config file.
 [**leader**](commands.md#leader-1) | Give/Take the Team Leadership.
@@ -502,6 +503,14 @@ Command | Description
 
 ![In-Game Command heli Image](images/ingame_commands/heli_ingame.png)
 
+
+
+## **hidden vendors**
+
+> **Show former vendor locations grouped by grid.** The bot records each vending-machine marker seen for the current server/map signature, keeps it after it disappears, and `!hv` reports former vendors that are not currently broadcasting. `!hvw` uses the same database but only includes short-lived former vendors, which are the best water-stash suspects. `!hvt` shows hidden vendors from shortest tracked broadcast time upward, helping find vendors that were visible for the least polling cycles. Vendors that never broadcast through Rust+ cannot be recovered. Works from in-game team chat and from the Discord commands channel.
+<br>Command: `!hv`
+<br>Command: `!hvw`
+<br>Command: `!hvt`
 
 ## **large**
 

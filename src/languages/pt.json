@@ -841,5 +841,17 @@
     "autotranslateUsage": "Uso: !autotranslate on [idioma[,idioma...]] ou !autotranslate off.",
     "autotranslateLanguageNotFound": "Não foi encontrado nenhum idioma de destino suportado para a tradução automática.",
     "autotranslateEnabled": "Tradução automática ativada para: {languages}.",
-    "autotranslateDisabled": "Tradução automática desativada."
+    "autotranslateDisabled": "Tradução automática desativada.",
+    "commandSyntaxHiddenVendors": "hv",
+    "hiddenVendorsNone": "Nenhuma máquina antiga registrada para este servidor/mapa.",
+    "hiddenVendorsList": "{vendors}{more}",
+    "hiddenVendorsMore": "+{count} mais.",
+    "hiddenVendorGridEntry": "{count} máquinas antigas detectadas em {location}",
+    "commandSyntaxHiddenWaterVendors": "hvw",
+    "hiddenWaterVendorsNone": "Nenhuma máquina antiga suspeita de estar na água registrada para este servidor/mapa.",
+    "hiddenWaterVendorsList": "{vendors}{more}",
+    "commandSyntaxHiddenVendingTime": "hvt",
+    "hiddenVendingTimeNone": "Nenhuma máquina antiga com tempo de transmissão rastreado para este servidor/mapa.",
+    "hiddenVendingTimeList": "{vendors}{more}",
+    "hiddenVendingTimeEntry": "{count} máquinas antigas detectadas em {location} após {polls} sondagens"
 }

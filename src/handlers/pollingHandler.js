@@ -20,6 +20,7 @@
 
 const Fs = require('fs');
 const DeepSeaHandler = require('./deepSeaHandler.js');
+const HiddenVendors = require('../plugins/hiddenVendors');
 const EventDebugLogger = require('../util/eventDebugLogger.js');
 const LoggingSettings = require('../util/loggingSettings.js');
 const Info = require('../structures/Info');
@@ -66,6 +67,7 @@ module.exports = {
         await SmartSwitchHandler.handler(rustplus, client, time.time);
         TimeHandler.handler(rustplus, client, time.time);
         await VendingMachines.handler(rustplus, client, mapMarkers.mapMarkers);
+        HiddenVendors.recordVendors(rustplus, mapMarkers.mapMarkers);
 
         rustplus.time.updateTime(time.time);
         rustplus.info.updateInfo(info.info);

@@ -85,7 +85,7 @@ module.exports = async (client, interaction) => {
         if (rustplus) {
             rustplus.generalSettings.trademark = interaction.values[0];
             rustplus.trademarkString = (instance.generalSettings.trademark === 'NOT SHOWING') ?
-                '' : `${instance.generalSettings.trademark} | `;
+                '' : '[BOT] ';
         }
 
         client.log(client.intlGet(null, 'infoCap'), client.intlGet(null, 'selectMenuValueChange', {

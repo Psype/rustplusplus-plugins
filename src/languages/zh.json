@@ -841,5 +841,17 @@
     "autotranslateUsage": "用法：!autotranslate on [语言[,语言...]] 或 !autotranslate off。",
     "autotranslateLanguageNotFound": "找不到任何支持的自动翻译目标语言。",
     "autotranslateEnabled": "已启用自动翻译，目标语言：{languages}。",
-    "autotranslateDisabled": "已禁用自动翻译。"
+    "autotranslateDisabled": "已禁用自动翻译。",
+    "commandSyntaxHiddenVendors": "hv",
+    "hiddenVendorsNone": "此服务器/地图没有记录已消失的售货机。",
+    "hiddenVendorsList": "{vendors}{more}",
+    "hiddenVendorsMore": "另有 {count} 个。",
+    "hiddenVendorGridEntry": "在 {location} 检测到 {count} 个已消失的售货机",
+    "commandSyntaxHiddenWaterVendors": "hvw",
+    "hiddenWaterVendorsNone": "此服务器/地图没有记录疑似水中且已消失的售货机。",
+    "hiddenWaterVendorsList": "{vendors}{more}",
+    "commandSyntaxHiddenVendingTime": "hvt",
+    "hiddenVendingTimeNone": "此服务器/地图没有记录广播时长的已消失售货机。",
+    "hiddenVendingTimeList": "{vendors}{more}",
+    "hiddenVendingTimeEntry": "在 {location} 检测到 {count} 个已消失的售货机，广播了 {polls} 次轮询"
 }

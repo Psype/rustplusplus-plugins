@@ -841,5 +841,17 @@
     "autotranslateUsage": "Použití: !autotranslate on [jazyk[,jazyk...]] nebo !autotranslate off.",
     "autotranslateLanguageNotFound": "Nebyl nalezen žádný podporovaný cílový jazyk pro automatický překlad.",
     "autotranslateEnabled": "Automatický překlad zapnut pro: {languages}.",
-    "autotranslateDisabled": "Automatický překlad vypnut."
+    "autotranslateDisabled": "Automatický překlad vypnut.",
+    "commandSyntaxHiddenVendors": "hv",
+    "hiddenVendorsNone": "Pro tento server/mapu nejsou zaznamenány žádné bývalé automaty.",
+    "hiddenVendorsList": "{vendors}{more}",
+    "hiddenVendorsMore": "+{count} dalších.",
+    "hiddenVendorGridEntry": "{count} bývalých automatů zjištěno v {location}",
+    "commandSyntaxHiddenWaterVendors": "hvw",
+    "hiddenWaterVendorsNone": "Pro tento server/mapu nejsou zaznamenány žádné bývalé automaty podezřelé z vody.",
+    "hiddenWaterVendorsList": "{vendors}{more}",
+    "commandSyntaxHiddenVendingTime": "hvt",
+    "hiddenVendingTimeNone": "Pro tento server/mapu nejsou žádné bývalé automaty se sledovanou dobou vysílání.",
+    "hiddenVendingTimeList": "{vendors}{more}",
+    "hiddenVendingTimeEntry": "{count} bývalých automatů zjištěno v {location} po {polls} dotazech"
 }

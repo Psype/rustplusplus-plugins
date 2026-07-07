@@ -841,5 +841,17 @@
     "autotranslateUsage": "Användning: !autotranslate on [språk[,språk...]] eller !autotranslate off.",
     "autotranslateLanguageNotFound": "Kunde inte hitta något målsspråk som stöds för automatisk översättning.",
     "autotranslateEnabled": "Automatisk översättning aktiverad för: {languages}.",
-    "autotranslateDisabled": "Automatisk översättning inaktiverad."
+    "autotranslateDisabled": "Automatisk översättning inaktiverad.",
+    "commandSyntaxHiddenVendors": "hv",
+    "hiddenVendorsNone": "Inga tidigare varuautomater registrerade för den här servern/kartan.",
+    "hiddenVendorsList": "{vendors}{more}",
+    "hiddenVendorsMore": "+{count} till.",
+    "hiddenVendorGridEntry": "{count} tidigare varuautomater upptäckta i {location}",
+    "commandSyntaxHiddenWaterVendors": "hvw",
+    "hiddenWaterVendorsNone": "Inga vattenmisstänkta tidigare varuautomater registrerade för den här servern/kartan.",
+    "hiddenWaterVendorsList": "{vendors}{more}",
+    "commandSyntaxHiddenVendingTime": "hvt",
+    "hiddenVendingTimeNone": "Inga tidigare varuautomater med spårad sändningstid registrerade för den här servern/kartan.",
+    "hiddenVendingTimeList": "{vendors}{more}",
+    "hiddenVendingTimeEntry": "{count} tidigare varuautomater upptäckta i {location} efter {polls} pollningar"
 }

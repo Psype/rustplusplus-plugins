@@ -841,5 +841,17 @@
     "autotranslateUsage": "Kullanım: !autotranslate on [dil[,dil...]] veya !autotranslate off.",
     "autotranslateLanguageNotFound": "Otomatik çeviri için desteklenen hedef dil bulunamadı.",
     "autotranslateEnabled": "Otomatik çeviri şu hedefler için açıldı: {languages}.",
-    "autotranslateDisabled": "Otomatik çeviri kapatıldı."
+    "autotranslateDisabled": "Otomatik çeviri kapatıldı.",
+    "commandSyntaxHiddenVendors": "hv",
+    "hiddenVendorsNone": "Bu sunucu/harita için kayıtlı eski otomat yok.",
+    "hiddenVendorsList": "{vendors}{more}",
+    "hiddenVendorsMore": "+{count} daha.",
+    "hiddenVendorGridEntry": "{location} konumunda {count} eski otomat tespit edildi",
+    "commandSyntaxHiddenWaterVendors": "hvw",
+    "hiddenWaterVendorsNone": "Bu sunucu/harita için su şüpheli eski otomat kaydı yok.",
+    "hiddenWaterVendorsList": "{vendors}{more}",
+    "commandSyntaxHiddenVendingTime": "hvt",
+    "hiddenVendingTimeNone": "Bu sunucu/harita için yayın süresi izlenen eski otomat yok.",
+    "hiddenVendingTimeList": "{vendors}{more}",
+    "hiddenVendingTimeEntry": "{location} konumunda {polls} yoklamadan sonra {count} eski otomat tespit edildi"
 }

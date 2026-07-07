@@ -25,8 +25,7 @@ module.exports = {
         const guildId = rustplus.guildId;
         const generalSettings = rustplus.generalSettings;
         const commandDelayMs = parseInt(generalSettings.commandDelay) * 1000;
-        const trademark = generalSettings.trademark;
-        const trademarkString = (trademark === 'NOT SHOWING') ? '' : `${trademark} | `;
+        const trademarkString = (generalSettings.trademark === 'NOT SHOWING') ? '' : '[BOT] ';
         const messageMaxLength = Constants.MAX_LENGTH_TEAM_MESSAGE - trademarkString.length;
 
         /* Time to write a message from the queue. If message === null, that means that its a timer call. */

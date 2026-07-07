@@ -2111,8 +2111,7 @@ class RustPlus extends RustPlusLib {
             return null;
         }
 
-        const trademark = this.generalSettings.trademark;
-        const trademarkString = (trademark === 'NOT SHOWING') ? '' : `${trademark} | `;
+        const trademarkString = (this.generalSettings.trademark === 'NOT SHOWING') ? '' : '[BOT] ';
         const messageMaxLength = Constants.MAX_LENGTH_TEAM_MESSAGE - trademarkString.length;
         const leftLength = `...xxx ${Client.client.intlGet(this.guildId, 'more')}.`.length;
 
