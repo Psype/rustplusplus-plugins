@@ -24,6 +24,7 @@ const SmartSwitchHandler = require('./smartSwitchHandler.js');
 const LoggingSettings = require('../util/loggingSettings.js');
 const LanguageSettings = require('../util/languageSettings.js');
 const TeammateLanguageDatabase = require('../plugins/teammateLanguageDatabase');
+const HiddenVendors = require('../plugins/hiddenVendors');
 const CommandCatalog = require('../util/commandCatalog.js');
 
 module.exports = {
@@ -98,6 +99,18 @@ module.exports = {
         else if (commandLowerCase.startsWith(`${prefix}${client.intlGet('en', 'commandSyntaxEvents')}`) ||
             commandLowerCase.startsWith(`${prefix}${client.intlGet(guildId, 'commandSyntaxEvents')}`)) {
             rustplus.sendInGameMessage(rustplus.getCommandEvents(command));
+        }
+        else if (matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet('en', 'commandSyntaxHiddenVendors')) ||
+            matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet(guildId, 'commandSyntaxHiddenVendors'))) {
+            rustplus.sendInGameMessage(HiddenVendors.getCommandHiddenVendors(rustplus, client));
+        }
+        else if (matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet('en', 'commandSyntaxHiddenWaterVendors')) ||
+            matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet(guildId, 'commandSyntaxHiddenWaterVendors'))) {
+            rustplus.sendInGameMessage(HiddenVendors.getCommandHiddenWaterVendors(rustplus, client));
+        }
+        else if (matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet('en', 'commandSyntaxHiddenVendingTime')) ||
+            matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet(guildId, 'commandSyntaxHiddenVendingTime'))) {
+            rustplus.sendInGameMessage(HiddenVendors.getCommandHiddenVendingTime(rustplus, client));
         }
         else if (commandLowerCase === `${prefix}${client.intlGet('en', 'commandSyntaxHeli')}` ||
             commandLowerCase === `${prefix}${client.intlGet(guildId, 'commandSyntaxHeli')}`) {

@@ -841,5 +841,17 @@
     "autotranslateUsage": "Verwendung: !autotranslate on [Sprache[,Sprache...]] oder !autotranslate off.",
     "autotranslateLanguageNotFound": "Keine unterstützte Zielsprache für die automatische Übersetzung gefunden.",
     "autotranslateEnabled": "Automatische Übersetzung aktiviert für: {languages}.",
-    "autotranslateDisabled": "Automatische Übersetzung deaktiviert."
+    "autotranslateDisabled": "Automatische Übersetzung deaktiviert.",
+    "commandSyntaxHiddenVendors": "hv",
+    "hiddenVendorsNone": "Keine ehemaligen Verkaufsautomaten für diesen Server/diese Karte gespeichert.",
+    "hiddenVendorsList": "{vendors}{more}",
+    "hiddenVendorsMore": "+{count} weitere.",
+    "hiddenVendorGridEntry": "{count} ehemalige Verkaufsautomaten in {location} erkannt",
+    "commandSyntaxHiddenWaterVendors": "hvw",
+    "hiddenWaterVendorsNone": "Keine wasserverdächtigen ehemaligen Verkaufsautomaten für diesen Server/diese Karte gespeichert.",
+    "hiddenWaterVendorsList": "{vendors}{more}",
+    "commandSyntaxHiddenVendingTime": "hvt",
+    "hiddenVendingTimeNone": "Keine ehemaligen Verkaufsautomaten mit erfasster Sendezeit für diesen Server/diese Karte.",
+    "hiddenVendingTimeList": "{vendors}{more}",
+    "hiddenVendingTimeEntry": "{count} ehemalige Verkaufsautomaten in {location} nach {polls} Abfragen erkannt"
 }

@@ -841,5 +841,17 @@
     "autotranslateUsage": "Użycie: !autotranslate on [język[,język...]] lub !autotranslate off.",
     "autotranslateLanguageNotFound": "Nie znaleziono obsługiwanego języka docelowego dla automatycznego tłumaczenia.",
     "autotranslateEnabled": "Automatyczne tłumaczenie włączone dla: {languages}.",
-    "autotranslateDisabled": "Automatyczne tłumaczenie wyłączone."
+    "autotranslateDisabled": "Automatyczne tłumaczenie wyłączone.",
+    "commandSyntaxHiddenVendors": "hv",
+    "hiddenVendorsNone": "Brak zapisanych dawnych automatów dla tego serwera/mapy.",
+    "hiddenVendorsList": "{vendors}{more}",
+    "hiddenVendorsMore": "+{count} więcej.",
+    "hiddenVendorGridEntry": "{count} dawnych automatów wykryto w {location}",
+    "commandSyntaxHiddenWaterVendors": "hvw",
+    "hiddenWaterVendorsNone": "Brak zapisanych dawnych automatów podejrzanych o wodę dla tego serwera/mapy.",
+    "hiddenWaterVendorsList": "{vendors}{more}",
+    "commandSyntaxHiddenVendingTime": "hvt",
+    "hiddenVendingTimeNone": "Brak dawnych automatów ze śledzonym czasem nadawania dla tego serwera/mapy.",
+    "hiddenVendingTimeList": "{vendors}{more}",
+    "hiddenVendingTimeEntry": "{count} dawnych automatów wykryto w {location} po {polls} odpytywaniach"
 }

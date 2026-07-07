@@ -841,5 +841,17 @@
     "autotranslateUsage": "Uso: !autotranslate on [idioma[,idioma...]] o !autotranslate off.",
     "autotranslateLanguageNotFound": "No se encontró ningún idioma de destino compatible para la traducción automática.",
     "autotranslateEnabled": "Traducción automática activada para: {languages}.",
-    "autotranslateDisabled": "Traducción automática desactivada."
+    "autotranslateDisabled": "Traducción automática desactivada.",
+    "commandSyntaxHiddenVendors": "hv",
+    "hiddenVendorsNone": "No hay antiguos vendedores registrados para este servidor/mapa.",
+    "hiddenVendorsList": "{vendors}{more}",
+    "hiddenVendorsMore": "+{count} más.",
+    "hiddenVendorGridEntry": "{count} antiguos vendedores detectados en {location}",
+    "commandSyntaxHiddenWaterVendors": "hvw",
+    "hiddenWaterVendorsNone": "No hay antiguos vendedores sospechosos de estar en agua para este servidor/mapa.",
+    "hiddenWaterVendorsList": "{vendors}{more}",
+    "commandSyntaxHiddenVendingTime": "hvt",
+    "hiddenVendingTimeNone": "No hay antiguos vendedores con tiempo de emisión registrado para este servidor/mapa.",
+    "hiddenVendingTimeList": "{vendors}{more}",
+    "hiddenVendingTimeEntry": "{count} antiguos vendedores detectados en {location} después de {polls} sondeos"
 }

@@ -23,6 +23,7 @@ const DiscordTools = require('../discordTools/discordTools');
 const LoggingSettings = require('../util/loggingSettings.js');
 const LanguageSettings = require('../util/languageSettings.js');
 const TeammateLanguageDatabase = require('../plugins/teammateLanguageDatabase');
+const HiddenVendors = require('../plugins/hiddenVendors');
 const CommandCatalog = require('../util/commandCatalog.js');
 
 module.exports = {
@@ -91,6 +92,18 @@ module.exports = {
         else if (commandLowerCase.startsWith(`${prefix}${client.intlGet('en', 'commandSyntaxEvents')}`) ||
             commandLowerCase.startsWith(`${prefix}${client.intlGet(guildId, 'commandSyntaxEvents')}`)) {
             response = rustplus.getCommandEvents(command);
+        }
+        else if (matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet('en', 'commandSyntaxHiddenVendors')) ||
+            matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet(guildId, 'commandSyntaxHiddenVendors'))) {
+            response = HiddenVendors.getCommandHiddenVendors(rustplus, client);
+        }
+        else if (matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet('en', 'commandSyntaxHiddenWaterVendors')) ||
+            matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet(guildId, 'commandSyntaxHiddenWaterVendors'))) {
+            response = HiddenVendors.getCommandHiddenWaterVendors(rustplus, client);
+        }
+        else if (matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet('en', 'commandSyntaxHiddenVendingTime')) ||
+            matchesCommandWithOptionalArgs(commandLowerCase, prefix, client.intlGet(guildId, 'commandSyntaxHiddenVendingTime'))) {
+            response = HiddenVendors.getCommandHiddenVendingTime(rustplus, client);
         }
         else if (commandLowerCase === `${prefix}${client.intlGet('en', 'commandSyntaxHeli')}` ||
             commandLowerCase === `${prefix}${client.intlGet(guildId, 'commandSyntaxHeli')}`) {

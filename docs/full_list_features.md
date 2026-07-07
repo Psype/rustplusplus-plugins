@@ -38,6 +38,7 @@
 - **deepsea** - `!deepsea` - Track Deep Sea activity from off-map vendor clusters and predict open/close windows.
 - **events** - `!events [event]` - Get recent events and event timing summaries.
 - **heli** - `!heli` - Get information regarding Patrol Helicopter.
+- **hidden vendors** - `!hv` / `!hvw` / `!hvt` - Show former vendor locations grouped by grid; `!hvw` filters short-lived water suspects and `!hvt` sorts by shortest broadcast time.
 - **language** - `!language [code]` - Show or change the bot language for this server.
 - **large** - `!large` - Get information regarding Large Oil Rig.
 - **leader** - `!leader [teammate]` - Transfer leadership.

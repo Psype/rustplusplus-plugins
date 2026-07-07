@@ -841,5 +841,17 @@
     "autotranslateUsage": "사용법: !autotranslate on [언어[,언어...]] 또는 !autotranslate off.",
     "autotranslateLanguageNotFound": "자동 번역에 사용할 지원 대상 언어를 찾을 수 없습니다.",
     "autotranslateEnabled": "자동 번역이 활성화되었습니다. 대상 언어: {languages}.",
-    "autotranslateDisabled": "자동 번역이 비활성화되었습니다."
+    "autotranslateDisabled": "자동 번역이 비활성화되었습니다.",
+    "commandSyntaxHiddenVendors": "hv",
+    "hiddenVendorsNone": "이 서버/맵에 기록된 이전 자판기가 없습니다.",
+    "hiddenVendorsList": "{vendors}{more}",
+    "hiddenVendorsMore": "+{count}개 더.",
+    "hiddenVendorGridEntry": "{location}에서 이전 자판기 {count}개 감지됨",
+    "commandSyntaxHiddenWaterVendors": "hvw",
+    "hiddenWaterVendorsNone": "이 서버/맵에 기록된 물속 의심 이전 자판기가 없습니다.",
+    "hiddenWaterVendorsList": "{vendors}{more}",
+    "commandSyntaxHiddenVendingTime": "hvt",
+    "hiddenVendingTimeNone": "이 서버/맵에 방송 시간이 추적된 이전 자판기가 없습니다.",
+    "hiddenVendingTimeList": "{vendors}{more}",
+    "hiddenVendingTimeEntry": "{location}에서 {polls}회 폴링 후 이전 자판기 {count}개 감지됨"
 }
