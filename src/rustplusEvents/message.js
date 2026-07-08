@@ -76,16 +76,6 @@ async function messageBroadcastTeamChanged(rustplus, client, message) {
 async function messageBroadcastTeamMessage(rustplus, client, message) {
     const instance = client.getInstance(rustplus.guildId);
     const steamId = message.broadcast.teamMessage.message.steamId.toString();
-    const sentByThisBot = rustplus.playerId !== undefined && rustplus.playerId !== null &&
-        steamId === rustplus.playerId.toString();
-
-    if (sentByThisBot) {
-        /* Delay inGameChatHandler */
-        clearTimeout(rustplus.inGameChatTimeout);
-        const commandDelayMs = parseInt(rustplus.generalSettings.commandDelay) * 1000;
-        rustplus.inGameChatTimeout = setTimeout(
-            InGameChatHandler.inGameChatHandler, commandDelayMs, rustplus, client);
-    }
 
     let tempName = message.broadcast.teamMessage.message.name;
     let tempMessage = message.broadcast.teamMessage.message.message;
@@ -101,11 +91,6 @@ async function messageBroadcastTeamMessage(rustplus, client, message) {
 
     TeammateLanguageDatabase.recordTeamMessage(rustplus, message.broadcast.teamMessage.message);
 
-    if (sentByThisBot) {
-        removeSentBotMessage(rustplus, message.broadcast.teamMessage.message.message);
-        return;
-    }
-
     if (instance.blacklist['steamIds'].includes(`${steamId}`)) {
         rustplus.log(client.intlGet(null, 'infoCap'), client.intlGet(null, `userPartOfBlacklistInGame`, {
             user: `${message.broadcast.teamMessage.message.name} (${steamId})`,
@@ -116,7 +101,14 @@ async function messageBroadcastTeamMessage(rustplus, client, message) {
     }
 
     if (rustplus.messagesSentByBot.includes(message.broadcast.teamMessage.message.message)) {
+        /* Echo of a queued bot message from Rust+; do not relay or parse it. */
         removeSentBotMessage(rustplus, message.broadcast.teamMessage.message.message);
+
+        /* Delay inGameChatHandler so command replies do not flood team chat. */
+        clearTimeout(rustplus.inGameChatTimeout);
+        const commandDelayMs = parseInt(rustplus.generalSettings.commandDelay) * 1000;
+        rustplus.inGameChatTimeout = setTimeout(
+            InGameChatHandler.inGameChatHandler, commandDelayMs, rustplus, client);
         return;
     }
 
