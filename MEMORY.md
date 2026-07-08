@@ -88,7 +88,7 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 ## Raid alarm plugin localization
 - Raid alarm plugin messages translate the standard `You're getting raided!` title through `baseIsUnderAttack` and translate `X destroyed at Y` payloads through `raidAlarmDestroyedAt`.
 - Item names from FCM/plugin payloads remain as provided because the payload does not include stable item IDs.
-- Bot-originated Rust team-chat broadcasts (matching the bot Rust+ player SteamID) should be treated as echoes of the bot's own queued messages and must not be relayed back through Discord/team-chat autotranslate or command handling. This prevents localized bot command replies such as `!hv` output from being translated by autotranslate.
+- Bot-originated Rust team-chat broadcasts should be identified by exact matches against `rustplus.messagesSentByBot`, not by SteamID, and must not be relayed back through Discord/team-chat autotranslate or command handling. This prevents localized bot command replies such as `!hv` output from being translated by autotranslate while still allowing the paired Rust+ SteamID to issue commands.
 - Hidden vendor tracking should exclude Deep Sea event vending-machine markers. Deep Sea vendors are NPC/event vendors, not player vending machines, and should not appear as temporary/water-suspect hidden vendors.
 - On successful Rust+ connection startup, the bot should announce `rustplusOperational` into Rust team chat after the first poll completes and `isOperational` becomes true.
 - Teammate death notifications should preserve a grid location whenever possible, falling back from the previous cached player position to the updated team payload position before using `spawn`.
