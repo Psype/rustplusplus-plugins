@@ -14,6 +14,20 @@ const DeepSeaHandler = require('../../handlers/deepSeaHandler.js');
 const DATA_DIR = Path.join(__dirname, '..', '..', '..', 'data', 'hidden-vendors');
 const MAX_COMMAND_RESULTS = 10;
 const WATER_SUSPECT_MAX_SEEN_POLLS = 2;
+/* Observed in docs/rust_event_rpp_bot.json Deep Sea Rust+ marker snapshots. */
+const KNOWN_DEEP_SEA_VENDOR_NAMES = new Set([
+    'attire shop',
+    'bandit weapons shop',
+    'main food shop',
+    'farming shop',
+    'weapons shop',
+    'boat vendor',
+    'fish exchange',
+    'fishing shop',
+    'medical shop',
+    'casino bar shopkeeper',
+    'shop keeper'
+]);
 
 function recordVendors(rustplus, mapMarkers) {
     if (!rustplus || !mapMarkers) return;
@@ -25,9 +39,7 @@ function recordVendors(rustplus, mapMarkers) {
     const currentKeys = new Set(currentVendors.map(getVendorKey));
     const database = readDatabase(rustplus);
 
-    for (const key of deepSeaVendorKeys) {
-        delete database.vendors[key];
-    }
+    pruneDeepSeaVendors(rustplus, database, deepSeaVendorKeys);
 
     database.guildId = rustplus.guildId;
     database.serverId = rustplus.serverId;
@@ -59,7 +71,7 @@ function getCommandHiddenWaterVendors(rustplus, client) {
 
 function getCommandHiddenVendingTime(rustplus, client) {
     const guildId = rustplus.guildId;
-    const database = readDatabase(rustplus);
+    const database = readPrunedDatabase(rustplus);
     const hidden = Object.values(database.vendors)
         .filter(vendor => !vendor.broadcasting)
         .filter(vendor => Number.isFinite(vendor.seenPolls));
@@ -85,7 +97,7 @@ function getCommandHiddenVendingTime(rustplus, client) {
 
 function getCommandGroupedHiddenVendors(rustplus, client, waterSuspectsOnly) {
     const guildId = rustplus.guildId;
-    const database = readDatabase(rustplus);
+    const database = readPrunedDatabase(rustplus);
     const hidden = Object.values(database.vendors)
         .filter(vendor => !vendor.broadcasting)
         .filter(vendor => !waterSuspectsOnly || isWaterSuspect(vendor));
@@ -164,7 +176,55 @@ function getVendingMachines(rustplus, markers, deepSeaVendorKeys = null) {
     const excludedKeys = deepSeaVendorKeys || getDeepSeaVendorKeys(rustplus, markers);
     return (markers || [])
         .filter(marker => isVendingMachineMarker(marker, vendingMachineType))
-        .filter(marker => !excludedKeys.has(getVendorKey(marker)));
+        .filter(marker => !excludedKeys.has(getVendorKey(marker)))
+        .filter(marker => !isKnownDeepSeaVendor(rustplus, marker));
+}
+
+function readPrunedDatabase(rustplus) {
+    const database = readDatabase(rustplus);
+    if (pruneDeepSeaVendors(rustplus, database, new Set())) writeDatabase(rustplus, database);
+    return database;
+}
+
+function pruneDeepSeaVendors(rustplus, database, deepSeaVendorKeys) {
+    let changed = false;
+
+    for (const key of deepSeaVendorKeys) {
+        if (database.vendors.hasOwnProperty(key)) {
+            delete database.vendors[key];
+            changed = true;
+        }
+    }
+
+    for (const [key, vendor] of Object.entries(database.vendors)) {
+        if (isKnownDeepSeaVendor(rustplus, vendor)) {
+            delete database.vendors[key];
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
+function isKnownDeepSeaVendor(rustplus, vendor) {
+    if (!vendor || !isOffMapVendor(rustplus, vendor)) return false;
+    const name = normalizeText(vendor.name);
+    if (!name) return false;
+    return KNOWN_DEEP_SEA_VENDOR_NAMES.has(name.toLowerCase());
+}
+
+function isOffMapVendor(rustplus, vendor) {
+    if (!Number.isFinite(vendor.x) || !Number.isFinite(vendor.y)) return false;
+
+    const mapSize = getCorrectedMapSize(rustplus);
+    if (!Number.isFinite(mapSize) || mapSize <= 0) return vendor.x < 0 || vendor.y < 0;
+    return vendor.x < 0 || vendor.y < 0 || vendor.x > mapSize || vendor.y > mapSize;
+}
+
+function getCorrectedMapSize(rustplus) {
+    if (!rustplus || !rustplus.info) return null;
+    if (Number.isFinite(rustplus.info.correctedMapSize)) return rustplus.info.correctedMapSize;
+    return Number.isFinite(rustplus.info.mapSize) ? rustplus.info.mapSize : null;
 }
 
 function getDeepSeaVendorKeys(rustplus, markers) {

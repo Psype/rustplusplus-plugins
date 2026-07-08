@@ -100,7 +100,7 @@ async function messageBroadcastTeamMessage(rustplus, client, message) {
         return;
     }
 
-    if (rustplus.messagesSentByBot.includes(message.broadcast.teamMessage.message.message)) {
+    if (isQueuedBotEcho(rustplus, steamId, message.broadcast.teamMessage.message.message)) {
         /* Echo of a queued bot message from Rust+; do not relay or parse it. */
         removeSentBotMessage(rustplus, message.broadcast.teamMessage.message.message);
 
@@ -281,4 +281,20 @@ async function updateToolCupboard(rustplus, client, message) {
     }
 
     await DiscordMessages.sendStorageMonitorMessage(rustplus.guildId, rustplus.serverId, entityId);
+}
+function isQueuedBotEcho(rustplus, steamId, sentMessage) {
+    if (rustplus.messagesSentByBot.includes(sentMessage)) return true;
+
+    const sentByPairedRustPlusAccount = rustplus.playerId !== undefined && rustplus.playerId !== null &&
+        steamId === rustplus.playerId.toString();
+    return sentByPairedRustPlusAccount && isBotBrandedMessage(rustplus, sentMessage);
+}
+
+function isBotBrandedMessage(rustplus, sentMessage) {
+    if (typeof sentMessage !== 'string') return false;
+
+    const trademark = rustplus.generalSettings.trademark;
+    if (trademark === 'NOT SHOWING') return false;
+
+    return sentMessage.trimStart().startsWith('[BOT]');
 }
