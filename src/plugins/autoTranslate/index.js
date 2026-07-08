@@ -36,6 +36,8 @@ function parseCommand(rustplus, command) {
 }
 
 async function translateMessage(rustplus, message) {
+    if (isBotOrTranslationMessage(message.message)) return null;
+
     const settings = getSettings(rustplus);
     if (!settings.enabled) return null;
 
@@ -58,6 +60,12 @@ async function translateMessage(rustplus, message) {
     catch (e) {
         return null;
     }
+}
+
+function isBotOrTranslationMessage(message) {
+    if (typeof message !== 'string') return false;
+    const normalized = message.trimStart();
+    return normalized.startsWith('[BOT]') || /^\[→[a-z]{2,3}\]\s*\[BOT\]/i.test(normalized);
 }
 
 function chooseTarget(source, targets) {
