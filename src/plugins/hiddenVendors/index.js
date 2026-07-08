@@ -168,7 +168,14 @@ function getVendingMachines(rustplus, markers, deepSeaVendorKeys = null) {
 }
 
 function getDeepSeaVendorKeys(rustplus, markers) {
-    return new Set(DeepSeaHandler.getDeepSeaVendors(rustplus, { markers: markers }).map(getVendorKey));
+    if (!DeepSeaHandler || typeof DeepSeaHandler.getDeepSeaVendors !== 'function') return new Set();
+
+    try {
+        return new Set(DeepSeaHandler.getDeepSeaVendors(rustplus, { markers: markers }).map(getVendorKey));
+    }
+    catch (_e) {
+        return new Set();
+    }
 }
 
 function isVendingMachineMarker(marker, vendingMachineType) {

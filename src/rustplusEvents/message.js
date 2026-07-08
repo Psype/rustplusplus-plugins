@@ -76,7 +76,8 @@ async function messageBroadcastTeamChanged(rustplus, client, message) {
 async function messageBroadcastTeamMessage(rustplus, client, message) {
     const instance = client.getInstance(rustplus.guildId);
     const steamId = message.broadcast.teamMessage.message.steamId.toString();
-    const sentByThisBot = steamId === rustplus.playerId;
+    const sentByThisBot = rustplus.playerId !== undefined && rustplus.playerId !== null &&
+        steamId === rustplus.playerId.toString();
 
     if (sentByThisBot) {
         /* Delay inGameChatHandler */
