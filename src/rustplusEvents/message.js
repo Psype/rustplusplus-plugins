@@ -76,8 +76,10 @@ async function messageBroadcastTeamChanged(rustplus, client, message) {
 async function messageBroadcastTeamMessage(rustplus, client, message) {
     const instance = client.getInstance(rustplus.guildId);
     const steamId = message.broadcast.teamMessage.message.steamId.toString();
+    const sentByThisBot = rustplus.playerId !== undefined && rustplus.playerId !== null &&
+        steamId === rustplus.playerId.toString();
 
-    if (steamId === rustplus.playerId) {
+    if (sentByThisBot) {
         /* Delay inGameChatHandler */
         clearTimeout(rustplus.inGameChatTimeout);
         const commandDelayMs = parseInt(rustplus.generalSettings.commandDelay) * 1000;
@@ -99,6 +101,11 @@ async function messageBroadcastTeamMessage(rustplus, client, message) {
 
     TeammateLanguageDatabase.recordTeamMessage(rustplus, message.broadcast.teamMessage.message);
 
+    if (sentByThisBot) {
+        removeSentBotMessage(rustplus, message.broadcast.teamMessage.message.message);
+        return;
+    }
+
     if (instance.blacklist['steamIds'].includes(`${steamId}`)) {
         rustplus.log(client.intlGet(null, 'infoCap'), client.intlGet(null, `userPartOfBlacklistInGame`, {
             user: `${message.broadcast.teamMessage.message.name} (${steamId})`,
@@ -109,12 +116,7 @@ async function messageBroadcastTeamMessage(rustplus, client, message) {
     }
 
     if (rustplus.messagesSentByBot.includes(message.broadcast.teamMessage.message.message)) {
-        /* Remove message from messagesSendByBot */
-        for (let i = rustplus.messagesSentByBot.length - 1; i >= 0; i--) {
-            if (rustplus.messagesSentByBot[i] === message.broadcast.teamMessage.message.message) {
-                rustplus.messagesSentByBot.splice(i, 1);
-            }
-        }
+        removeSentBotMessage(rustplus, message.broadcast.teamMessage.message.message);
         return;
     }
 
@@ -127,6 +129,16 @@ async function messageBroadcastTeamMessage(rustplus, client, message) {
     }));
 
     TeamChatHandler(rustplus, client, message.broadcast.teamMessage.message);
+}
+
+
+function removeSentBotMessage(rustplus, sentMessage) {
+    /* Remove message from messagesSentByBot */
+    for (let i = rustplus.messagesSentByBot.length - 1; i >= 0; i--) {
+        if (rustplus.messagesSentByBot[i] === sentMessage) {
+            rustplus.messagesSentByBot.splice(i, 1);
+        }
+    }
 }
 
 async function messageBroadcastEntityChanged(rustplus, client, message) {

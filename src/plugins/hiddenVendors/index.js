@@ -9,6 +9,8 @@
 const Fs = require('fs');
 const Path = require('path');
 
+const DeepSeaHandler = require('../../handlers/deepSeaHandler.js');
+
 const DATA_DIR = Path.join(__dirname, '..', '..', '..', 'data', 'hidden-vendors');
 const MAX_COMMAND_RESULTS = 10;
 const WATER_SUSPECT_MAX_SEEN_POLLS = 2;
@@ -17,9 +19,15 @@ function recordVendors(rustplus, mapMarkers) {
     if (!rustplus || !mapMarkers) return;
 
     const now = new Date().toISOString();
-    const currentVendors = getVendingMachines(rustplus, mapMarkers.markers || []);
+    const markers = mapMarkers.markers || [];
+    const deepSeaVendorKeys = getDeepSeaVendorKeys(rustplus, markers);
+    const currentVendors = getVendingMachines(rustplus, markers, deepSeaVendorKeys);
     const currentKeys = new Set(currentVendors.map(getVendorKey));
     const database = readDatabase(rustplus);
+
+    for (const key of deepSeaVendorKeys) {
+        delete database.vendors[key];
+    }
 
     database.guildId = rustplus.guildId;
     database.serverId = rustplus.serverId;
@@ -151,9 +159,23 @@ function isWaterSuspect(vendor) {
     return vendor.seenPolls <= WATER_SUSPECT_MAX_SEEN_POLLS;
 }
 
-function getVendingMachines(rustplus, markers) {
+function getVendingMachines(rustplus, markers, deepSeaVendorKeys = null) {
     const vendingMachineType = rustplus.mapMarkers ? rustplus.mapMarkers.types.VendingMachine : 3;
-    return (markers || []).filter(marker => isVendingMachineMarker(marker, vendingMachineType));
+    const excludedKeys = deepSeaVendorKeys || getDeepSeaVendorKeys(rustplus, markers);
+    return (markers || [])
+        .filter(marker => isVendingMachineMarker(marker, vendingMachineType))
+        .filter(marker => !excludedKeys.has(getVendorKey(marker)));
+}
+
+function getDeepSeaVendorKeys(rustplus, markers) {
+    if (!DeepSeaHandler || typeof DeepSeaHandler.getDeepSeaVendors !== 'function') return new Set();
+
+    try {
+        return new Set(DeepSeaHandler.getDeepSeaVendors(rustplus, { markers: markers }).map(getVendorKey));
+    }
+    catch (_e) {
+        return new Set();
+    }
 }
 
 function isVendingMachineMarker(marker, vendingMachineType) {

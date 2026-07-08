@@ -498,6 +498,22 @@ async function sendDeepSeaClosed(rustplus) {
         'cargoship_logo.png');
 }
 
+function getDeepSeaVendors(rustplus, mapMarkers) {
+    if (!rustplus || !rustplus.info || !mapMarkers) return [];
+
+    const correctedMapSize = getCorrectedMapSize(rustplus);
+    if (!correctedMapSize) return [];
+
+    const vendingMachineType = getVendingMachineType(rustplus);
+    const offMapVendors = (mapMarkers.markers || [])
+        .filter(marker => isVendingMachineMarker(marker, vendingMachineType))
+        .filter(marker => isOffMap(marker, correctedMapSize));
+
+    const casinoVendors = offMapVendors.filter(isCasinoBarShopkeeper);
+    return casinoVendors.length > 0 || offMapVendors.length >= OFF_MAP_VENDOR_CLUSTER_SIZE ?
+        offMapVendors : [];
+}
+
 function install(rustplus, client = null) {
     if (client) rustplus.__deepSeaClient = client;
     ensureState(rustplus);
@@ -510,6 +526,7 @@ module.exports = {
     getDeepSeaSide: getDeepSeaSide,
     getDeepSeaSideDetails: getDeepSeaSideDetails,
     getReferenceBounds: getReferenceBounds,
+    getDeepSeaVendors: getDeepSeaVendors,
     formatCommand: formatCommand,
 
     handler: async function (rustplus, client, mapMarkers) {
@@ -520,14 +537,7 @@ module.exports = {
         const state = ensureState(rustplus);
         const correctedMapSize = getCorrectedMapSize(rustplus);
         if (!correctedMapSize) return;
-        const vendingMachineType = getVendingMachineType(rustplus);
-        const offMapVendors = (mapMarkers.markers || [])
-            .filter(marker => isVendingMachineMarker(marker, vendingMachineType))
-            .filter(marker => isOffMap(marker, correctedMapSize));
-
-        const casinoVendors = offMapVendors.filter(isCasinoBarShopkeeper);
-        const deepSeaVendors = casinoVendors.length > 0 || offMapVendors.length >= OFF_MAP_VENDOR_CLUSTER_SIZE ?
-            offMapVendors : [];
+        const deepSeaVendors = getDeepSeaVendors(rustplus, mapMarkers);
         const active = deepSeaVendors.length > 0;
 
         if (active) {

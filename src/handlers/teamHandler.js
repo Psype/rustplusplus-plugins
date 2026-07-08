@@ -20,6 +20,24 @@
 
 const Constants = require('../util/constants.js');
 const DiscordMessages = require('../discordTools/discordMessages.js');
+const Map = require('../util/map.js');
+
+function getDeathLocation(rustplus, player, playerUpdated) {
+    if (player.pos !== null) return player.pos.string;
+
+    const updatedPosition = getGridPosition(rustplus, playerUpdated);
+    return updatedPosition || 'spawn';
+}
+
+function getGridPosition(rustplus, player) {
+    if (!player || !Number.isFinite(player.x) || !Number.isFinite(player.y) || !rustplus.info) return null;
+
+    const mapSize = rustplus.info.correctedMapSize || rustplus.info.mapSize;
+    if (!Number.isFinite(mapSize)) return null;
+
+    const position = Map.getPos(player.x, player.y, mapSize, rustplus);
+    return position ? position.string : null;
+}
 
 module.exports = {
     handler: async function (rustplus, client, teamInfo) {
@@ -66,7 +84,7 @@ module.exports = {
             for (const playerUpdated of teamInfo.members) {
                 if (player.steamId === playerUpdated.steamId.toString()) {
                     if (player.isGoneDead(playerUpdated)) {
-                        const location = player.pos === null ? 'spawn' : player.pos.string;
+                        const location = getDeathLocation(rustplus, player, playerUpdated);
                         const str = client.intlGet(guildId, 'playerJustDied', {
                             name: player.name,
                             location: location

@@ -113,5 +113,6 @@ module.exports = {
         rustplus.isOperational = true;
 
         rustplus.updateLeaderRustPlusLiteInstance();
+        rustplus.sendInGameMessage(client.intlGet(guildId, 'rustplusOperational'));
     },
 };
