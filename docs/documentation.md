@@ -10,3 +10,5 @@
 * [**Commands**](commands.md)
 * [**Discord Text Channels**](discord_text_channels.md)
 * [**Smart Devices**](smart_devices.md)
+* [**Plugin Architecture**](plugin_architecture.md)
+* [**External Server Mod Compatibility**](external_mod_compatibility.md)

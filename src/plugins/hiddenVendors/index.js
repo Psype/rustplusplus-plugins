@@ -9,7 +9,7 @@
 const Fs = require('fs');
 const Path = require('path');
 
-const DeepSeaHandler = require('../../handlers/deepSeaHandler.js');
+const DeepSeaHandler = require('../deepSea');
 
 const DATA_DIR = Path.join(__dirname, '..', '..', '..', 'data', 'hidden-vendors');
 const MAX_COMMAND_RESULTS = 10;

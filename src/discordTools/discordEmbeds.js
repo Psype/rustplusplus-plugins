@@ -22,6 +22,7 @@ const Discord = require('discord.js');
 
 const Client = require('../../index.ts');
 const Constants = require('../util/constants.js');
+const PluginManager = require('../plugins/pluginManager.js');
 const DiscordTools = require('./discordTools.js');
 const InstanceUtils = require('../util/instanceUtils.js');
 const Timer = require('../util/timer');
@@ -774,7 +775,8 @@ module.exports = {
         const largeOilMessage = rustplus.getCommandLarge(true);
         const ch47Message = rustplus.getCommandChinook(true);
         const travelingVendorMessage = rustplus.getCommandTravelingVendor(true);
-        const deepseaMessage = rustplus.getCommandDeepsea(true);
+        const deepseaMessage = PluginManager.getDeepSeaStatus(rustplus, true) ||
+            Client.client.intlGet(guildId, 'notActive');
 
         return module.exports.getEmbed({
             title: Client.client.intlGet(guildId, 'eventInfo'),

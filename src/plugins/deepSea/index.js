@@ -5,8 +5,8 @@
     strings, and side inference so the base RustPlus/MapMarkers structures stay easy to update from upstream.
 */
 
-const Constants = require('../util/constants.js');
-const Timer = require('../util/timer.js');
+const Constants = require('../../util/constants.js');
+const Timer = require('../../util/timer.js');
 
 const STATE_KEY = '__deepSeaState';
 const OFF_MAP_VENDOR_CLUSTER_SIZE = 3;
@@ -443,39 +443,21 @@ function getEventSummaries(rustplus, event) {
     return [getEventSummary(rustplus, event)];
 }
 
-function patchCommands(rustplus, client) {
-    if (!rustplus.__deepSeaCommandPatched) {
-        rustplus.getCommandDeepsea = function (isInfoChannel = false) {
-            return formatCommand(this, isInfoChannel);
-        };
-        rustplus.__deepSeaCommandPatched = true;
+function getEventsCommandResponse(rustplus, client, command) {
+    const prefix = rustplus.generalSettings.prefix;
+    const commandEvents = `${prefix}events`;
+    const localizedSyntax = client ? client.intlGet(rustplus.guildId, 'commandSyntaxEvents') : 'events';
+    const commandEventsLocalized = `${prefix}${localizedSyntax}`;
+    const args = command.toLowerCase().startsWith(commandEventsLocalized.toLowerCase()) ?
+        command.slice(commandEventsLocalized.length).trim() : command.slice(commandEvents.length).trim();
+    const event = args.replace(/ .*/, '').toLowerCase();
+
+    if (['small', 'large', 'deepsea'].includes(event)) return getEventSummaries(rustplus, event);
+    if (event === '') {
+        return ['cargo', 'heli', 'chinook', 'small', 'large', 'deepsea']
+            .flatMap(entry => getEventSummaries(rustplus, entry));
     }
-
-    if (!rustplus.__deepSeaEventsPatched && typeof rustplus.getCommandEvents === 'function') {
-        const originalGetCommandEvents = rustplus.getCommandEvents.bind(rustplus);
-        rustplus.getCommandEvents = function (command) {
-            const prefix = this.generalSettings.prefix;
-            const commandEvents = `${prefix}events`;
-            const commandEventsLocalized = `${prefix}${client ? client.intlGet(this.guildId, 'commandSyntaxEvents') : 'events'}`;
-            let args = command.toLowerCase().startsWith(commandEventsLocalized) ?
-                command.slice(commandEventsLocalized.length).trim() : command.slice(commandEvents.length).trim();
-            const event = args.replace(/ .*/, '').toLowerCase();
-
-            if (['small', 'large', 'deepsea'].includes(event)) return getEventSummaries(this, event);
-            if (event === '') {
-                return ['cargo', 'heli', 'chinook', 'small', 'large', 'deepsea']
-                    .flatMap(e => getEventSummaries(this, e));
-            }
-            return originalGetCommandEvents(command);
-        };
-        rustplus.__deepSeaEventsPatched = true;
-    }
-}
-
-function disableLegacyGenericRadiusDeepSea(rustplus) {
-    if (!rustplus.mapMarkers || rustplus.mapMarkers.__deepSeaLegacyDisabled) return;
-    rustplus.mapMarkers.isDeepseaMarker = function () { return false; };
-    rustplus.mapMarkers.__deepSeaLegacyDisabled = true;
+    return null;
 }
 
 async function sendDeepSeaOpened(rustplus) {
@@ -517,8 +499,6 @@ function getDeepSeaVendors(rustplus, mapMarkers) {
 function install(rustplus, client = null) {
     if (client) rustplus.__deepSeaClient = client;
     ensureState(rustplus);
-    patchCommands(rustplus, client);
-    disableLegacyGenericRadiusDeepSea(rustplus);
 }
 
 module.exports = {
@@ -527,6 +507,7 @@ module.exports = {
     getDeepSeaSideDetails: getDeepSeaSideDetails,
     getReferenceBounds: getReferenceBounds,
     getDeepSeaVendors: getDeepSeaVendors,
+    getEventsCommandResponse: getEventsCommandResponse,
     formatCommand: formatCommand,
 
     handler: async function (rustplus, client, mapMarkers) {

@@ -30,6 +30,11 @@ const PRIMARY = Discord.ButtonStyle.Primary;
 const SECONDARY = Discord.ButtonStyle.Secondary;
 const LINK = Discord.ButtonStyle.Link;
 
+function getToggleLabel(guildId, labelKey, active) {
+    const stateKey = active ? 'enabledCap' : 'disabledCap';
+    return `${Client.client.intlGet(guildId, labelKey)}: ${Client.client.intlGet(guildId, stateKey)}`;
+}
+
 module.exports = {
     getButton: function (options = {}) {
         const button = new Discord.ButtonBuilder();
@@ -301,17 +306,17 @@ module.exports = {
         return new Discord.ActionRowBuilder().addComponents(
             module.exports.getButton({
                 customId: `DiscordNotification${identifier}`,
-                label: Client.client.intlGet(guildId, 'discordCap'),
+                label: getToggleLabel(guildId, 'discordCap', discordActive),
                 style: discordActive ? SUCCESS : DANGER
             }),
             module.exports.getButton({
                 customId: `InGameNotification${identifier}`,
-                label: Client.client.intlGet(guildId, 'inGameCap'),
+                label: getToggleLabel(guildId, 'inGameCap', inGameActive),
                 style: inGameActive ? SUCCESS : DANGER
             }),
             module.exports.getButton({
                 customId: `VoiceNotification${identifier}`,
-                label: Client.client.intlGet(guildId, 'voiceCap'),
+                label: getToggleLabel(guildId, 'voiceCap', voiceActive),
                 style: voiceActive ? SUCCESS : DANGER
             }));
     },

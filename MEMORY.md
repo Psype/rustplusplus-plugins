@@ -76,6 +76,18 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 - Modded servers may have multiple oil rigs. Small/Large Oil Rig summaries should split per oil-rig monument grid, e.g. `Large Oil Rig (A1)` and `Large Oil Rig (Z20)`, with per-grid last-trigger/unlock estimates when observed.
 - Event aliases should remain compatible with RustPlusBot-style naming where previously added, including `ch47`, `oil_rig_small`, and `large_oil_rig`.
 
+## Upstream and plugin architecture
+- The canonical bot upstream is configured as Git remote `upstream` at `https://github.com/alexemanuelol/rustplusplus.git`.
+- Optional fork features integrate only through `src/plugins/pluginManager.js`; core handlers must not import individual feature plugins.
+- Deep Sea state/detection and custom fork commands live behind the plugin boundary. The base `MapMarkers` and `RustPlus` structures must not carry duplicate Deep Sea implementations or runtime method monkey-patches.
+- The Rust+ dependency remains pinned to `alexemanuelol/rustplus.js#089cfd3` because it is version 2.5.0 plus Proto3/current-server compatibility fixes absent from Liam's current master. Any replacement must pass the protocol compatibility fixtures first.
+- `npm test` runs deterministic Node tests before the TypeScript no-emit check. `npm run benchmark:plugins` measures dispatch overhead.
+- TypeScript uses the paired `module: Node16` and `moduleResolution: Node16` settings. The package has no ESM `type`, so Node16 preserves its CommonJS runtime while avoiding the deprecated `node`/`node10` resolver.
+- The repository enforces UTF-8/LF through `.gitattributes` and `.editorconfig` for Linux compatibility. Keep `update.sh` tracked as executable (`100755`).
+- A `Crate = 6` marker is not treated as a vanilla airdrop without a captured Rust+ fixture proving that mapping.
+- Event notification buttons expose their state in their label: green/`ENABLED` means active and red/`DISABLED` means inactive. Discord, in-game, and voice outputs remain independent; in-game event notifications stay disabled by default.
+- Event delivery queues enabled in-game output before Discord/voice and isolates failures per output; an optional delivery failure must not cancel the other enabled outputs.
+
 ## Discord setup and permissions
 - Restarting the bot must not reset existing Rust++ Discord category/channel permission overwrites and make private channels public again.
 - Startup setup should preserve current overwrites for existing category/channels. Permissions are applied automatically only when creating missing category/channels or during first-time setup.
@@ -87,6 +99,9 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 
 ## Raid alarm plugin localization
 - Raid alarm plugin messages translate the standard `You're getting raided!` title through `baseIsUnderAttack` and translate `X destroyed at Y` payloads through `raidAlarmDestroyedAt`.
+- The supported server plugin is haggbart Raid Alarm `0.4.2`, which sends Rust+ FCM alerts directly to TC-authorized players via `Util.TryGetServerPairingData()` and does not require a vanilla Smart Alarm entity.
+- Raid Alarm FCM handling lives behind `src/plugins/raidAlarm`. It recognizes the canonical title or body, honors `smartAlarmNotifyInGame`, queues in-game delivery before Discord, and isolates delivery failures.
+- As verified on 2026-09-07, Raid Alarm 0.4.2 is the only external Rust server mod with an explicit bot integration. The canonical inventory is `docs/external_mod_compatibility.md`; Deep Sea and Smart Alarm are vanilla Rust features, while Hidden Vendors, AutoTranslate, and Teammate Language Database are bot-local.
 - Item names from FCM/plugin payloads remain as provided because the payload does not include stable item IDs.
 - Bot-originated Rust team-chat broadcasts should be identified by queued-message matches or the `[BOT]` brand on messages from the paired Rust+ SteamID, not by SteamID alone, and must not be relayed back through Discord/team-chat autotranslate or command handling. Autotranslate should also ignore bot-branded messages so command replies such as `!hv` are not translated back into team chat while still allowing the paired Rust+ SteamID to issue commands.
 - Hidden vendor tracking should exclude Deep Sea event vending-machine markers. Deep Sea vendors are NPC/event vendors, not player vending machines, and should not appear as temporary/water-suspect hidden vendors.

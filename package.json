@@ -6,7 +6,10 @@
     "scripts": {
         "start": "ts-node .",
         "preinstall": "npx npm-force-resolutions",
-        "test": "tsc --noEmit -p ."
+        "test": "npm run test:unit && npm run test:types",
+        "test:unit": "node --test test/*.test.js",
+        "test:types": "tsc --noEmit -p .",
+        "benchmark:plugins": "node benchmark/plugin-dispatch.js"
     },
     "repository": {
         "type": "git",

@@ -633,7 +633,7 @@
     "shouldLeaderCommandEnabledSetting": "La commande leader doit-elle être activée ?",
     "shouldLeaderCommandOnlyForPairedSetting": "La commande leader devrait-elle fonctionner uniquement pour les personnes associées au serveur ?",
     "shouldSmartAlarmNotifyNotConnectedSetting": "Les alarmes intelligentes devraient-elles avertir même si elles ne sont pas configurées sur le serveur Rust connecté ?",
-    "shouldSmartAlarmsNotifyInGameSetting": "Les alarmes intelligentes doivent-elles avertir en jeu ?",
+    "shouldSmartAlarmsNotifyInGameSetting": "Les alertes Smart Alarm et Raid Alarm (uMod) doivent-elles être envoyées en jeu ?",
     "shouldSmartSwitchNotifyInGameWhenChangedFromDiscord": "Les commutateurs intelligents et les groupes de commutateurs intelligents devraient-ils avertir dans le jeu lorsqu'ils sont modifiés depuis Discord ?",
     "showingBlacklist": "Afficher la blacklist.",
     "showingSubscriptionList": "Afficher la liste des abonnements.",

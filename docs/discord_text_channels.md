@@ -66,6 +66,10 @@ There are a few buttons for each server. The `CONNECT` button lets you start a c
 
 > The Settings Channel contain a bunch of different settings for rustplusplus. There are settings for language, voice gender, command prefix, trademark visibility, allow in-game commands, mute in-game, in-game teammate notifications, command delay, Smart Alarm notifications, enable leader command, battlemetrics notifications, wipe detection, vending machine subscription and event notifications.
 
+Event notification buttons show their state in both text and color: green means enabled and red means disabled. `DISCORD`, `IN-GAME`, and `VOICE` are independent outputs. In-game event notifications are disabled by default, so enable the `IN-GAME` button for each event that should be sent to Rust team chat. Oil Rig locked-crate timers and Patrol Helicopter destruction use the same per-event setting and output rules.
+
+Rust team-chat delivery is queued before optional Discord and voice deliveries. A failure in one output is logged and does not cancel the other enabled outputs.
+
 ![Discord Text Channel Settings](images/channels/settings_channel.png)
 
 

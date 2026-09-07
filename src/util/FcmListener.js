@@ -30,6 +30,7 @@ const DiscordMessages = require('../discordTools/discordMessages.js');
 const DiscordTools = require('../discordTools/discordTools.js');
 const InstanceUtils = require('../util/instanceUtils.js');
 const Map = require('../util/map.js');
+const PluginManager = require('../plugins/pluginManager.js');
 const Scrape = require('../util/scrape.js');
 const Config = require('../../config');
 
@@ -66,7 +67,7 @@ module.exports = async (client, guild) => {
     const androidId = credentials[hoster].gcm.android_id;
     const securityToken = credentials[hoster].gcm.security_token;
     client.fcmListeners[guild.id] = new PushReceiverClient(androidId, securityToken, [])
-    client.fcmListeners[guild.id].on('ON_DATA_RECEIVED', (data) => {
+    client.fcmListeners[guild.id].on('ON_DATA_RECEIVED', async (data) => {
         const appData = data.appData;
 
         if (!appData) {
@@ -141,6 +142,11 @@ module.exports = async (client, guild) => {
             } break;
 
             case 'alarm': {
+                const pluginHandled = await PluginManager.handleFcmAlarm({
+                    client, guild, hoster, channelId, title, message, body
+                });
+                if (pluginHandled) break;
+
                 switch (body.type) {
                     case 'alarm': {
                         client.log('FCM Host', `GuildID: ${guild.id}, SteamID: ${hoster}, alarm: alarm`);
@@ -148,13 +154,6 @@ module.exports = async (client, guild) => {
                     } break;
 
                     default: {
-                        if (title === 'You\'re getting raided!') {
-                            /* Custom alarm from plugin: https://umod.org/plugins/raid-alarm */
-                            client.log('FCM Host',
-                                `GuildID: ${guild.id}, SteamID: ${hoster}, alarm: raid-alarm plugin`);
-                            alarmRaidAlarm(client, guild, title, message, body);
-                            break;
-                        }
                         client.log('FCM Host',
                             `GuildID: ${guild.id}, SteamID: ${hoster}, alarm: other\n${JSON.stringify(data)}`);
                     } break;
@@ -470,53 +469,6 @@ async function alarmAlarm(client, guild, title, message, body) {
         await DiscordMessages.sendSmartAlarmTriggerMessage(guild.id, serverId, entityId);
         client.log(client.intlGet(null, 'infoCap'), `${title}: ${message}`);
     }
-}
-
-async function alarmRaidAlarm(client, guild, title, message, body) {
-    const instance = client.getInstance(guild.id);
-    const serverId = `${body.ip}-${body.port}`;
-    const rustplus = client.rustplusInstances[guild.id];
-
-    if (!instance.serverList.hasOwnProperty(serverId)) return;
-
-    const files = [];
-    if (body.img === '') {
-        files.push(new Discord.AttachmentBuilder(Path.join(__dirname, '..', `resources/images/rocket.png`)));
-    }
-
-    const content = {
-        embeds: [DiscordEmbeds.getAlarmRaidAlarmEmbed(getRaidAlarmText(client, guild, title, message), body)],
-        content: '@everyone',
-        files: files
-    }
-
-    if (rustplus && (serverId === rustplus.serverId)) {
-        await DiscordMessages.sendMessage(guild.id, content, null, instance.channelId.activity);
-        const raidText = getRaidAlarmText(client, guild, title, message);
-        rustplus.sendInGameMessage(`${raidText.title}: ${raidText.message}`);
-    }
-
-    const raidText = getRaidAlarmText(client, guild, title, message);
-    client.log(client.intlGet(null, 'infoCap'), `${raidText.title} ${raidText.message}`);
-}
-
-function getRaidAlarmText(client, guild, title, message) {
-    let translatedTitle = title;
-    let translatedMessage = message;
-
-    if (title === 'You\'re getting raided!') {
-        translatedTitle = client.intlGet(guild.id, 'baseIsUnderAttack');
-    }
-
-    const destroyedMatch = /^(.*) destroyed at (.*)$/i.exec(message);
-    if (destroyedMatch) {
-        translatedMessage = client.intlGet(guild.id, 'raidAlarmDestroyedAt', {
-            item: destroyedMatch[1],
-            location: destroyedMatch[2]
-        });
-    }
-
-    return { title: translatedTitle, message: translatedMessage };
 }
 
 async function playerDeath(client, guild, title, message, body, discordUserId) {

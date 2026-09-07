@@ -34,9 +34,9 @@ const DiscordTools = require('../discordTools/discordTools.js');
 const InGameChatHandler = require('../handlers/inGameChatHandler.js');
 const InstanceUtils = require('../util/instanceUtils.js');
 const Languages = require('../util/languages.js');
-const AutoTranslate = require('../plugins/autoTranslate');
 const Logger = require('./Logger.js');
 const Map = require('../util/map.js');
+const PluginManager = require('../plugins/pluginManager.js');
 const RustPlusLite = require('../structures/RustPlusLite');
 const TeamHandler = require('../handlers/teamHandler.js');
 const Timer = require('../util/timer.js');
@@ -277,7 +277,7 @@ class RustPlus extends RustPlusLib {
     }
 
     sendInGameMessage(message) {
-        InGameChatHandler.inGameChatHandler(this, Client.client, message);
+        return InGameChatHandler.inGameChatHandler(this, Client.client, message);
     }
 
     async sendEvent(setting, text, event, embed_color, firstPoll = false, image = null) {
@@ -285,16 +285,26 @@ class RustPlus extends RustPlusLib {
 
         this.updateEvents(event, text);
 
-        if (!firstPoll && setting.discord) {
-            await DiscordMessages.sendDiscordEventMessage(this.guildId, this.serverId, text, img, embed_color);
-        }
         if (!firstPoll && setting.inGame) {
-            await this.sendInGameMessage(`${text}`);
+            await this.sendEventOutput('in-game', () => this.sendInGameMessage(`${text}`));
+        }
+        if (!firstPoll && setting.discord) {
+            await this.sendEventOutput('discord', () =>
+                DiscordMessages.sendDiscordEventMessage(this.guildId, this.serverId, text, img, embed_color));
         }
         if (!firstPoll && setting.voice) {
-            await DiscordVoice.sendDiscordVoiceMessage(this.guildId, text);
+            await this.sendEventOutput('voice', () => DiscordVoice.sendDiscordVoiceMessage(this.guildId, text));
         }
         this.log(Client.client.intlGet(null, 'eventCap'), text);
+    }
+
+    async sendEventOutput(output, callback) {
+        try {
+            await callback();
+        }
+        catch (error) {
+            this.log('EVENT', `${output}: ${error}`, 'warning');
+        }
     }
 
     replenishTokens() {
@@ -1240,68 +1250,6 @@ class RustPlus extends RustPlusLib {
         return decayString;
     }
 
-    getCommandDeepsea(isInfoChannel = false) {
-        const deepseaMarkers = this.mapMarkers.deepseas;
-        if (deepseaMarkers.length > 0) {
-            const locations = deepseaMarkers.map(marker => marker.location.string).join(', ');
-            if (isInfoChannel) {
-                return Client.client.intlGet(this.guildId, 'deepseaActiveShort', { locations: locations });
-            }
-
-            const seenSince = deepseaMarkers
-                .map(marker => marker.deepseaSeenSince)
-                .filter(seenSince => seenSince !== undefined)
-                .sort((a, b) => a - b)[0] || new Date();
-            const secondsSinceSeen = (new Date() - seenSince) / 1000;
-            const secondsUntilDefaultClose = (Constants.DEFAULT_DEEPSEA_DURATION_MS / 1000) - secondsSinceSeen;
-
-            if (secondsUntilDefaultClose > 0) {
-                return Client.client.intlGet(this.guildId, 'deepseaActiveAtPrediction', {
-                    locations: locations,
-                    elapsed: Timer.secondsToFullScale(secondsSinceSeen),
-                    time: Timer.secondsToFullScale(secondsUntilDefaultClose)
-                });
-            }
-
-            return Client.client.intlGet(this.guildId, 'deepseaActiveAt', { locations: locations });
-        }
-
-        if (this.mapMarkers.timeSinceDeepseaWasActive === null) {
-            return isInfoChannel ? Client.client.intlGet(this.guildId, 'notActive') :
-                Client.client.intlGet(this.guildId, 'deepseaNotActive');
-        }
-
-        const secondsSince = (new Date() - this.mapMarkers.timeSinceDeepseaWasActive) / 1000;
-        if (isInfoChannel) {
-            return Client.client.intlGet(this.guildId, 'timeSinceLast', {
-                time: Timer.secondsToFullScale(secondsSince, 's')
-            });
-        }
-
-        const secondsUntilMin = (Constants.DEFAULT_DEEPSEA_COOLDOWN_MIN_MS / 1000) - secondsSince;
-        const secondsUntilMax = (Constants.DEFAULT_DEEPSEA_COOLDOWN_MAX_MS / 1000) - secondsSince;
-        if (secondsUntilMax <= 0) {
-            return Client.client.intlGet(this.guildId, 'timeSinceDeepseaActiveOverdue', {
-                side: side,
-                time: Timer.secondsToFullScale(secondsSince)
-            });
-        }
-        else if (secondsUntilMin <= 0) {
-            return Client.client.intlGet(this.guildId, 'timeSinceDeepseaActiveSoon', {
-                side: side,
-                time: Timer.secondsToFullScale(secondsSince),
-                maxTime: Timer.secondsToFullScale(secondsUntilMax)
-            });
-        }
-
-        return Client.client.intlGet(this.guildId, 'timeSinceDeepseaActivePrediction', {
-            side: side,
-            time: Timer.secondsToFullScale(secondsSince),
-            minTime: Timer.secondsToFullScale(secondsUntilMin),
-            maxTime: Timer.secondsToFullScale(secondsUntilMax)
-        });
-    }
-
     getCommandDespawn(command) {
         const prefix = this.generalSettings.prefix;
         const commandDespawn = `${prefix}${Client.client.intlGet(this.guildId, 'commandSyntaxDespawn')}`;
@@ -1338,6 +1286,9 @@ class RustPlus extends RustPlusLib {
     }
 
     getCommandEvents(command) {
+        const pluginResponse = PluginManager.getEventsCommandResponse(this, Client.client, command);
+        if (pluginResponse !== null) return pluginResponse;
+
         const prefix = this.generalSettings.prefix;
         const commandEvents = `${prefix}${Client.client.intlGet(this.guildId, 'commandSyntaxEvents')}`;
         const commandEventsEn = `${prefix}${Client.client.intlGet('en', 'commandSyntaxEvents')}`;
@@ -1351,12 +1302,9 @@ class RustPlus extends RustPlusLib {
         const commandLargeEn = `${Client.client.intlGet('en', 'commandSyntaxLarge')}`;
         const commandChinook = `${Client.client.intlGet(this.guildId, 'commandSyntaxChinook')}`;
         const commandChinookEn = `${Client.client.intlGet('en', 'commandSyntaxChinook')}`;
-        const commandDeepsea = `${Client.client.intlGet(this.guildId, 'commandSyntaxDeepsea')}`;
-        const commandDeepseaEn = `${Client.client.intlGet('en', 'commandSyntaxDeepsea')}`;
-
         const EVENTS = [commandCargo, commandCargoEn, commandHeli, commandHeliEn, commandSmall,
             commandSmallEn, commandLarge, commandLargeEn, commandChinook, commandChinookEn,
-            commandDeepsea, commandDeepseaEn, 'ch47', 'oil_rig_small', 'large_oil_rig'];
+            'ch47', 'oil_rig_small', 'large_oil_rig'];
 
         if (command.toLowerCase().startsWith(`${commandEvents}`)) {
             command = command.slice(`${commandEvents}`.length).trim();
@@ -1425,11 +1373,6 @@ class RustPlus extends RustPlusLib {
                 event = 'large';
             } break;
 
-            case commandDeepseaEn:
-            case commandDeepsea: {
-                event = 'deepsea';
-            } break;
-
             default: {
                 event = 'all';
             } break;
@@ -1439,7 +1382,7 @@ class RustPlus extends RustPlusLib {
             return [this.getEventSummary(event)];
         }
 
-        return ['cargo', 'heli', 'chinook', 'small', 'large', 'deepsea'].map(e => this.getEventSummary(e));
+        return ['cargo', 'heli', 'chinook', 'small', 'large'].map(e => this.getEventSummary(e));
     }
 
     getEventSummary(event) {
@@ -1448,16 +1391,14 @@ class RustPlus extends RustPlusLib {
             heli: 'Patrol Helicopter',
             chinook: 'Chinook 47',
             small: 'Small Oil Rig',
-            large: 'Large Oil Rig',
-            deepsea: 'Deep Sea'
+            large: 'Large Oil Rig'
         };
         const getters = {
             cargo: () => this.getCommandCargo(),
             heli: () => this.getCommandHeli(),
             chinook: () => this.getCommandChinook(),
             small: () => this.getCommandSmall(),
-            large: () => this.getCommandLarge(),
-            deepsea: () => this.getCommandDeepsea()
+            large: () => this.getCommandLarge()
         };
 
         const name = eventNames[event] || event;
@@ -2634,20 +2575,6 @@ class RustPlus extends RustPlusLib {
         }
     }
 
-
-    getCommandAutoTranslate(command) {
-        const result = AutoTranslate.parseCommand(this, command);
-        if (result.error === 'usage') return Client.client.intlGet(this.guildId, 'autotranslateUsage');
-        if (result.error === 'language') return Client.client.intlGet(this.guildId, 'autotranslateLanguageNotFound');
-
-        if (result.enabled) {
-            return Client.client.intlGet(this.guildId, 'autotranslateEnabled', {
-                languages: result.targets.join(',')
-            });
-        }
-
-        return Client.client.intlGet(this.guildId, 'autotranslateDisabled');
-    }
 
     async getCommandTranslateTo(command) {
         const prefix = this.generalSettings.prefix;

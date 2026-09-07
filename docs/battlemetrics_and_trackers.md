@@ -11,7 +11,7 @@ Once you've obtained your Battlemetrics token, copy it into the config file loca
 The config file should look something like this (NOTE: key below is invalid):
 
     battlemetrics: {
-        token: process.env.RPP_BATTLEMETRICS_TOKEN || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbiI6IjM5NzE4MDE2ZjZlYjY1NmMiLCJpYXQiOjE0NzgwMzc1MjQsIm5iZiI6MTQ3ODAzNzUyNCwiaXNzIjoiaHR0cHM6Ly93d3cuYmF0dGxlbWV0cmljcy5jb20iLCJzdWIiOiJ1cm46dXNlcjoxIn0.iwwHt2lvBxlBqcEm7HrX1b1Rb9MXcMghUY5xspluWgw'
+        token: process.env.RPP_BATTLEMETRICS_TOKEN || ''
     }
 
 If no token is obtained, tracker functionality will be disabled.

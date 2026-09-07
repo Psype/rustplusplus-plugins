@@ -19,10 +19,9 @@
 */
 
 const Fs = require('fs');
-const DeepSeaHandler = require('./deepSeaHandler.js');
-const HiddenVendors = require('../plugins/hiddenVendors');
 const EventDebugLogger = require('../util/eventDebugLogger.js');
 const LoggingSettings = require('../util/loggingSettings.js');
+const PluginManager = require('../plugins/pluginManager.js');
 const Info = require('../structures/Info');
 const InformationHandler = require('../handlers/informationHandler.js');
 const MapMarkers = require('../structures/MapMarkers.js');
@@ -31,7 +30,6 @@ const SmartSwitchHandler = require('../handlers/smartSwitchHandler.js');
 const StorageMonitorHandler = require('../handlers/storageMonitorHandler.js');
 const Team = require('../structures/Team');
 const TeamHandler = require('../handlers/teamHandler.js');
-const TeammateLanguageDatabase = require('../plugins/teammateLanguageDatabase');
 const Time = require('../structures/Time');
 const TimeHandler = require('../handlers/timeHandler.js');
 const VendingMachines = require('../handlers/vendingMachineHandler.js');
@@ -60,22 +58,22 @@ module.exports = {
     },
 
     handlers: async function (rustplus, client, info, mapMarkers, teamInfo, time) {
-        TeammateLanguageDatabase.recordTeamInfo(rustplus, teamInfo.teamInfo);
+        await PluginManager.onTeamInfo({ rustplus, client, teamInfo: teamInfo.teamInfo });
         await TeamHandler.handler(rustplus, client, teamInfo.teamInfo);
         rustplus.team.updateTeam(teamInfo.teamInfo);
 
         await SmartSwitchHandler.handler(rustplus, client, time.time);
         TimeHandler.handler(rustplus, client, time.time);
         await VendingMachines.handler(rustplus, client, mapMarkers.mapMarkers);
-        HiddenVendors.recordVendors(rustplus, mapMarkers.mapMarkers);
+        await PluginManager.beforeMapMarkersUpdate({ rustplus, client, mapMarkers: mapMarkers.mapMarkers });
 
         rustplus.time.updateTime(time.time);
         rustplus.info.updateInfo(info.info);
         dumpMapMarkers(rustplus, mapMarkers.mapMarkers);
         EventDebugLogger.logMapMarkers(rustplus, mapMarkers.mapMarkers, rustplus.map ? rustplus.map.monuments : []);
-        DeepSeaHandler.install(rustplus, client);
+        await PluginManager.install({ rustplus, client });
         rustplus.mapMarkers.updateMapMarkers(mapMarkers.mapMarkers);
-        await DeepSeaHandler.handler(rustplus, client, mapMarkers.mapMarkers);
+        await PluginManager.afterMapMarkersUpdate({ rustplus, client, mapMarkers: mapMarkers.mapMarkers });
 
         await InformationHandler.handler(rustplus);
         await StorageMonitorHandler.handler(rustplus, client);
