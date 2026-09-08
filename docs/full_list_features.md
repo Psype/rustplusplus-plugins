@@ -27,7 +27,7 @@
 ## In-Game and Discord Commands
 - **afk** - `!afk` - Display AFK teammates.
 - **alive** - `!alive` - Display who has been alive longest.
-- **autotranslate** - `!autotranslate on [language[,language...]]` or `!autotranslate off` - Automatically translate relayed team-chat messages in Discord.
+- **autotranslate** - `!autotranslate on [language[,language...]]` or `!autotranslate off` - Translate a teammate only when the message matches their recorded original language; relay the result to Rust team chat and Discord.
 - **cargo** - `!cargo` - Display information regarding Cargoship.
 - **chinook** - `!chinook` - Display information regarding Chinook 47.
 - **commands [command]** - `!commands [command]` - List all commands or show one-line usage for one command.
@@ -92,6 +92,11 @@
 - F1 console connect information.
 
 ## In-Game Event Notifications
+> **Current Rust+ limitation (since 2026-08-06):** Facepunch no longer sends vending-machine or event map markers
+> (cargo, helicopters, travelling vendor) through the public Rust+ stream. The capabilities below are retained for
+> protocol history, but cannot receive new live state unless Facepunch restores the signal or the server provides a
+> separately integrated authoritative bridge.
+
 > Receive notifications for In-Game Events such as:
 - **Cargo Ship** - When it spawns, despawns, how long before it enters egress stage. How long time since it was last out. step-trace.
 - **Patrol Helicopter** - When it spawns, despawns or gets taken down. How long time since it was last out and how long since it was taken down. step-trace.

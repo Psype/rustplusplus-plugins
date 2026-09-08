@@ -30,13 +30,22 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 - `!logs on|off` works in-game and in the Discord command chat. Turning logs off keeps console output but suppresses Winston file writes, raw Rust+ WebSocket/event debug logs, marker history, and marker snapshots.
 - The teammate SteamID/nickname/language CSV database is data, not config, and remains under `data/teammate-language-database/<guildId>-<serverId>.csv`.
 
+## Current Rust+ map-marker limitation
+- Facepunch's [Power Trip update](https://rust.facepunch.com/news/power-trip) of 2026-08-06 stopped sending vending-machine and event map markers (cargo, helicopters, and travelling vendor) to Rust+.
+- A live capture from 2026-09-08 contains 14 successful `getMapMarkers` responses over about 130 seconds, with exactly four `Player` markers in every snapshot and no event or vending-machine marker. Polling and protobuf decoding are healthy; this is not a marker-format regression.
+- Cargo, Patrol Helicopter, Chinook, marker-derived Oil Rig activity, Deep Sea, Hidden Vendors, and market/vendor observation therefore cannot receive new live state from the current public Rust+ API. Existing historical handlers are retained in case Facepunch restores the signal or a compatible server-authoritative bridge is added.
+- Team/death/connection data and paired-device/FCM alerts use other Rust+ responses and remain available. Do not implement retries or enum-format workarounds for the missing markers.
+- Restoring these event signals on a modded server requires a separately validated server-side Oxide/Carbon/uMod bridge; do not assume or install one without server-admin scope and a documented payload contract.
+
 ## Generic language detection, teammate language DB, and autotranslate
-- `src/util/languageDetector.js` provides silent lightweight detection for major scripts such as Han, Japanese kana, Hangul, Cyrillic, Arabic, Thai, Greek, Hebrew, and Devanagari, plus a basic English heuristic for short team-chat messages.
+- `src/util/languageDetector.js` detects major scripts directly and lazily loads the local, zero-API `eld` 2.1.0 extra-small model for short English/French/Chinese chat. English/French Rust-gaming vocabulary handles terse phrases while shared tokens such as `raid`, `base`, `loot`, and `gg` remain unknown on their own to avoid spam.
 - `src/plugins/teammateLanguageDatabase/index.js` stores per-guild/server CSV rows with `steamid,date,name,language`. It uses `XX` for unknown, preserves existing non-`XX` languages as source of truth, and appends a row when a SteamID appears with a new nickname.
 - The teammate language DB records observations from Rust+ polling team info, team-change broadcasts, and team-chat messages.
 - Manual commands: `!record [steamid] [pseudonym with spaces allowed]` adds a nickname row, and `!who [steamid]` lists known pseudonyms with dates/language. They should work in Rust team chat and the Discord commands channel.
-- `!autotranslate on [language[,language...]]` / `!autotranslate off` works in-game and in Discord command channels. `!autotranslate on` defaults to English. With two targets such as `en,zh`, English messages translate to Chinese and Chinese/non-English messages translate to English where detected.
-- Autotranslate posts translated messages to the Discord team-chat relay and repeats them into Rust team chat.
+- `!autotranslate on [language[,language...]]` / `!autotranslate off` works in-game and in Discord command channels. `!autotranslate on` defaults to English. `en,zh` supports English to Chinese and Chinese to English; `fr,zh` supports French to Chinese and Chinese to French.
+- To avoid spam, autotranslate only runs when the detected message language matches the player's first known non-`XX` language in the teammate database. A Chinese player writing English, for example, is intentionally not translated back into Chinese.
+- Autotranslate queues the translated Rust team-chat message before the optional Discord relay. Translation-engine and Discord failures are logged and do not cancel an already queued in-game translation.
+- The 2026-09-08 benchmark measured about 356k messages/second (2.8 microseconds/message) after loading the model, versus about 1.54M for the former incomplete word list. The lazy ELD import added about 45 MiB RSS in isolation but does not affect startup or script/lexicon-only messages; translation network latency remains dominant.
 
 ## Deep Sea event support
 - Deep Sea is not Underwater Labs. It is the Naval Update offshore timed world event reached beyond map-edge buoys, with Floating City, Ghost Ships, islands, patrol boats, no respawning loot, and a timer/radiation pressure before closure.

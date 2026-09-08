@@ -1,11 +1,23 @@
 # External Server Mod Compatibility
 
-Last verified: **2026-09-07 03:32:43 +02:00 (Europe/Paris)**.
+Last verified: **2026-09-08 (Europe/Paris)**.
 
 ## Scope
 
 This inventory covers Rust server mods whose payloads or APIs are explicitly consumed by rustplusplus. It does not
 list npm dependencies, external web services, or unrelated mods that may be installed on a game server.
+
+## Current Rust+ API limitation
+
+Facepunch's [Power Trip update](https://rust.facepunch.com/news/power-trip) of 2026-08-06 explicitly stopped sending
+vending-machine and event map markers (cargo, helicopters, and travelling vendor) to Rust+. A 2026-09-08 live capture
+confirmed healthy polling and decoding but returned only `Player` markers in all 14 `getMapMarkers` snapshots.
+
+Consequently, the standalone bot cannot currently observe Cargo Ship, Patrol Helicopter, Chinook, marker-derived Oil
+Rig activity, vending machines, Hidden Vendors, or Deep Sea through the public Rust+ stream. Existing handlers are
+kept for protocol history and a possible future restoration of the signal. Raid Alarm FCM notifications and
+team/death/connection information use separate payloads and are unaffected. Restoring world-event detection on a
+modded server requires a separately validated server-authoritative plugin bridge; it is not a marker-format fix.
 
 ## Supported external mods
 
@@ -39,8 +51,8 @@ Server verification procedure:
 
 | Feature | Classification | Version tracking |
 | --- | --- | --- |
-| Deep Sea | Vanilla Rust feature introduced by Facepunch in the [Naval Update](https://rust.facepunch.com/news/naval) on 2026-02-05. The bot observes Rust+ map markers. | Follow Rust/Rust+ protocol compatibility; there is no server-plugin version. |
-| Hidden Vendors | Bot-local persistence and filtering of Rust+ vending-machine markers. | Versioned with this repository. |
+| Deep Sea | Vanilla Rust feature introduced by Facepunch in the [Naval Update](https://rust.facepunch.com/news/naval) on 2026-02-05. Detection historically observed Rust+ vending-machine markers, which Facepunch stopped sending on 2026-08-06. | Currently unavailable from the public Rust+ stream; there is no server-plugin version. |
+| Hidden Vendors | Bot-local persistence and filtering of Rust+ vending-machine markers, which Facepunch stopped sending on 2026-08-06. | Existing history remains readable, but no new public Rust+ observations are currently available. |
 | AutoTranslate | Bot-local team-chat processing. | Versioned with this repository and its npm lockfile. |
 | Teammate Language Database | Bot-local CSV persistence. | Versioned with this repository. |
 | Smart Alarm | Vanilla Rust+ entity support. | Follow Rust/Rust+ protocol compatibility; it is not a uMod plugin. |

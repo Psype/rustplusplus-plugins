@@ -1,4 +1,4 @@
-/* Generic, silent language detector for short Rust team-chat messages. */
+/* Local language detector tuned for short Rust team-chat messages. */
 
 const SCRIPT_RULES = [
     { regex: /\p{Script=Han}/u, language: 'zh' },
@@ -12,13 +12,45 @@ const SCRIPT_RULES = [
     { regex: /\p{Script=Devanagari}/u, language: 'hi' }
 ];
 
-const ENGLISH_WORDS = new Set([
-    'a', 'about', 'all', 'am', 'an', 'and', 'are', 'at', 'back', 'base', 'be', 'been', 'but', 'by', 'can',
-    'come', 'do', 'dont', "don't", 'down', 'for', 'from', 'go', 'going', 'good', 'got', 'have', 'he', 'here',
-    'i', "i'm", 'im', 'in', 'is', 'it', 'its', "it's", 'left', 'loot', 'me', 'my', 'need', 'no', 'not', 'of',
-    'on', 'one', 'our', 'out', 'raid', 'right', 'see', 'the', 'there', 'they', 'this', 'to', 'up', 'us', 'we',
-    'what', 'where', 'who', 'with', 'yes', 'you', 'your'
+const DETECTOR_LANGUAGES = Object.freeze(['en', 'fr', 'zh']);
+const STRONG_WORDS = Object.freeze({
+    en: new Set([
+        'again', 'back', 'behind', 'bring', 'came', 'come', 'coming', 'cover', 'did', "didn't", 'enemy',
+        'enemies', 'give', 'go', 'going', 'help', 'need', 'now', 'people', 'please', 'should', 'stay', 'take',
+        'team', 'wait', 'where', 'whole', 'work', 'works', 'yes', 'wood', 'stone', 'sulfur', 'cloth', 'scrap'
+    ]),
+    fr: new Set([
+        'aide', 'attends', 'besoin', 'bois', 'ça', "c'est", 'cest', 'couvre', 'derrière', 'devrait',
+        'droite', 'ennemi', 'ennemis', 'équipe', 'ferraille', 'fonctionne', 'fonctionner', 'gauche', 'ici',
+        'maintenant', 'non', 'où', 'oui', 'pierre', 'personne', 'personnes', 'ramène', 'reste', 'soufre',
+        'tissu', 'toute', 'viens', 'venez'
+    ])
+});
+const COMMON_WORDS = Object.freeze({
+    en: new Set([
+        'a', 'am', 'an', 'and', 'are', 'at', 'can', "can't", 'cant', 'do', "don't", 'dont', 'for', 'from',
+        'get', 'got', 'have', 'he', 'here', 'his', 'i', "i'm", 'im', 'in', 'is', 'it', "it's", 'its', 'me',
+        'my', 'no', 'not', 'of', 'other', 'our', 'out', 'she', 'that', 'the', 'their', 'them', 'there', 'they',
+        'this', 'to', 'under', 'up', 'us', 'we', 'what', 'who', 'with', 'without', 'you', 'your'
+    ]),
+    fr: new Set([
+        'à', 'ai', 'avec', 'dans', 'de', 'des', 'du', 'elle', 'en', 'es', 'est', 'et', 'fait', 'faut', 'il',
+        "j'ai", 'je', 'la', 'là', 'le', 'les', 'moi', 'mon', 'ne', 'nous', 'on', 'pas', 'pour', 'sans', 'se',
+        'suis', 'sur', "t'es", 'tes', 'toi', 'tu', 'un', 'une', 'va', 'vous', 'votre'
+    ])
+});
+const GAMING_PHRASES = Object.freeze([
+    Object.freeze({
+        regex: /\b(?:raid|enemy|enemies|heli|cargo)\s+(?:at|near)\s+(?:the\s+)?(?:base|rig|grid)\b/u,
+        language: 'en'
+    }),
+    Object.freeze({
+        regex: /\b(?:on|je|tu|nous|vous)\s+(?:raid|farm|roam|depo|camp|push)\b/u,
+        language: 'fr'
+    })
 ]);
+
+let detectorPromise;
 
 function detectLanguage(text) {
     const normalized = normalizeText(text);
@@ -28,13 +60,56 @@ function detectLanguage(text) {
         if (rule.regex.test(normalized)) return rule.language;
     }
 
-    const words = normalized.toLowerCase().match(/[a-z']+/g) || [];
+    const lexicalLanguage = detectLexicalLanguage(normalized.toLocaleLowerCase('en'));
+    if (lexicalLanguage) return lexicalLanguage;
+
+    return getDetector().then(detector => {
+        const result = detector.detect(normalized);
+        if (!result.language || !result.isReliable()) return null;
+        return DETECTOR_LANGUAGES.includes(result.language) ? result.language : null;
+    });
+}
+
+function detectLexicalLanguage(text) {
+    for (const phrase of GAMING_PHRASES) {
+        if (phrase.regex.test(text)) return phrase.language;
+    }
+
+    const words = text.match(/\p{L}+(?:['’]\p{L}+)*/gu) || [];
     if (words.length === 0) return null;
 
-    const englishMatches = words.filter(word => ENGLISH_WORDS.has(word)).length;
-    if (englishMatches >= 2 || (words.length <= 3 && englishMatches >= 1)) return 'en';
+    const scores = { en: 0, fr: 0 };
+    const strongScores = { en: 0, fr: 0 };
+    for (const language of ['en', 'fr']) {
+        for (const word of words) {
+            const normalizedWord = word.replaceAll('’', "'");
+            if (STRONG_WORDS[language].has(normalizedWord)) {
+                scores[language] += 2;
+                strongScores[language]++;
+            }
+            else if (COMMON_WORDS[language].has(normalizedWord)) scores[language]++;
+        }
+    }
 
+    if (scores.en === scores.fr) return null;
+    const language = scores.en > scores.fr ? 'en' : 'fr';
+    const otherLanguage = language === 'en' ? 'fr' : 'en';
+    if (strongScores[language] > 0 && scores[language] > scores[otherLanguage]) return language;
+    if (scores[language] - scores[otherLanguage] >= 2) return language;
     return null;
+}
+
+function getDetector() {
+    if (!detectorPromise) {
+        detectorPromise = import('eld/extrasmall').then(({ eld }) => {
+            eld.setLanguageSubset([...DETECTOR_LANGUAGES]);
+            return eld;
+        }).catch(error => {
+            detectorPromise = undefined;
+            throw error;
+        });
+    }
+    return detectorPromise;
 }
 
 function normalizeText(text) {

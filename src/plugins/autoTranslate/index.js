@@ -9,7 +9,7 @@ const TeammateLanguageDatabase = require('../teammateLanguageDatabase/index.js')
 const CONFIG_DIR = Path.join(__dirname, '..', '..', '..', 'config');
 const SETTINGS_PATH = Path.join(CONFIG_DIR, 'autotranslate-settings.json');
 const LEGACY_SETTINGS_PATH = Path.join(__dirname, '..', '..', '..', 'data', 'autotranslate-settings.json');
-const DEFAULT_SETTINGS = { enabled: false, targets: ['en'] };
+const DEFAULT_SETTINGS = Object.freeze({ enabled: false, targets: Object.freeze(['en']) });
 
 function getSettings(rustplus) {
     const all = readAll();
@@ -26,46 +26,42 @@ function setSettings(rustplus, settings) {
 function parseCommand(rustplus, command) {
     const args = command.trim().split(/\s+/).slice(1);
     const action = (args.shift() || '').toLowerCase();
-    if (!['on', 'off'].includes(action)) return { error: 'usage' };
+    if (!['on', 'off'].includes(action)) return Object.freeze({ error: 'usage' });
     if (action === 'off') return setSettings(rustplus, { enabled: false, targets: getSettings(rustplus).targets });
 
     const targetText = args.join(' ').trim() || 'en';
     const targets = targetText.split(',').map(resolveLanguage).filter(Boolean);
-    if (targets.length === 0) return { error: 'language' };
-    return setSettings(rustplus, { enabled: true, targets: [...new Set(targets)] });
+    if (targets.length === 0) return Object.freeze({ error: 'language' });
+    return setSettings(rustplus, { enabled: true, targets });
 }
 
-async function translateMessage(rustplus, message) {
+async function translateMessage(rustplus, message, dependencies = {}) {
+    if (!message || typeof message.message !== 'string') return null;
     if (isBotOrTranslationMessage(message.message)) return null;
 
-    const settings = getSettings(rustplus);
+    const settings = dependencies.settings ? normalizeSettings(dependencies.settings) : getSettings(rustplus);
     if (!settings.enabled) return null;
 
-    const source = LanguageDetector.detectLanguage(message.message);
+    const source = await LanguageDetector.detectLanguage(message.message);
     if (!source) return null;
-    const knownLanguage = TeammateLanguageDatabase.getKnownLanguage(rustplus, message.steamId);
-    // strict mode: unknown player = no translation
-    if (!knownLanguage) return null;
-    // strict mode: only translate when player speaks their registered language
-    if (source !== knownLanguage) return null;
+    const knownLanguage = Object.prototype.hasOwnProperty.call(dependencies, 'knownLanguage') ?
+        dependencies.knownLanguage : TeammateLanguageDatabase.getKnownLanguage(rustplus, message.steamId);
+    if (!knownLanguage || source !== knownLanguage.toString().trim().toLowerCase()) return null;
     const target = chooseTarget(source, settings.targets);
     if (!target || target === source) return null;
 
-    try {
-        const translated = source ? await Translate(message.message, { from: source, to: target }) :
-            await Translate(message.message, target);
-        if (!translated || translated.trim() === message.message.trim()) return null;
-        return { source, target, translated };
-    }
-    catch (e) {
-        return null;
-    }
+    const translator = dependencies.translator || Translate;
+    if (typeof translator !== 'function') throw new TypeError('Translator must be a function.');
+
+    const translated = await translator(message.message, { from: source, to: target });
+    if (typeof translated !== 'string' || !translated.trim() || translated.trim() === message.message.trim()) return null;
+    return Object.freeze({ source, target, translated });
 }
 
 function isBotOrTranslationMessage(message) {
     if (typeof message !== 'string') return false;
     const normalized = message.trimStart();
-    return normalized.startsWith('[BOT]') || /^\[→[a-z]{2,3}\]\s*\[BOT\]/i.test(normalized);
+    return normalized.startsWith('[BOT]') || /^\[(?:→|â†’)[a-z]{2,3}\]\s*/i.test(normalized);
 }
 
 function chooseTarget(source, targets) {
@@ -75,6 +71,7 @@ function chooseTarget(source, targets) {
 }
 
 function resolveLanguage(value) {
+    if (value === undefined || value === null) return null;
     const normalized = value.toString().trim().toLowerCase();
     if (/^[a-z]{2,3}$/.test(normalized)) return normalized;
     return Languages[normalized] || null;
@@ -100,6 +97,15 @@ function migrateLegacySettings() {
 }
 
 function getKey(rustplus) { return `${rustplus.guildId}:${rustplus.serverId}`; }
-function normalizeSettings(settings) { return { ...DEFAULT_SETTINGS, ...(settings || {}) }; }
+function normalizeSettings(settings) {
+    const input = settings && typeof settings === 'object' ? settings : {};
+    const targets = Array.isArray(input.targets) ? input.targets
+        .map(resolveLanguage)
+        .filter(Boolean) : DEFAULT_SETTINGS.targets;
+    return Object.freeze({
+        enabled: input.enabled === true,
+        targets: Object.freeze(targets.length > 0 ? [...new Set(targets)] : [...DEFAULT_SETTINGS.targets])
+    });
+}
 
 module.exports = { getSettings, parseCommand, translateMessage };

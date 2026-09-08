@@ -24,13 +24,13 @@ function recordTeamInfo(rustplus, teamInfo) {
     }
 }
 
-function recordTeamMessage(rustplus, teamMessage) {
+async function recordTeamMessage(rustplus, teamMessage) {
     if (!teamMessage) return;
 
     recordPlayer(rustplus, {
         steamId: teamMessage.steamId,
         name: teamMessage.name,
-        language: LanguageDetector.detectLanguage(teamMessage.message)
+        language: await LanguageDetector.detectLanguage(teamMessage.message)
     });
 }
 
