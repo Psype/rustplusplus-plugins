@@ -1,7 +1,10 @@
 const Assert = require('node:assert/strict');
+const Fs = require('node:fs');
+const Path = require('node:path');
 const Test = require('node:test');
 
 const PluginManager = require('../src/plugins/pluginManager.js');
+const TeammateLanguageDatabase = require('../src/plugins/teammateLanguageDatabase/index.js');
 
 function createClient() {
     return {
@@ -94,6 +97,28 @@ Test('unknown commands fall through without side effects', async () => {
 
     Assert.deepEqual(response, { handled: false });
     Assert.equal(Object.isFrozen(response), true);
+});
+
+Test('record command preserves a pseudonym with non-ASCII characters', async t => {
+    const client = createClient();
+    const rustplus = createRustplus();
+    rustplus.guildId = 'test-record-command';
+    const csvPath = Path.join(__dirname, '..', 'data', 'teammate-language-database',
+        'test-record-command-server.csv');
+    t.after(() => {
+        if (Fs.existsSync(csvPath)) Fs.unlinkSync(csvPath);
+    });
+
+    const response = await PluginManager.handleCommand({
+        source: 'inGame', client, rustplus, guildId: rustplus.guildId,
+        message: {}, command: '!record 76561198000000003 这就是我的宿命',
+        commandLowerCase: '!record 76561198000000003 这就是我的宿命', prefix: '!'
+    });
+
+    Assert.equal(response.handled, true);
+    Assert.deepEqual(
+        TeammateLanguageDatabase.getKnownPseudonyms(rustplus, '76561198000000003').map(entry => entry.name),
+        ['这就是我的宿命']);
 });
 
 Test('Deep Sea detection requires an off-map vendor cluster', async () => {

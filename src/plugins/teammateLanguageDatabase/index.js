@@ -12,6 +12,7 @@ const LanguageDetector = require('../../util/languageDetector.js');
 const DATA_DIR = Path.join(__dirname, '..', '..', '..', 'data', 'teammate-language-database');
 const CSV_HEADER = ['steamid', 'date', 'name', 'language'];
 const UNKNOWN_LANGUAGE = 'XX';
+const LANGUAGE_SEPARATOR = ';';
 
 function recordTeamInfo(rustplus, teamInfo) {
     if (!teamInfo || !Array.isArray(teamInfo.members)) return;
@@ -46,8 +47,10 @@ function getKnownPseudonyms(rustplus, steamId) {
     if (!normalizedSteamId) return [];
 
     const csvPath = getCsvPath(rustplus);
+    const rows = readRows(csvPath);
+    const language = serializeLanguages(getLanguagesForSteamId(rows, normalizedSteamId));
     const seen = new Set();
-    return readRows(csvPath)
+    return rows
         .filter(row => row.steamid === normalizedSteamId && row.name)
         .filter(row => {
             if (seen.has(row.name)) return false;
@@ -57,18 +60,22 @@ function getKnownPseudonyms(rustplus, steamId) {
         .map(row => ({
             name: row.name,
             date: row.date,
-            language: row.language || UNKNOWN_LANGUAGE
+            language: language
         }));
 }
 
 function getKnownLanguage(rustplus, steamId) {
+    return getKnownLanguages(rustplus, steamId)[0] || null;
+}
+
+function getKnownLanguages(rustplus, steamId) {
     const normalizedSteamId = normalizeSteamId(steamId);
-    if (!normalizedSteamId) return null;
+    if (!normalizedSteamId) return Object.freeze([]);
 
     const csvPath = getCsvPath(rustplus);
     const rows = readRows(csvPath);
 
-    return getLanguageForSteamId(rows, normalizedSteamId);
+    return getLanguagesForSteamId(rows, normalizedSteamId);
 }
 
 function recordPlayer(rustplus, player) {
@@ -79,8 +86,10 @@ function recordPlayer(rustplus, player) {
     ensureDataDir();
     const csvPath = getCsvPath(rustplus);
     const rows = readRows(csvPath);
-    const existingLanguage = getLanguageForSteamId(rows, steamId);
-    const language = existingLanguage || normalizeLanguage(player.language) || UNKNOWN_LANGUAGE;
+    const existingLanguages = getLanguagesForSteamId(rows, steamId);
+    const candidateLanguages = normalizeLanguages(player.language);
+    const languages = existingLanguages.length === 0 ? candidateLanguages : existingLanguages;
+    const language = serializeLanguages(languages);
     const lastRow = getLastRowForSteamId(rows, steamId);
 
     if (lastRow && lastRow.name === name) {
@@ -123,7 +132,7 @@ function readRows(csvPath) {
             steamid: values[0] || '',
             date: values[1] || '',
             name: values[2] || '',
-            language: values[3] || UNKNOWN_LANGUAGE
+            language: serializeLanguages(normalizeLanguages(values[3]))
         };
     });
 }
@@ -138,9 +147,30 @@ function writeRows(csvPath, rows) {
     Fs.writeFileSync(csvPath, `${lines.join('\n')}\n`);
 }
 
-function getLanguageForSteamId(rows, steamId) {
-    const row = rows.find(entry => entry.steamid === steamId && entry.language && entry.language !== UNKNOWN_LANGUAGE);
-    return row ? row.language : null;
+function getLanguagesForSteamId(rows, steamId) {
+    const row = getLatestRowForSteamId(rows, steamId);
+    return row ? normalizeLanguages(row.language) : Object.freeze([]);
+}
+
+function getLatestRowForSteamId(rows, steamId) {
+    let latestRow = null;
+    let latestTimestamp = Number.NEGATIVE_INFINITY;
+    let hasValidTimestamp = false;
+
+    for (const row of rows) {
+        if (row.steamid !== steamId) continue;
+        const timestamp = Date.parse(row.date);
+        if (!Number.isFinite(timestamp)) {
+            if (!hasValidTimestamp) latestRow = row;
+            continue;
+        }
+        if (!hasValidTimestamp || timestamp >= latestTimestamp) {
+            latestRow = row;
+            latestTimestamp = timestamp;
+            hasValidTimestamp = true;
+        }
+    }
+    return latestRow;
 }
 
 function getLastRowForSteamId(rows, steamId) {
@@ -166,6 +196,17 @@ function normalizeLanguage(language) {
     if (!language) return null;
     const value = language.toString().trim();
     return /^[a-zA-Z]{2}$/.test(value) ? value.toLowerCase() : null;
+}
+
+function normalizeLanguages(languages) {
+    const values = Array.isArray(languages) ? languages :
+        (languages === undefined || languages === null ? [] : languages.toString().split(LANGUAGE_SEPARATOR));
+    const normalized = values.map(normalizeLanguage).filter(language => language && language !== 'xx');
+    return Object.freeze([...new Set(normalized)]);
+}
+
+function serializeLanguages(languages) {
+    return languages.length > 0 ? languages.join(LANGUAGE_SEPARATOR) : UNKNOWN_LANGUAGE;
 }
 
 function sanitizeFilePart(value) {
@@ -210,5 +251,6 @@ module.exports = {
     recordTeamMessage,
     recordManual,
     getKnownPseudonyms,
-    getKnownLanguage
+    getKnownLanguage,
+    getKnownLanguages
 };

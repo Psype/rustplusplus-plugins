@@ -91,6 +91,18 @@ async function messageBroadcastTeamMessage(rustplus, client, message) {
     tempMessage = tempMessage.replace(/^<color.+?<\/color>/g, '');      /* Unknown */
     message.broadcast.teamMessage.message.message = tempMessage;
 
+    if (isQueuedBotEcho(rustplus, steamId, message.broadcast.teamMessage.message.message)) {
+        /* Echo of a queued bot message from Rust+; do not relay or parse it. */
+        removeSentBotMessage(rustplus, message.broadcast.teamMessage.message.message);
+
+        /* Delay inGameChatHandler so command replies do not flood team chat. */
+        clearTimeout(rustplus.inGameChatTimeout);
+        const commandDelayMs = parseInt(rustplus.generalSettings.commandDelay) * 1000;
+        rustplus.inGameChatTimeout = setTimeout(
+            InGameChatHandler.inGameChatHandler, commandDelayMs, rustplus, client);
+        return;
+    }
+
     await PluginManager.onTeamMessage({
         rustplus, client, message: message.broadcast.teamMessage.message
     });
@@ -101,18 +113,6 @@ async function messageBroadcastTeamMessage(rustplus, client, message) {
             message: message.broadcast.teamMessage.message.message
         }));
         TeamChatHandler(rustplus, client, message.broadcast.teamMessage.message);
-        return;
-    }
-
-    if (isQueuedBotEcho(rustplus, steamId, message.broadcast.teamMessage.message.message)) {
-        /* Echo of a queued bot message from Rust+; do not relay or parse it. */
-        removeSentBotMessage(rustplus, message.broadcast.teamMessage.message.message);
-
-        /* Delay inGameChatHandler so command replies do not flood team chat. */
-        clearTimeout(rustplus.inGameChatTimeout);
-        const commandDelayMs = parseInt(rustplus.generalSettings.commandDelay) * 1000;
-        rustplus.inGameChatTimeout = setTimeout(
-            InGameChatHandler.inGameChatHandler, commandDelayMs, rustplus, client);
         return;
     }
 

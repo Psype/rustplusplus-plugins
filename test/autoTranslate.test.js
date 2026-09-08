@@ -32,6 +32,34 @@ Test('translates English and Chinese when each matches the player language', asy
     Assert.deepEqual(calls.map(({ from, to }) => [from, to]), [['en', 'zh'], ['zh', 'en']]);
 });
 
+Test('translates any declared player language to the other configured language', async () => {
+    const result = await AutoTranslate.translateMessage(rustplus, {
+        steamId: 'multilingual-player',
+        message: 'the bot should be fixed'
+    }, {
+        settings: { enabled: true, targets: ['en', 'zh'] },
+        knownLanguages: ['fr', 'en'],
+        translator: async (text, { from, to }) => `${from}->${to}:${text}`
+    });
+
+    Assert.deepEqual(result, {
+        source: 'en', target: 'zh', translated: 'en->zh:the bot should be fixed'
+    });
+});
+
+Test('does not translate a declared language outside the configured pair', async () => {
+    const result = await AutoTranslate.translateMessage(rustplus, {
+        steamId: 'multilingual-player',
+        message: 'maintenant ça devrait fonctionner'
+    }, {
+        settings: { enabled: true, targets: ['en', 'zh'] },
+        knownLanguages: ['fr', 'en'],
+        translator: async () => { throw new Error('translator must not run'); }
+    });
+
+    Assert.equal(result, null);
+});
+
 Test('does not translate a player speaking outside their registered language', async () => {
     const result = await AutoTranslate.translateMessage(rustplus, {
         steamId: 'chinese-player',

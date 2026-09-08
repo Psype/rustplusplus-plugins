@@ -662,12 +662,12 @@ Subcommand | Description | Required
 
 ## **record**
 
-> **Manually record a SteamID and pseudonym in the teammate language CSV database.** The pseudonym is everything after the SteamID, so spaces are allowed. Existing language values for that SteamID are inherited and not overwritten. Works from in-game team chat and from the Discord commands channel.
+> **Manually record a SteamID and pseudonym in the teammate language CSV database.** The pseudonym is everything after the SteamID, so spaces and special characters are allowed. The language list is managed directly in the CSV; a new alias inherits the latest dated row for that SteamID. Works from in-game team chat and from the Discord commands channel.
 <br>Command: `!record [steamid] [pseudonym]`
 
 ## **who**
 
-> **List all known pseudonyms for a SteamID from the teammate language CSV database.** Results include the first recorded date for each known pseudonym and the current language code stored for that SteamID. Works from in-game team chat and from the Discord commands channel.
+> **List all known pseudonyms for a SteamID from the teammate language CSV database.** Results include the first recorded date for each known pseudonym and the semicolon-separated language codes from the latest dated row for that SteamID. Works from in-game team chat and from the Discord commands channel.
 <br>Command: `!who [steamid]`
 
 ## **send**

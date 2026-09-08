@@ -27,7 +27,7 @@
 ## In-Game and Discord Commands
 - **afk** - `!afk` - Display AFK teammates.
 - **alive** - `!alive` - Display who has been alive longest.
-- **autotranslate** - `!autotranslate on [language[,language...]]` or `!autotranslate off` - Translate a teammate only when the message matches their recorded original language; relay the result to Rust team chat and Discord.
+- **autotranslate** - `!autotranslate on [language[,language...]]` or `!autotranslate off` - Translate a teammate only when the message matches one of their recorded languages and the active translation pair; relay the result to Rust team chat and Discord.
 - **cargo** - `!cargo` - Display information regarding Cargoship.
 - **chinook** - `!chinook` - Display information regarding Chinook 47.
 - **commands [command]** - `!commands [command]` - List all commands or show one-line usage for one command.
@@ -52,7 +52,7 @@
 - **player/players** - `!player [name]` or `!players` - Get Battlemetrics information about players.
 - **pop** - `!pop` - Get population of the server.
 - **prox** - `!prox` - Display teammates that are nearby.
-- **record** - `!record [steamid] [pseudonym]` - Add a pseudonym to the teammate language CSV database.
+- **record** - `!record [steamid] [pseudonym]` - Add a pseudonym; player languages are edited directly in the teammate CSV.
 - **recycle** - `!recycle [item] [quantity]` - Display the output of recycling an item.
 - **research** - `!research [item]` - Display the cost to research an item.
 - **send** - `!send [discord user] [message]` - Send a message through rustplusplus to a person on Discord.

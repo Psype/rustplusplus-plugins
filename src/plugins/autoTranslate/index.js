@@ -44,9 +44,8 @@ async function translateMessage(rustplus, message, dependencies = {}) {
 
     const source = await LanguageDetector.detectLanguage(message.message);
     if (!source) return null;
-    const knownLanguage = Object.prototype.hasOwnProperty.call(dependencies, 'knownLanguage') ?
-        dependencies.knownLanguage : TeammateLanguageDatabase.getKnownLanguage(rustplus, message.steamId);
-    if (!knownLanguage || source !== knownLanguage.toString().trim().toLowerCase()) return null;
+    const knownLanguages = getKnownLanguages(rustplus, message.steamId, dependencies);
+    if (!knownLanguages.includes(source)) return null;
     const target = chooseTarget(source, settings.targets);
     if (!target || target === source) return null;
 
@@ -67,7 +66,21 @@ function isBotOrTranslationMessage(message) {
 function chooseTarget(source, targets) {
     if (!Array.isArray(targets) || targets.length === 0) return null;
     if (source && targets.includes(source) && targets.length > 1) return targets.find(target => target !== source);
-    return targets[0];
+    if (targets.length === 1 && targets[0] !== source) return targets[0];
+    return null;
+}
+
+function getKnownLanguages(rustplus, steamId, dependencies) {
+    let values;
+    if (Object.prototype.hasOwnProperty.call(dependencies, 'knownLanguages')) values = dependencies.knownLanguages;
+    else if (Object.prototype.hasOwnProperty.call(dependencies, 'knownLanguage')) values = dependencies.knownLanguage;
+    else return TeammateLanguageDatabase.getKnownLanguages(rustplus, steamId);
+
+    const languages = Array.isArray(values) ? values :
+        (values === undefined || values === null ? [] : values.toString().split(';'));
+    return Object.freeze([...new Set(languages
+        .map(language => language === undefined || language === null ? '' : language.toString().trim().toLowerCase())
+        .filter(language => /^[a-z]{2}$/.test(language) && language !== 'xx'))]);
 }
 
 function resolveLanguage(value) {
