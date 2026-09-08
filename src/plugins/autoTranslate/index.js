@@ -43,18 +43,42 @@ async function translateMessage(rustplus, message, dependencies = {}) {
     if (!settings.enabled) return null;
 
     const source = await LanguageDetector.detectLanguage(message.message);
-    if (!source) return null;
+    if (!source) {
+        logDecision(rustplus, message, 'SKIPPED', 'language-undetected', settings.targets);
+        return null;
+    }
     const knownLanguages = getKnownLanguages(rustplus, message.steamId, dependencies);
-    if (!knownLanguages.includes(source)) return null;
+    if (!knownLanguages.includes(source)) {
+        logDecision(rustplus, message, 'SKIPPED', 'source-not-declared', settings.targets, source, knownLanguages);
+        return null;
+    }
     const target = chooseTarget(source, settings.targets);
-    if (!target || target === source) return null;
+    if (!target || target === source) {
+        logDecision(rustplus, message, 'SKIPPED', 'source-not-in-active-pair',
+            settings.targets, source, knownLanguages);
+        return null;
+    }
 
     const translator = dependencies.translator || Translate;
     if (typeof translator !== 'function') throw new TypeError('Translator must be a function.');
 
     const translated = await translator(message.message, { from: source, to: target });
-    if (typeof translated !== 'string' || !translated.trim() || translated.trim() === message.message.trim()) return null;
+    if (typeof translated !== 'string' || !translated.trim() || translated.trim() === message.message.trim()) {
+        logDecision(rustplus, message, 'SKIPPED', 'empty-or-unchanged-translation',
+            settings.targets, source, knownLanguages, target);
+        return null;
+    }
+    logDecision(rustplus, message, 'TRANSLATED', 'ok', settings.targets, source, knownLanguages, target);
     return Object.freeze({ source, target, translated });
+}
+
+function logDecision(rustplus, message, decision, reason, targets, source = '-', knownLanguages = [], target = '-') {
+    if (!rustplus || typeof rustplus.log !== 'function') return;
+    const steamId = message && message.steamId !== undefined && message.steamId !== null ?
+        message.steamId.toString() : 'unknown';
+    rustplus.log('AUTOTRANSLATE',
+        `${decision} steamId=${steamId} source=${source} player=${knownLanguages.join(';') || '-'} ` +
+        `targets=${targets.join(';') || '-'} target=${target} reason=${reason}`);
 }
 
 function isBotOrTranslationMessage(message) {

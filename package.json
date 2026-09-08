@@ -9,6 +9,7 @@
         "test": "npm run test:unit && npm run test:types",
         "test:unit": "node --test test/*.test.js",
         "test:types": "tsc --noEmit -p .",
+        "test:autotranslate:live": "node test/liveAutoTranslate.js",
         "benchmark:plugins": "node benchmark/plugin-dispatch.js"
     },
     "repository": {

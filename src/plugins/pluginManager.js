@@ -107,7 +107,8 @@ async function handleCommand(context) {
 
 async function translateTeamMessage(context) {
     try {
-        return await AutoTranslate.translateMessage(context.rustplus, context.message);
+        return await AutoTranslate.translateMessage(
+            context.rustplus, context.message, context.translationDependencies || {});
     }
     catch (error) {
         reportFailure(context, { name: 'auto-translate' }, 'translateTeamMessage', error);

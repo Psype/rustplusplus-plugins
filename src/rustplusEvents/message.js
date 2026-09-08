@@ -38,10 +38,10 @@ module.exports = {
         if (!rustplus.isOperational) return;
 
         if (message.hasOwnProperty('response')) {
-            messageResponse(rustplus, client, message);
+            await messageResponse(rustplus, client, message);
         }
         else if (message.hasOwnProperty('broadcast')) {
-            messageBroadcast(rustplus, client, message);
+            await messageBroadcast(rustplus, client, message);
         }
     },
 };
@@ -52,10 +52,10 @@ async function messageResponse(rustplus, client, message) {
 
 async function messageBroadcast(rustplus, client, message) {
     if (message.broadcast.hasOwnProperty('teamChanged')) {
-        messageBroadcastTeamChanged(rustplus, client, message);
+        await messageBroadcastTeamChanged(rustplus, client, message);
     }
     else if (message.broadcast.hasOwnProperty('teamMessage')) {
-        messageBroadcastTeamMessage(rustplus, client, message);
+        await messageBroadcastTeamMessage(rustplus, client, message);
     }
     else if (message.broadcast.hasOwnProperty('entityChanged')) {
         messageBroadcastEntityChanged(rustplus, client, message);
@@ -112,7 +112,7 @@ async function messageBroadcastTeamMessage(rustplus, client, message) {
             user: `${message.broadcast.teamMessage.message.name} (${steamId})`,
             message: message.broadcast.teamMessage.message.message
         }));
-        TeamChatHandler(rustplus, client, message.broadcast.teamMessage.message);
+        await TeamChatHandler(rustplus, client, message.broadcast.teamMessage.message);
         return;
     }
 
@@ -124,7 +124,7 @@ async function messageBroadcastTeamMessage(rustplus, client, message) {
         user: `${message.broadcast.teamMessage.message.name} (${steamId})`
     }));
 
-    TeamChatHandler(rustplus, client, message.broadcast.teamMessage.message);
+    await TeamChatHandler(rustplus, client, message.broadcast.teamMessage.message);
 }
 
 

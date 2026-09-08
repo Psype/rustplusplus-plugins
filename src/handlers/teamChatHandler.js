@@ -21,12 +21,14 @@
 const DiscordMessages = require('../discordTools/discordMessages.js');
 const PluginManager = require('../plugins/pluginManager.js');
 
-module.exports = async function (rustplus, client, message) {
+module.exports = async function (rustplus, client, message, translationDependencies = {}) {
     const originalRelay = Promise.resolve()
         .then(() => DiscordMessages.sendTeamChatMessage(rustplus.guildId, message))
         .catch(error => rustplus.log('AUTOTRANSLATE', `Discord source relay: ${error}`, 'warning'));
 
-    const translation = await PluginManager.translateTeamMessage({ rustplus, client, message });
+    const translation = await PluginManager.translateTeamMessage({
+        rustplus, client, message, translationDependencies
+    });
     if (translation) {
         const translatedMessage = `[→${translation.target}] ${translation.translated}`;
         await rustplus.sendInGameMessage(translatedMessage);

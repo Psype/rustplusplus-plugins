@@ -400,6 +400,7 @@ Command | Description
 > **Automatically translate Rust team-chat messages back into team chat and into the Discord relay.** `!autotranslate on` defaults to English. You can pass one target language, or two languages separated by a comma. With two targets, if the detected source language already matches one target, the other target is used; for example `!autotranslate on en,zh` translates Chinese messages to English and English messages to Chinese. Language names from the existing translation command are accepted, such as `english,chinese`, as well as language codes such as `en,zh`.
 <br>Command: `!autotranslate on [language[,language...]]`
 <br>Command: `!autotranslate off`
+<br>Server live check: `npm run test:autotranslate:live` exercises the real detector, Google translation engine, handler, Rust queue, and final send boundary without publishing to Rust or Discord.
 
 ## **afk**
 
