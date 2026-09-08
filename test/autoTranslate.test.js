@@ -88,6 +88,36 @@ Test('supports the future French and Chinese target pair', async () => {
     });
 });
 
+Test('translates a short French translation test to Chinese', async () => {
+    const result = await AutoTranslate.translateMessage(rustplus, {
+        steamId: 'french-player',
+        message: 'test de traduction'
+    }, {
+        settings: { enabled: true, targets: ['fr', 'zh'] },
+        knownLanguages: ['fr'],
+        translator: async (text, { from, to }) => `${from}->${to}:${text}`
+    });
+
+    Assert.deepEqual(result, {
+        source: 'fr', target: 'zh', translated: 'fr->zh:test de traduction'
+    });
+});
+
+Test('uses the English fallback for ambiguous Latin gaming text', async () => {
+    const result = await AutoTranslate.translateMessage(rustplus, {
+        steamId: 'english-player',
+        message: 'loot'
+    }, {
+        settings: { enabled: true, targets: ['en', 'zh'] },
+        knownLanguages: ['en'],
+        translator: async (text, { from, to }) => `${from}->${to}:${text}`
+    });
+
+    Assert.deepEqual(result, {
+        source: 'en', target: 'zh', translated: 'en->zh:loot'
+    });
+});
+
 Test('does not swallow translator failures', async () => {
     await Assert.rejects(() => AutoTranslate.translateMessage(rustplus, {
         steamId: 'english-player',
@@ -99,7 +129,7 @@ Test('does not swallow translator failures', async () => {
     }), /translator offline/);
 });
 
-Test('ignores bot translations and ambiguous gaming-only messages', async () => {
+Test('ignores bot translations and messages without letters', async () => {
     const translator = async () => { throw new Error('translator must not run'); };
     const settings = { enabled: true, targets: ['en', 'zh'] };
 
@@ -107,6 +137,6 @@ Test('ignores bot translations and ambiguous gaming-only messages', async () => 
         message: '[→zh] 现在应该可以用了'
     }, { settings, knownLanguage: 'zh', translator }), null);
     Assert.equal(await AutoTranslate.translateMessage(rustplus, {
-        message: 'raid'
+        message: '123'
     }, { settings, knownLanguage: 'en', translator }), null);
 });

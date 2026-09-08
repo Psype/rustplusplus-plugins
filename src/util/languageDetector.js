@@ -17,13 +17,14 @@ const STRONG_WORDS = Object.freeze({
     en: new Set([
         'again', 'back', 'behind', 'bring', 'came', 'come', 'coming', 'cover', 'did', "didn't", 'enemy',
         'enemies', 'give', 'go', 'going', 'help', 'need', 'now', 'people', 'please', 'should', 'stay', 'take',
-        'team', 'wait', 'where', 'whole', 'work', 'works', 'yes', 'wood', 'stone', 'sulfur', 'cloth', 'scrap'
+        'team', 'translate', 'translated', 'translation', 'translator', 'wait', 'where', 'whole', 'work', 'works',
+        'yes', 'wood', 'stone', 'sulfur', 'cloth', 'scrap'
     ]),
     fr: new Set([
         'aide', 'attends', 'besoin', 'bois', 'ça', "c'est", 'cest', 'couvre', 'derrière', 'devrait',
         'droite', 'ennemi', 'ennemis', 'équipe', 'ferraille', 'fonctionne', 'fonctionner', 'gauche', 'ici',
         'maintenant', 'non', 'où', 'oui', 'pierre', 'personne', 'personnes', 'ramène', 'reste', 'soufre',
-        'tissu', 'toute', 'viens', 'venez'
+        'tissu', 'toute', 'traducteur', 'traduction', 'traduire', 'traduit', 'viens', 'venez'
     ])
 });
 const COMMON_WORDS = Object.freeze({
@@ -65,8 +66,8 @@ function detectLanguage(text) {
 
     return getDetector().then(detector => {
         const result = detector.detect(normalized);
-        if (!result.language || !result.isReliable()) return null;
-        return DETECTOR_LANGUAGES.includes(result.language) ? result.language : null;
+        if (DETECTOR_LANGUAGES.includes(result.language)) return result.language;
+        return looksLikeLatinText(normalized) ? 'en' : null;
     });
 }
 
@@ -119,6 +120,11 @@ function normalizeText(text) {
         .replace(/<@!?\d+>|<#[0-9]+>|<@&[0-9]+>/g, ' ')
         .replace(/[0-9_.,!?;:()[\]{}<>/\\|@#$%^&*+=~`"-]+/g, ' ')
         .trim();
+}
+
+function looksLikeLatinText(text) {
+    const letters = text.match(/\p{L}/gu) || [];
+    return letters.length > 0 && letters.every(letter => /\p{Script=Latin}/u.test(letter));
 }
 
 module.exports = { detectLanguage };
