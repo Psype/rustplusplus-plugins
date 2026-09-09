@@ -1,10 +1,10 @@
 const Fs = require('fs');
 const Path = require('path');
-const Translate = require('translate');
 
 const Languages = require('../../util/languages.js');
 const LanguageDetector = require('../../util/languageDetector.js');
 const TeammateLanguageDatabase = require('../teammateLanguageDatabase/index.js');
+const GoogleTranslator = require('./googleTranslator.js');
 
 const CONFIG_DIR = Path.join(__dirname, '..', '..', '..', 'config');
 const SETTINGS_PATH = Path.join(CONFIG_DIR, 'autotranslate-settings.json');
@@ -59,7 +59,7 @@ async function translateMessage(rustplus, message, dependencies = {}) {
         return null;
     }
 
-    const translator = dependencies.translator || Translate;
+    const translator = dependencies.translator || GoogleTranslator;
     if (typeof translator !== 'function') throw new TypeError('Translator must be a function.');
 
     const translated = await translator(message.message, { from: source, to: target });

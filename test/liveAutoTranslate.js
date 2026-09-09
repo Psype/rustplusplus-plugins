@@ -18,6 +18,7 @@ const TeamChatHandler = require('../src/handlers/teamChatHandler.js');
 
 async function run() {
     const rustMessages = [];
+    const diagnosticLogs = [];
     const scenarios = Object.freeze([
         Object.freeze({
             sourceMessage: 'test de traduction',
@@ -51,7 +52,7 @@ async function run() {
         inGameChatQueue: [],
         inGameChatTimeout: null,
         messagesSentByBot: [],
-        log: () => {},
+        log: (...values) => diagnosticLogs.push(values.map(value => value && value.toString()).join(' ')),
         sendInGameMessage(message) {
             return InGameChatHandler.inGameChatHandler(this, client, message);
         },
@@ -66,6 +67,7 @@ async function run() {
 
     try {
         for (const scenario of scenarios) {
+            const diagnosticStart = diagnosticLogs.length;
             await TeamChatHandler(rustplus, client, {
                 steamId: scenario.playerLanguages.includes('zh') ?
                     '76561198843692446' : '76561197975819827',
@@ -76,7 +78,9 @@ async function run() {
                 knownLanguages: scenario.playerLanguages
             });
 
-            Assert.equal(rustplus.inGameChatQueue.length, 1);
+            Assert.equal(rustplus.inGameChatQueue.length, 1,
+                `No translated Rust message was queued for ${JSON.stringify(scenario.sourceMessage)}. ` +
+                `Plugin logs: ${JSON.stringify(diagnosticLogs.slice(diagnosticStart))}`);
             Assert.match(rustplus.inGameChatQueue[0],
                 new RegExp(`^\\[BOT\\] \\[→${scenario.expectedTarget}\\] `, 'u'));
             clearTimeout(rustplus.inGameChatTimeout);
