@@ -64,10 +64,15 @@ Test('invalid command contexts fail closed at the plugin boundary', async () => 
 Test('a synchronous optional plugin failure preserves the core fallback', () => {
     const DeepSea = require('../src/plugins/deepSea');
     const original = DeepSea.formatCommand;
+    const logs = [];
+    const rustplus = createRustplus();
+    rustplus.log = (...values) => logs.push(values);
     DeepSea.formatCommand = () => { throw new Error('deterministic failure'); };
 
     try {
-        Assert.equal(PluginManager.getDeepSeaStatus(createRustplus(), true), null);
+        Assert.equal(PluginManager.getDeepSeaStatus(rustplus, true), null);
+        Assert.equal(logs.length, 1);
+        Assert.equal(logs[0][2], 'warn');
     }
     finally {
         DeepSea.formatCommand = original;

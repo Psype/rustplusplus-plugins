@@ -28,6 +28,7 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   - `config/autotranslate-settings.json` for `!autotranslate`.
 - Legacy paths are migrated/copied forward automatically where implemented (`logs/logging-settings.json` and `data/autotranslate-settings.json`).
 - `!logs on|off` works in-game and in the Discord command chat. Turning logs off keeps console output but suppresses Winston file writes, raw Rust+ WebSocket/event debug logs, marker history, and marker snapshots.
+- Guild-scoped runtime log prefixes use the compact literal `[server]` instead of the potentially very long Rust server name; the Discord guild ID remains present.
 - The teammate SteamID/nickname/language CSV database is data, not config, and remains under `data/teammate-language-database/<guildId>-<serverId>.csv`.
 
 ## Current Rust+ map-marker limitation

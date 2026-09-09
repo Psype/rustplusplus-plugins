@@ -86,7 +86,7 @@ function logProviderFallbacks(rustplus, message, failures) {
         message.steamId.toString() : 'unknown';
     for (const failure of failures) {
         rustplus.log('AUTOTRANSLATE',
-            `PROVIDER_FAILED steamId=${steamId} provider=${failure.provider} reason=${failure.reason}`, 'warning');
+            `PROVIDER_FAILED steamId=${steamId} provider=${failure.provider} reason=${failure.reason}`, 'warn');
     }
 }
 

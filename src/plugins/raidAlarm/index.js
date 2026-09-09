@@ -50,7 +50,7 @@ function getText(client, guildId, title, message) {
 }
 
 function logFailure(client, guildId, output, error) {
-    client.log('PLUGIN', `GuildID: ${guildId}, raid-alarm.${output}: ${error}`, 'warning');
+    client.log('PLUGIN', `GuildID: ${guildId}, raid-alarm.${output}: ${error}`, 'warn');
 }
 
 async function deliver(client, guildId, output, callback) {
@@ -99,7 +99,7 @@ async function handleFcmAlarm(context, adapters = {}) {
     const raidText = getText(context.client, guildId, context.title, context.message);
 
     if (!server) {
-        context.client.log('PLUGIN', `GuildID: ${guildId}, Raid Alarm server is not registered: ${serverId}.`, 'warning');
+        context.client.log('PLUGIN', `GuildID: ${guildId}, Raid Alarm server is not registered: ${serverId}.`, 'warn');
         return true;
     }
 

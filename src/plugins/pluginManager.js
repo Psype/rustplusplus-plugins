@@ -38,12 +38,12 @@ const plugins = Object.freeze([
 function reportFailure(context, plugin, hook, error) {
     const rustplus = context && context.rustplus;
     if (rustplus && typeof rustplus.log === 'function') {
-        rustplus.log('PLUGIN', `${plugin.name}.${hook}: ${error}`, 'warning');
+        rustplus.log('PLUGIN', `${plugin.name}.${hook}: ${error}`, 'warn');
         return;
     }
     const client = context && context.client;
     if (client && typeof client.log === 'function') {
-        client.log('PLUGIN', `${plugin.name}.${hook}: ${error}`, 'warning');
+        client.log('PLUGIN', `${plugin.name}.${hook}: ${error}`, 'warn');
     }
 }
 

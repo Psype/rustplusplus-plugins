@@ -55,7 +55,9 @@ Test('uMod Raid Alarm queues in-game before an isolated Discord failure', async 
     Assert.equal(handled, true);
     Assert.deepEqual(fixture.calls.map(call => call.output), ['in-game', 'discord']);
     Assert.equal(fixture.calls[0].text, 'Base under attack: wall.external.high.stone @ H14');
-    Assert.equal(fixture.logs.some(log => String(log[1]).includes('raid-alarm.discord')), true);
+    const failureLog = fixture.logs.find(log => String(log[1]).includes('raid-alarm.discord'));
+    Assert.ok(failureLog);
+    Assert.equal(failureLog[2], 'warn');
 });
 
 Test('uMod Raid Alarm honors the in-game Smart Alarm output setting without a vanilla entity', async () => {

@@ -144,7 +144,7 @@ Test('does not swallow translator failures', async () => {
     const loggingRustplus = Object.freeze({
         guildId: 'guild',
         serverId: 'server',
-        log: (...values) => logs.push(values.join(' '))
+        log: (...values) => logs.push(Object.freeze(values))
     });
     const failure = new Error('translator offline');
     failure.failures = Object.freeze([
@@ -159,8 +159,9 @@ Test('does not swallow translator failures', async () => {
         knownLanguage: 'en',
         translator: async () => { throw failure; }
     }), /translator offline/);
-    Assert.equal(logs.some(log => log.includes('provider=google-web reason=HTTP 429')), true);
-    Assert.equal(logs.some(log => log.includes('provider=deeplx reason=ETIMEDOUT')), true);
+    Assert.equal(logs.some(log => log.join(' ').includes('provider=google-web reason=HTTP 429')), true);
+    Assert.equal(logs.some(log => log.join(' ').includes('provider=deeplx reason=ETIMEDOUT')), true);
+    Assert.equal(logs.every(log => log[2] === 'warn'), true);
 });
 
 Test('ignores bot translations and messages without letters', async () => {

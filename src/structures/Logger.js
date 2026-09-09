@@ -24,6 +24,8 @@ const Winston = require("winston");
 const Config = require('../../config');
 const LoggingSettings = require('../util/loggingSettings.js');
 
+const SERVER_LOG_LABEL = '[server]';
+
 class Logger {
     constructor(logFilePath, type) {
         this.logger = Winston.createLogger({
@@ -91,14 +93,14 @@ class Logger {
                 if (LoggingSettings.isEnabled()) {
                     this.logger.log({
                         level: level,
-                        message: `${time} | ${this.guildId} | ${this.serverName} | ${text}`
+                        message: `${time} | ${this.guildId} | ${SERVER_LOG_LABEL} | ${text}`
                     });
                 }
 
                 console.log(
                     Colors.green(`${time} `) +
                     Colors.cyan(`${this.guildId} `) +
-                    Colors.white(`${this.serverName} `) +
+                    Colors.white(`${SERVER_LOG_LABEL} `) +
                     ((level === 'error') ? Colors.red(text) : Colors.yellow(text))
                 );
 
@@ -107,13 +109,13 @@ class Logger {
                         if (LoggingSettings.isEnabled()) {
                             this.logger.log({
                                 level: level,
-                                message: `${time} | ${this.guildId} | ${this.serverName} | ${line}`
+                                message: `${time} | ${this.guildId} | ${SERVER_LOG_LABEL} | ${line}`
                             });
                         }
                         console.log(
                             Colors.green(`${time} `) +
                             Colors.cyan(`${this.guildId} `) +
-                            Colors.white(`${this.serverName} `) +
+                            Colors.white(`${SERVER_LOG_LABEL} `) +
                             Colors.red(line));
                     }
                 }
