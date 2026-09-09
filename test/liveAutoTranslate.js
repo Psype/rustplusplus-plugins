@@ -15,6 +15,7 @@ require.cache[discordMessagesPath] = {
 
 const InGameChatHandler = require('../src/handlers/inGameChatHandler.js');
 const TeamChatHandler = require('../src/handlers/teamChatHandler.js');
+const Translator = require('../src/plugins/autoTranslate/translator.js');
 
 async function run() {
     const rustMessages = [];
@@ -90,12 +91,39 @@ async function run() {
 
         Assert.equal(rustMessages.length, scenarios.length);
         Assert.equal(discordRelays.length, scenarios.length * 2);
-        process.stdout.write(`${JSON.stringify(scenarios.map((scenario, index) => ({
+        const forcedRateLimit = Object.assign(new Error('Too Many Requests'), { status: 429 });
+        const deepLxFallback = await Translator('test de traduction', { from: 'fr', to: 'zh' }, {
+            googleClient: async () => { throw forcedRateLimit; }
+        });
+        Assert.equal(deepLxFallback.provider, 'deeplx');
+        Assert.deepEqual(deepLxFallback.failures, [{ provider: 'google-web', reason: 'HTTP 429' }]);
+        const bingFallback = await Translator('test de traduction', { from: 'fr', to: 'zh' }, {
+            googleClient: async () => { throw forcedRateLimit; },
+            deepLxClient: async () => { throw new Error('forced DeepLX failure'); }
+        });
+        Assert.equal(bingFallback.provider, 'bing-web');
+        Assert.deepEqual(bingFallback.failures, [
+            { provider: 'google-web', reason: 'HTTP 429' },
+            { provider: 'deeplx', reason: 'forced DeepLX failure' }
+        ]);
+        const myMemoryFallback = await Translator('the bot should work', { from: 'en', to: 'fr' }, {
+            googleClient: async () => { throw forcedRateLimit; },
+            deepLxClient: async () => { throw new Error('forced DeepLX failure'); },
+            bingClient: async () => { throw new Error('forced Bing failure'); }
+        });
+        Assert.equal(myMemoryFallback.provider, 'mymemory');
+        Assert.deepEqual(myMemoryFallback.failures, [
+            { provider: 'google-web', reason: 'HTTP 429' },
+            { provider: 'deeplx', reason: 'forced DeepLX failure' },
+            { provider: 'bing-web', reason: 'forced Bing failure' }
+        ]);
+
+        process.stdout.write(`${JSON.stringify({ translations: scenarios.map((scenario, index) => ({
             sourceMessage: scenario.sourceMessage,
             playerLanguages: scenario.playerLanguages,
             targets: scenario.targets,
             rustTeamMessage: rustMessages[index]
-        })), null, 2)}\n`);
+        })), deepLxFallback, bingFallback, myMemoryFallback }, null, 2)}\n`);
     }
     finally {
         clearTimeout(rustplus.inGameChatTimeout);

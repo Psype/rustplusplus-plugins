@@ -4,7 +4,7 @@ const Path = require('path');
 const Languages = require('../../util/languages.js');
 const LanguageDetector = require('../../util/languageDetector.js');
 const TeammateLanguageDatabase = require('../teammateLanguageDatabase/index.js');
-const GoogleTranslator = require('./googleTranslator.js');
+const Translator = require('./translator.js');
 
 const CONFIG_DIR = Path.join(__dirname, '..', '..', '..', 'config');
 const SETTINGS_PATH = Path.join(CONFIG_DIR, 'autotranslate-settings.json');
@@ -59,26 +59,45 @@ async function translateMessage(rustplus, message, dependencies = {}) {
         return null;
     }
 
-    const translator = dependencies.translator || GoogleTranslator;
+    const translator = dependencies.translator || Translator;
     if (typeof translator !== 'function') throw new TypeError('Translator must be a function.');
 
-    const translated = await translator(message.message, { from: source, to: target });
+    let result;
+    try { result = await translator(message.message, { from: source, to: target }); }
+    catch (error) {
+        if (error && Array.isArray(error.failures)) logProviderFallbacks(rustplus, message, error.failures);
+        throw error;
+    }
+    const translated = typeof result === 'string' ? result : result && result.text;
+    const provider = typeof result === 'object' && typeof result.provider === 'string' ? result.provider : 'custom';
+    if (result && Array.isArray(result.failures)) logProviderFallbacks(rustplus, message, result.failures);
     if (typeof translated !== 'string' || !translated.trim() || translated.trim() === message.message.trim()) {
         logDecision(rustplus, message, 'SKIPPED', 'empty-or-unchanged-translation',
-            settings.targets, source, knownLanguages, target);
+            settings.targets, source, knownLanguages, target, provider);
         return null;
     }
-    logDecision(rustplus, message, 'TRANSLATED', 'ok', settings.targets, source, knownLanguages, target);
+    logDecision(rustplus, message, 'TRANSLATED', 'ok', settings.targets, source, knownLanguages, target, provider);
     return Object.freeze({ source, target, translated });
 }
 
-function logDecision(rustplus, message, decision, reason, targets, source = '-', knownLanguages = [], target = '-') {
+function logProviderFallbacks(rustplus, message, failures) {
+    if (!rustplus || typeof rustplus.log !== 'function') return;
+    const steamId = message && message.steamId !== undefined && message.steamId !== null ?
+        message.steamId.toString() : 'unknown';
+    for (const failure of failures) {
+        rustplus.log('AUTOTRANSLATE',
+            `PROVIDER_FAILED steamId=${steamId} provider=${failure.provider} reason=${failure.reason}`, 'warning');
+    }
+}
+
+function logDecision(rustplus, message, decision, reason, targets, source = '-', knownLanguages = [], target = '-',
+    provider = '-') {
     if (!rustplus || typeof rustplus.log !== 'function') return;
     const steamId = message && message.steamId !== undefined && message.steamId !== null ?
         message.steamId.toString() : 'unknown';
     rustplus.log('AUTOTRANSLATE',
         `${decision} steamId=${steamId} source=${source} player=${knownLanguages.join(';') || '-'} ` +
-        `targets=${targets.join(';') || '-'} target=${target} reason=${reason}`);
+        `targets=${targets.join(';') || '-'} target=${target} provider=${provider} reason=${reason}`);
 }
 
 function isBotOrTranslationMessage(message) {

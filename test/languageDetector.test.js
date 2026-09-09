@@ -22,7 +22,11 @@ Test('detects short English, French, and Chinese Rust chat', async () => {
         Object.freeze(['couvre moi au cargo', 'fr']),
         Object.freeze(['dépose le loot puis on roam', 'fr']),
         Object.freeze(['test de traduction', 'fr']),
+        Object.freeze(['caisse verrouillée à la gare de triage', 'fr']),
+        Object.freeze(['le plan est que la tour serve à réapparaitre, et avoir des kits disponibles pour aller se battre', 'fr']),
+        Object.freeze(['la tour au-dessus servira à respawn et aller se battre, sous le rocher sera le bunker pour stocker seulement', 'fr']),
         Object.freeze(['现在应该可以用了', 'zh']),
+        Object.freeze(['nirks 我们在去战斗', 'zh']),
         Object.freeze(['回基地', 'zh'])
     ]);
 

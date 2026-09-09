@@ -118,15 +118,49 @@ Test('uses the English fallback for ambiguous Latin gaming text', async () => {
     });
 });
 
+Test('routes the reported French and Chinese chat messages through the active pair', async () => {
+    const samples = [
+        ['caisse verrouillée à la gare de triage', ['en', 'fr'], 'fr', 'zh'],
+        ['le plan est que la tour serve à réapparaitre, et avoir des kits disponibles pour aller se battre',
+            ['en', 'fr'], 'fr', 'zh'],
+        ['la tour au-dessus servira à respawn et aller se battre, sous le rocher sera le bunker pour stocker seulement',
+            ['en', 'fr'], 'fr', 'zh'],
+        ['nirks 我们在去战斗', ['zh'], 'zh', 'fr']
+    ];
+
+    for (const [message, knownLanguages, source, target] of samples) {
+        const result = await AutoTranslate.translateMessage(rustplus, { steamId: 'player', message }, {
+            settings: { enabled: true, targets: ['fr', 'zh'] },
+            knownLanguages,
+            translator: async text => `translated:${text}`
+        });
+        Assert.equal(result.source, source, message);
+        Assert.equal(result.target, target, message);
+    }
+});
+
 Test('does not swallow translator failures', async () => {
-    await Assert.rejects(() => AutoTranslate.translateMessage(rustplus, {
+    const logs = [];
+    const loggingRustplus = Object.freeze({
+        guildId: 'guild',
+        serverId: 'server',
+        log: (...values) => logs.push(values.join(' '))
+    });
+    const failure = new Error('translator offline');
+    failure.failures = Object.freeze([
+        Object.freeze({ provider: 'google-web', reason: 'HTTP 429' }),
+        Object.freeze({ provider: 'deeplx', reason: 'ETIMEDOUT' })
+    ]);
+    await Assert.rejects(() => AutoTranslate.translateMessage(loggingRustplus, {
         steamId: 'english-player',
         message: 'now it should work again'
     }, {
         settings: { enabled: true, targets: ['en', 'zh'] },
         knownLanguage: 'en',
-        translator: async () => { throw new Error('translator offline'); }
+        translator: async () => { throw failure; }
     }), /translator offline/);
+    Assert.equal(logs.some(log => log.includes('provider=google-web reason=HTTP 429')), true);
+    Assert.equal(logs.some(log => log.includes('provider=deeplx reason=ETIMEDOUT')), true);
 });
 
 Test('ignores bot translations and messages without letters', async () => {
