@@ -25,6 +25,11 @@ function matches(context, syntaxKey, mode = 'optional') {
     });
 }
 
+function matchesLiteral(context, commandName) {
+    const expected = `${context.prefix}${commandName}`.toLowerCase();
+    return context.commandLowerCase === expected || context.commandLowerCase.startsWith(`${expected} `);
+}
+
 async function handleCommand(context) {
     if (matches(context, 'commandSyntaxDeepsea', 'exact')) {
         DeepSea.install(context.rustplus, context.client);
@@ -51,7 +56,7 @@ async function handleCommand(context) {
     if (matches(context, 'commandSyntaxLogs')) {
         return result(getCommandLogs(context));
     }
-    if (matches(context, 'commandSyntaxCommands')) {
+    if (matches(context, 'commandSyntaxCommands') || matchesLiteral(context, 'help')) {
         return result(getCommandCommands(context));
     }
     if (matches(context, 'commandSyntaxAutoTranslate', 'args')) {

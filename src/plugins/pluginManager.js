@@ -9,12 +9,46 @@ const AutoTranslate = require('./autoTranslate');
 const CustomCommands = require('./customCommands');
 const DeepSea = require('./deepSea');
 const HiddenVendors = require('./hiddenVendors');
+const PlayerTracker = require('./playerTracker');
 const RaidAlarm = require('./raidAlarm');
 const TeammateLanguageDatabase = require('./teammateLanguageDatabase');
+const WarBandits = require('./warBandits');
+
+function getWarBanditsProvider(context) {
+    if (context && Object.prototype.hasOwnProperty.call(context, 'warBanditsProvider')) {
+        return context.warBanditsProvider;
+    }
+    const dependencies = context && context.playerTrackerDependencies;
+    if (dependencies && Object.prototype.hasOwnProperty.call(dependencies, 'warBanditsProvider')) {
+        return dependencies.warBanditsProvider;
+    }
+    return WarBandits;
+}
+
+function withWarBanditsProvider(context) {
+    const dependencies = context.playerTrackerDependencies || {};
+    if (Object.prototype.hasOwnProperty.call(dependencies, 'warBanditsProvider')) return context;
+    return Object.freeze({
+        ...context,
+        playerTrackerDependencies: Object.freeze({
+            ...dependencies,
+            warBanditsProvider: getWarBanditsProvider(context)
+        })
+    });
+}
 
 const plugins = Object.freeze([
     Object.freeze({ name: 'auto-translate' }),
-    Object.freeze({ name: 'custom-commands' }),
+    Object.freeze({
+        name: 'custom-commands',
+        handleCommand: context => CustomCommands.handleCommand(context)
+    }),
+    Object.freeze({ name: 'warbandits' }),
+    Object.freeze({
+        name: 'player-tracker',
+        handleCommand: context => PlayerTracker.handleCommand(withWarBanditsProvider(context)),
+        onBattlemetricsUpdated: context => PlayerTracker.onBattlemetricsUpdated(context)
+    }),
     Object.freeze({
         name: 'raid-alarm',
         onFcmAlarm: context => RaidAlarm.handleFcmAlarm(context)
@@ -97,7 +131,17 @@ async function runFirstHandled(hook, context) {
 async function handleCommand(context) {
     try {
         validateCommandContext(context);
-        return await CustomCommands.handleCommand(Object.freeze({ ...context }));
+        for (const plugin of plugins) {
+            if (typeof plugin.handleCommand !== 'function') continue;
+            try {
+                const result = await plugin.handleCommand(Object.freeze({ ...context }));
+                if (result && result.handled) return result;
+            }
+            catch (error) {
+                reportFailure(context, plugin, 'handleCommand', error);
+            }
+        }
+        return Object.freeze({ handled: false });
     }
     catch (error) {
         reportFailure(context, { name: 'custom-commands' }, 'handleCommand', error);
@@ -132,6 +176,7 @@ module.exports = Object.freeze({
     handleCommand,
     handleFcmAlarm: context => runFirstHandled('onFcmAlarm', context),
     install: context => runHook('install', context),
+    onBattlemetricsUpdated: context => runHook('onBattlemetricsUpdated', context),
     onTeamInfo: context => runHook('onTeamInfo', context),
     onTeamMessage: context => runHook('onTeamMessage', context),
     translateTeamMessage

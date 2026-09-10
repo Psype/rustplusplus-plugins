@@ -8,6 +8,7 @@
 - **/craft** - Display the cost to craft an item.
 - **/credentials** - Setup Credentials.
 - **/decay** - Display the decay time of an item.
+- **/despawn** - Display the despawn time of an item.
 - **/help** - Get help message.
 - **/item** - Get the details of an item.
 - **/leader** - Transfer leadership.
@@ -18,6 +19,7 @@
 - **/research** - Display the cost to research an item.
 - **/reset** - Reset Discord Channels.
 - **/role** - Setup a specific role to use rustplusplus.
+- **/stack** - Display stack size information for an item.
 - **/storagemonitor** - Change image of paired Storage Monitors.
 - **/switch** - Change image of paired Storage Monitors.
 - **/upkeep** - Get the upkeep cost of an item.
@@ -30,15 +32,16 @@
 - **autotranslate** - `!autotranslate on [language[,language...]]` or `!autotranslate off` - Translate a teammate only when the message matches one of their recorded languages and the active translation pair; relay the result to Rust team chat and Discord.
 - **cargo** - `!cargo` - Display information regarding Cargoship.
 - **chinook** - `!chinook` - Display information regarding Chinook 47.
-- **commands [command]** - `!commands [command]` - List all commands or show one-line usage for one command.
+- **commands/help** - `!commands [command]` or `!help [command]` - List all commands or show the documented synopsis and description for one command.
 - **connection/connections** - `!connection [steamid]` or `!connections` - Display latest team connections.
 - **craft** - `!craft [item] [quantity]` - Display the cost to craft an item.
 - **death/deaths** - `!death [steamid]` or `!deaths` - Display latest deaths.
 - **decay** - `!decay [item]` - Display the decay time of an item.
+- **despawn** - `!despawn [item]` - Display the despawn time of an item.
 - **deepsea** - `!deepsea` - Track Deep Sea activity from off-map vendor clusters and predict open/close windows.
 - **events** - `!events [event]` - Get recent events and event timing summaries.
 - **heli** - `!heli` - Get information regarding Patrol Helicopter.
-- **hidden vendors** - `!hv` / `!hvw` / `!hvt` - Show former vendor locations grouped by grid; `!hvw` filters short-lived water suspects and `!hvt` sorts by shortest broadcast time.
+- **hv/hvw/hvt** - `!hv` / `!hvw` / `!hvt` - Show former vendor locations grouped by grid; `!hvw` filters short-lived water suspects and `!hvt` sorts by shortest broadcast time.
 - **language** - `!language [code]` - Show or change the bot language for this server.
 - **large** - `!large` - Get information regarding Large Oil Rig.
 - **leader** - `!leader [teammate]` - Transfer leadership.
@@ -62,9 +65,12 @@
 - **team** - `!team` - Get team information (names of all teammates).
 - **time** - `!time` - Get in-game time.
 - **timer/timers** - `!timer [duration] [message]` or `!timers` - Set or list timers.
+- **track** - `!track [partial player name|SteamID64]` - Resolve a player on the current BattleMetrics server, enrich it ponctually from WarBandits when supported, and start BattleMetrics online/offline tracking. When several players match, use `!track #[number]` or `!track [same partial name] [number]`.
+- **tracklist/tracks** - `!tracklist` or `!tracks` - List tracked players with online or last-seen status.
 - **tr** - `!tr [language] [text]` - Translate from English to another language.
 - **trf** - `!trf [from] [to] [text]` - Translate from one language to another.
 - **tts** - `!tts [message]` - Send text-to-speech to Discord teamchat.
+- **untrack** - `!untrack [partial player name|BattleMetrics ID|SteamID64]` - Stop tracking one player.
 - **unmute** - `!unmute` - Unmute rustplusplus in-game.
 - **upkeep** - `!upkeep` - Check upkeep of Storage Monitor Tool Cupboards.
 - **uptime** - `!uptime` - Display the uptime of rustplusplus and currently connected server.

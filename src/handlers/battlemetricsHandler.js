@@ -21,7 +21,58 @@
 const Constants = require('../util/constants.js');
 const DiscordMessages = require('../discordTools/discordMessages.js');
 const DiscordTools = require('../discordTools/discordTools.js');
+const PluginManager = require('../plugins/pluginManager.js');
 const Scrape = require('../util/scrape.js');
+
+function logOptionalFailure(client, rustplus, operation, error) {
+    const text = `${operation}: ${error}`;
+    if (rustplus && typeof rustplus.log === 'function') {
+        rustplus.log('BATTLEMETRICS', text, 'warn');
+    }
+    else if (client && typeof client.log === 'function') {
+        client.log('BATTLEMETRICS', text, 'warn');
+    }
+}
+
+function logTrackerEvent(client, rustplus, text) {
+    if (rustplus && typeof rustplus.log === 'function') {
+        rustplus.log('TRACKER', text, 'info');
+    }
+    else if (client && typeof client.log === 'function') {
+        client.log('TRACKER', text, 'info');
+    }
+}
+
+function getTrackerPresenceText(client, guildId, content, playerName, online) {
+    if (content.managedBy === 'player-tracker') {
+        return online ? `Tracked player ${playerName} is now online.` :
+            `Tracked player ${playerName} just disconnected.`;
+    }
+    return client.intlGet(guildId,
+        online ? 'playerJustConnectedTracker' : 'playerJustDisconnectedTracker', {
+            name: playerName,
+            tracker: content.name
+        });
+}
+
+async function sendTrackerNotification(client, rustplus, guildId, content, color, text) {
+    logTrackerEvent(client, rustplus, text);
+    if (rustplus && (rustplus.serverId === content.serverId) && content.inGame) {
+        try {
+            await rustplus.sendInGameMessage(text);
+        }
+        catch (error) {
+            logOptionalFailure(client, rustplus, 'in-game tracker notification failed', error);
+        }
+    }
+    try {
+        await DiscordMessages.sendActivityNotificationMessage(
+            guildId, content.serverId, color, text, null, content.title, content.everyone);
+    }
+    catch (error) {
+        logOptionalFailure(client, rustplus, 'Discord tracker notification failed', error);
+    }
+}
 
 module.exports = {
     handler: async function (client, firstTime = false) {
@@ -32,42 +83,64 @@ module.exports = {
 
         for (const guildItem of client.guilds.cache) {
             const guildId = guildItem[0];
-            const instance = client.getInstance(guildId);
+            let instance = client.getInstance(guildId);
             const rustplus = client.rustplusInstances[guildId];
 
-            if (!firstTime) await module.exports.handleBattlemetricsChanges(client, guildId);
+            await PluginManager.onBattlemetricsUpdated({ client, guildId, rustplus, firstTime });
+            instance = client.getInstance(guildId);
 
-            /* Update information channel battlemetrics players */
-            const bmId = instance.activeServer !== null ?
-                instance.serverList[instance.activeServer].battlemetricsId : null;
-            let condition = instance.generalSettings.displayInformationBattlemetricsAllOnlinePlayers;
-            condition &= instance.activeServer !== null;
-            condition &= bmId !== null;
-            condition &= client.battlemetricsInstances.hasOwnProperty(bmId);
-            condition &= rustplus && rustplus.isOperational;
-
-            if (condition) {
-                await DiscordMessages.sendUpdateBattlemetricsOnlinePlayersInformationMessage(rustplus, bmId);
-            }
-            else {
-                if (instance.informationMessageId.battlemetricsPlayers !== null) {
-                    await DiscordTools.deleteMessageById(guildId, instance.channelId.information,
-                        instance.informationMessageId.battlemetricsPlayers);
-
-                    instance.informationMessageId.battlemetricsPlayers = null;
-                    client.setInstance(guildId, instance);
+            if (!firstTime) {
+                try {
+                    await module.exports.handleBattlemetricsChanges(client, guildId);
+                }
+                catch (error) {
+                    logOptionalFailure(client, rustplus, 'global BattleMetrics notification failed', error);
                 }
             }
 
-            for (const [trackerId, content] of Object.entries(instance.trackers)) {
+            try {
+                /* Update information channel battlemetrics players */
+                const bmId = instance.activeServer !== null ?
+                    instance.serverList[instance.activeServer].battlemetricsId : null;
+                let condition = instance.generalSettings.displayInformationBattlemetricsAllOnlinePlayers;
+                condition &= instance.activeServer !== null;
+                condition &= bmId !== null;
+                condition &= client.battlemetricsInstances.hasOwnProperty(bmId);
+                condition &= rustplus && rustplus.isOperational;
+
+                if (condition) {
+                    await DiscordMessages.sendUpdateBattlemetricsOnlinePlayersInformationMessage(rustplus, bmId);
+                }
+                else if (instance.informationMessageId.battlemetricsPlayers !== null) {
+                    await DiscordTools.deleteMessageById(guildId, instance.channelId.information,
+                        instance.informationMessageId.battlemetricsPlayers);
+
+                    const current = client.getInstance(guildId);
+                    client.setInstance(guildId, {
+                        ...current,
+                        informationMessageId: {
+                            ...current.informationMessageId,
+                            battlemetricsPlayers: null
+                        }
+                    });
+                    instance = client.getInstance(guildId);
+                }
+            }
+            catch (error) {
+                logOptionalFailure(client, rustplus, 'Discord BattleMetrics information refresh failed', error);
+            }
+
+            for (const [trackerId, initialContent] of Object.entries(instance.trackers)) {
+                let content = initialContent;
                 const battlemetricsId = content.battlemetricsId;
                 const bmInstance = client.battlemetricsInstances[battlemetricsId];
 
                 if (!bmInstance || !bmInstance.lastUpdateSuccessful) continue;
 
                 if (firstTime || searchSteamProfiles) {
+                    const changedSteamProfiles = new Map();
                     for (const player of content.players) {
-                        if (player.steamId === null) continue;
+                        if (player.steamId === null || player.playerIdLocked === true) continue;
 
                         let name = null;
                         if (calledSteamProfiles.hasOwnProperty(player.steamId)) {
@@ -82,20 +155,52 @@ module.exports = {
                         name = (content.clanTag !== '' ? `${content.clanTag} ` : '') + `${name}`;
 
                         if (player.name !== name) {
-                            await module.exports.trackerNewNameDetected(client, guildId, trackerId, battlemetricsId,
-                                player.name, name);
+                            try {
+                                await module.exports.trackerNewNameDetected(
+                                    client, guildId, trackerId, battlemetricsId, player.name, name);
+                            }
+                            catch (error) {
+                                logOptionalFailure(client, rustplus, 'Discord tracker name alert failed', error);
+                            }
 
                             const newPlayerId = Object.keys(bmInstance.players)
                                 .find(e => bmInstance.players[e]['name'] === name);
                             player.playerId = newPlayerId ? newPlayerId : null;
                             player.name = name;
+                            changedSteamProfiles.set(`${player.steamId}`, {
+                                name: player.name,
+                                playerId: player.playerId
+                            });
                         }
                     }
 
-                    client.setInstance(guildId, instance);
+                    if (changedSteamProfiles.size > 0) {
+                        const current = client.getInstance(guildId);
+                        const currentTracker = current.trackers[trackerId];
+                        if (currentTracker) {
+                            const players = currentTracker.players.map(player => {
+                                const changed = changedSteamProfiles.get(`${player.steamId}`);
+                                return changed ? { ...player, ...changed } : player;
+                            });
+                            client.setInstance(guildId, {
+                                ...current,
+                                trackers: {
+                                    ...current.trackers,
+                                    [trackerId]: { ...currentTracker, players }
+                                }
+                            });
+                            instance = client.getInstance(guildId);
+                            content = instance.trackers[trackerId];
+                        }
+                    }
 
                     if (firstTime) {
-                        await DiscordMessages.sendTrackerMessage(guildId, trackerId);
+                        try {
+                            await DiscordMessages.sendTrackerMessage(guildId, trackerId);
+                        }
+                        catch (error) {
+                            logOptionalFailure(client, rustplus, 'Discord tracker refresh failed', error);
+                        }
                         continue;
                     }
                 }
@@ -107,8 +212,13 @@ module.exports = {
                     for (const playerT of content.players) {
                         if (playerT.playerId !== player.id) continue;
 
-                        await module.exports.trackerNewNameDetected(client, guildId, trackerId, battlemetricsId,
-                            player.from, player.to);
+                        try {
+                            await module.exports.trackerNewNameDetected(
+                                client, guildId, trackerId, battlemetricsId, player.from, player.to);
+                        }
+                        catch (error) {
+                            logOptionalFailure(client, rustplus, 'Discord tracker name alert failed', error);
+                        }
                     }
                 }
 
@@ -117,16 +227,10 @@ module.exports = {
                     for (const player of content.players) {
                         if (player.playerId !== playerId) continue;
 
-                        const str = client.intlGet(guildId, 'playerJustConnectedTracker', {
-                            name: player.name,
-                            tracker: content.name
-                        });
-                        await DiscordMessages.sendActivityNotificationMessage(
-                            guildId, content.serverId, Constants.COLOR_ACTIVE, str, null, content.title,
-                            content.everyone);
-                        if (rustplus && (rustplus.serverId === content.serverId) && content.inGame) {
-                            rustplus.sendInGameMessage(str);
-                        }
+                        const str = getTrackerPresenceText(
+                            client, guildId, content, player.name, true);
+                        await sendTrackerNotification(
+                            client, rustplus, guildId, content, Constants.COLOR_ACTIVE, str);
                     }
                 }
 
@@ -135,16 +239,10 @@ module.exports = {
                     for (const player of content.players) {
                         if (player.playerId !== playerId) continue;
 
-                        const str = client.intlGet(guildId, 'playerJustConnectedTracker', {
-                            name: player.name,
-                            tracker: content.name
-                        });
-                        await DiscordMessages.sendActivityNotificationMessage(
-                            guildId, content.serverId, Constants.COLOR_ACTIVE, str, null, content.title,
-                            content.everyone);
-                        if (rustplus && (rustplus.serverId === content.serverId) && content.inGame) {
-                            rustplus.sendInGameMessage(str);
-                        }
+                        const str = getTrackerPresenceText(
+                            client, guildId, content, player.name, true);
+                        await sendTrackerNotification(
+                            client, rustplus, guildId, content, Constants.COLOR_ACTIVE, str);
                     }
                 }
 
@@ -153,23 +251,20 @@ module.exports = {
                     for (const player of content.players) {
                         if (player.playerId !== playerId) continue;
 
-                        const str = client.intlGet(guildId, 'playerJustDisconnectedTracker', {
-                            name: player.name,
-                            tracker: content.name
-                        });
+                        const str = getTrackerPresenceText(
+                            client, guildId, content, player.name, false);
 
-                        await DiscordMessages.sendActivityNotificationMessage(
-                            guildId, content.serverId, Constants.COLOR_INACTIVE, str, null, content.title,
-                            content.everyone);
-                        if (rustplus && (rustplus.serverId === content.serverId) && content.inGame) {
-                            rustplus.sendInGameMessage(str);
-                        }
+                        await sendTrackerNotification(
+                            client, rustplus, guildId, content, Constants.COLOR_INACTIVE, str);
                     }
                 }
 
-                client.setInstance(guildId, instance);
-
-                await DiscordMessages.sendTrackerMessage(guildId, trackerId);
+                try {
+                    await DiscordMessages.sendTrackerMessage(guildId, trackerId);
+                }
+                catch (error) {
+                    logOptionalFailure(client, rustplus, 'Discord tracker refresh failed', error);
+                }
             }
         }
 

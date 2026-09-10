@@ -9,21 +9,28 @@ const COMMAND_DOC_PATH = Path.join(__dirname, '..', '..', 'docs', 'full_list_fea
 
 function getCommands() {
     const section = getInGameCommandsSection();
-    return section.split(/\r?\n/)
+    const commands = section.split(/\r?\n/)
         .map(line => /^- \*\*(.+?)\*\* - (.+)$/.exec(line.trim()))
         .filter(Boolean)
         .flatMap(match => expandCommandEntry(match[1], match[2]));
+    const names = commands.map(command => command.name);
+    if (new Set(names).size !== names.length) {
+        throw new Error('Command documentation contains duplicate command names.');
+    }
+    return Object.freeze(commands);
 }
 
 function getCommandNames() {
-    return getCommands().map(command => command.name);
+    return Object.freeze(getCommands().map(command => command.name));
 }
 
 function getCommand(commandName) {
     if (!commandName) return null;
 
     const normalized = normalizeCommandName(commandName);
-    return getCommands().find(command => command.name === normalized || command.aliases.includes(normalized)) || null;
+    const commands = getCommands();
+    return commands.find(command => command.name === normalized) ||
+        commands.find(command => command.aliases.includes(normalized)) || null;
 }
 
 function getInGameCommandsSection() {
@@ -37,29 +44,30 @@ function getInGameCommandsSection() {
 function expandCommandEntry(rawCommand, description) {
     const aliases = rawCommand.split('/').map(part => normalizeCommandName(part)).filter(Boolean);
     const details = parseDescription(description);
-    return aliases.map(name => ({
+    return aliases.map(name => Object.freeze({
         name: name,
-        aliases: aliases.filter(alias => alias !== name),
-        usage: getUsage(rawCommand, name, details.usage),
+        aliases: Object.freeze(aliases.filter(alias => alias !== name)),
+        usage: getUsage(name, details.usages),
         description: details.description
     }));
 }
 
-function getUsage(rawCommand, name, documentedUsage) {
-    if (documentedUsage && normalizeCommandName(documentedUsage) === name) return documentedUsage;
-
-    const optionalSyntax = /\[(.+?)\]/.exec(rawCommand);
-    if (optionalSyntax && normalizeCommandName(rawCommand) === name) return `!${rawCommand}`;
-    return `!${name}`;
+function getUsage(name, documentedUsages) {
+    return documentedUsages.find(usage => normalizeCommandName(usage) === name) ||
+        documentedUsages[0] || `!${name}`;
 }
 
 function parseDescription(description) {
-    const match = /^`(.+?)`\s+-\s+(.+)$/.exec(description.trim());
-    if (!match) return { usage: null, description: description.trim() };
+    const value = description.trim();
+    const separator = value.indexOf(' - ');
+    if (separator === -1) return { usages: [], description: value };
+    const synopsis = value.slice(0, separator);
+    const usages = [...synopsis.matchAll(/`([^`]+)`/g)].map(match => match[1].trim());
+    if (usages.length === 0) return { usages: [], description: value };
 
     return {
-        usage: match[1].trim(),
-        description: match[2].trim()
+        usages,
+        description: value.slice(separator + 3).trim().replace(/`([^`]+)`/g, '$1')
     };
 }
 
@@ -72,8 +80,8 @@ function normalizeCommandName(commandName) {
         .replace(/\[.*$/, '');
 }
 
-module.exports = {
+module.exports = Object.freeze({
     getCommand,
     getCommandNames,
     getCommands
-};
+});

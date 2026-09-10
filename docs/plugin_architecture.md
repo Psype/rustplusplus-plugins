@@ -10,8 +10,15 @@ that boundary and must not import individual feature plugins.
 - `autoTranslate`: translates eligible relayed team-chat messages.
 - `raidAlarm`: handles direct Rust+ FCM alerts from haggbart's uMod Raid Alarm without requiring a vanilla Smart Alarm.
 - `teammateLanguageDatabase`: records teammate names and detected languages.
+- `playerTracker`: resolves current-server BattleMetrics players, owns the `Enemies` native tracker, and persists a
+  redacted status/last-seen projection without adding another poller.
+- `warBandits`: detached, on-demand identity/activity provider used only during `!track`; it caches the server
+  catalogue and resolved statistics, links them to BattleMetrics identities, and never decides presence or emits
+  online/offline transitions.
 - `customCommands`: owns commands added by this fork, including `deepsea`, `hv`, `hvw`, `hvt`, `language`, `record`,
-  `who`, `logs`, `commands`, and `autotranslate`.
+  `who`, `logs`, `commands`/`help`, and `autotranslate`. Its command catalogue reads the canonical
+  `## In-Game and Discord Commands` section of `docs/full_list_features.md` at runtime; QA compares that catalogue
+  against every static native/plugin command syntax.
 
 ## Stable hooks
 
@@ -25,6 +32,7 @@ The core currently calls these plugin-manager operations:
 - `translateTeamMessage`
 - `handleCommand`
 - `handleFcmAlarm`
+- `onBattlemetricsUpdated`
 - `getEventsCommandResponse`
 - `getDeepSeaStatus`
 
