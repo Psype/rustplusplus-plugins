@@ -11,7 +11,9 @@ that boundary and must not import individual feature plugins.
 - `raidAlarm`: handles direct Rust+ FCM alerts from haggbart's uMod Raid Alarm without requiring a vanilla Smart Alarm.
 - `teammateLanguageDatabase`: records teammate names and detected languages.
 - `playerTracker`: resolves current-server BattleMetrics players, owns the `Enemies` native tracker, and persists a
-  redacted status/last-seen projection without adding another poller.
+  redacted status/last-seen projection plus bounded Premium summaries without adding another poller.
+- `battlemetrics`: detached read-only API provider for player search, optional SteamID enrichment, server-player
+  summaries, session history, and co-play. It uses bounded caching/cooldowns and never decides tracker transitions.
 - `warBandits`: detached, on-demand identity/activity provider used only during `!track`; it caches the server
   catalogue and resolved statistics, links them to BattleMetrics identities, and never decides presence or emits
   online/offline transitions.

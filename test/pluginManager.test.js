@@ -52,7 +52,7 @@ function createRustplus() {
 Test('plugin registry exposes an immutable stable list', () => {
     const names = PluginManager.getPluginNames();
     Assert.deepEqual(names, [
-        'auto-translate', 'custom-commands', 'warbandits', 'player-tracker', 'raid-alarm',
+        'auto-translate', 'battlemetrics', 'custom-commands', 'warbandits', 'player-tracker', 'raid-alarm',
         'teammate-language-database', 'hidden-vendors', 'deep-sea'
     ]);
     Assert.equal(Object.isFrozen(names), true);
@@ -121,7 +121,9 @@ Test('canonical documentation covers every static in-game command', () => {
     runtimeKeys.delete('commandSyntaxOn');
     runtimeKeys.delete('commandSyntaxOff');
     const runtimeNames = new Set([...runtimeKeys].map(key => language[key]));
-    for (const name of ['help', 'track', 'tracklist', 'tracks', 'untrack']) runtimeNames.add(name);
+    for (const name of [
+        'help', 'track', 'trackhistory', 'trackinfo', 'tracklist', 'trackrelated', 'tracks', 'untrack'
+    ]) runtimeNames.add(name);
 
     Assert.deepEqual([...CommandCatalog.getCommandNames()].sort(), [...runtimeNames].sort());
 

@@ -1,17 +1,83 @@
-# Battlemetrics and Trackers
+# BattleMetrics Premium and Player Trackers
 
-## Authentication Token
+## Authentication
 
-Since 19/07/2026, Battlemetrics has discontinued free usage of its service and now requires an active subscription to use the API ([source](https://discord.com/channels/202199157224636417/270701413972049921/1528494637675708417)).
+BattleMetrics API access requires the active subscription associated with the access token. Create a personal access
+token in the BattleMetrics developer settings, copy `.env.example` to the repository-root `.env`, and set:
 
-Because the tracker functionality relies heavily on the Battlemetrics API, you are required to [obtain an API key](https://www.battlemetrics.com/subscription). The Basic plan should be sufficient. It was never the intention for people to have to pay to use rustplusplus, so this is unfortunate. This will remain the solution until a more permanent one is in place.
+```dotenv
+RPP_BATTLEMETRICS_TOKEN=replace_with_the_access_token
+```
 
-Once you've obtained your Battlemetrics token, copy it into the config file located at `config/index.js`.
+The value is an access token, not a client/application ID. `.env` is ignored by Git and loaded before `config/index.js`
+is evaluated; an existing process environment variable takes precedence. Never add the real token to `config/index.js`,
+`docker-compose.yml`, a service file committed to Git, logs, screenshots, or support output.
 
-The config file should look something like this (NOTE: key below is invalid):
+The tracker only performs read-only player/server requests. It does not call the Account, Favorite Servers, RCON,
+Bans, Player Flags, Player Notes, Triggers, or other mutation endpoints. Leave all those access-token permissions
+unchecked. If BattleMetrics requires at least one selection to create the token, `Account > Basic Account Information`
+is the narrowest fallback and is not used by the tracker; validate the resulting token with the live check below. Do
+not grant `View RCON information`: the
+user is not an administrator of the WarBandits server and that permission would not grant access to another
+organization's private identifiers.
 
-    battlemetrics: {
-        token: process.env.RPP_BATTLEMETRICS_TOKEN || ''
-    }
+## Implemented data flow
 
-If no token is obtained, tracker functionality will be disabled.
+| Signal | BattleMetrics endpoint | Bot behavior |
+| --- | --- | --- |
+| Current roster/status | `GET /servers/{serverId}?include=player` | Existing 60-second BattleMetrics poll; sole source of online/offline transitions and notifications. |
+| Server-scoped player search | `GET /players?filter[search]=...&filter[servers]=...` | Resolves `!track`; ambiguous or truncated results require numbered selection. |
+| Player identifier | `GET /players/{playerId}?include=identifier` | Adds SteamID64 only when BattleMetrics exposes a valid Steam identifier. |
+| Server-specific player summary | `GET /players/{playerId}/servers/{serverId}` | Read on demand by `!trackinfo`; persists first/last seen and playtime when supplied. |
+| Session history | `GET /players/{playerId}/relationships/sessions` | Read on demand by `!trackhistory`, filtered again locally to the active server. |
+| Co-play/related players | `GET /players/{playerId}/relationships/coplay` | Read on demand by `!trackrelated`; never labelled as a team or identity proof. |
+
+The Premium provider is isolated in `src/plugins/battlemetrics`. It uses one five-second request per command endpoint,
+fixed HTTPS origin, no redirects, bounded responses, strict JSON:API validation, five- or ten-minute caches, and
+in-flight request coalescing. A provider is never retried blindly. HTTP 429 establishes a process-wide cooldown for
+that HTTP client using `Retry-After`/rate-reset headers; 401, 403, 404, timeout, and malformed responses remain distinct
+sanitized failures. Tokens and raw response bodies are never logged.
+
+## Commands and storage
+
+- `!track <partial name|SteamID64>` starts tracking on the active BattleMetrics server. Use `!track #<number>` after
+  an ambiguous search.
+- `!tracklist` / `!tracks` lists current status or last seen.
+- `!trackinfo <tracked player>` obtains the Premium server-specific summary.
+- `!trackhistory <tracked player>` obtains recent sessions on the active server.
+- `!trackrelated <tracked player>` obtains BattleMetrics co-play results.
+- `!untrack <partial name|BattleMetrics ID|SteamID64>` stops tracking.
+
+Presence notifications remain exactly `Tracked player <name> is now online.` and
+`Tracked player <name> just disconnected.`. A failed API call never becomes an offline transition and never erases the
+last successful data. Premium detail commands do not mutate tracker presence or emit transitions.
+
+The readable projection is `data/player-trackers/<guildId>-<battlemetricsServerId>.json`. Schema 2 keeps stable IDs,
+aliases, status and timestamps plus sanitized Premium summaries. It does not store access tokens, IP addresses, raw
+identifiers, notes, flags, response bodies, or unbounded logs. Schema 1 files are migrated in memory and rewritten as
+schema 2 on the next normal tracker update.
+
+## Verification and limits
+
+After setting the token and restarting the service, obtain a tracked player's BattleMetrics ID from `!track` or the
+JSON projection and run:
+
+```bash
+npm run test:battlemetrics:live -- <battlemetrics-server-id> <battlemetrics-player-id>
+```
+
+This explicit read-only check probes server-player information, sessions, and co-play. It prints only availability,
+field presence, counts, truncation, sanitized HTTP category and retry time; it never prints the token, configured IDs,
+names, response values, headers, or bodies.
+
+Premium improves the available history and BattleMetrics' refresh rate, but it does not bypass Rust's censored player
+list, a private/hidden BattleMetrics profile, or server-owner-only access. BattleMetrics states that unique identifier
+search is unavailable to non-owners, and private/streamer sessions can be hidden even from subscribers. The bot
+therefore keeps BattleMetrics player ID as its tracking key, treats SteamID64 as optional enrichment, and never infers
+identity from co-play alone.
+
+References: [BattleMetrics API documentation](https://www.battlemetrics.com/developers/documentation),
+[SteamID search restrictions](https://learn.battlemetrics.com/article/54-how-can-i-search-for-a-player-by-steam64id),
+[profile visibility and retention](https://learn.battlemetrics.com/article/44-what-can-i-do-to-hide-my-player-profile),
+[Player Log](https://www.battlemetrics.com/servers/arma3/2197362/sessions), and
+[Player Queries](https://blog.battlemetrics.com/posts/player-queries/).

@@ -10,6 +10,7 @@
         "test:unit": "node --test test/*.test.js",
         "test:types": "tsc --noEmit -p .",
         "test:autotranslate:live": "node test/liveAutoTranslate.js",
+        "test:battlemetrics:live": "node test/liveBattlemetrics.js",
         "benchmark:plugins": "node benchmark/plugin-dispatch.js"
     },
     "repository": {
@@ -33,6 +34,7 @@
         "colors": "^1.4.0",
         "discord-api-types": "^0.38.14",
         "discord.js": "^14.21.0",
+        "dotenv": "^17.4.2",
         "eld": "2.1.0",
         "ffmpeg-static": "^5.1.0",
         "gm": "^1.25.0",

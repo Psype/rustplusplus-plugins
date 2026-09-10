@@ -407,12 +407,15 @@ Command | Description
 [**team**](commands.md#team) | Get the names of all members in the team.
 [**time**](commands.md#time) | Get the current time In-Game and time till day/night.
 [**timer/timers**](commands.md#timer) | Set or list custom timers.
-[**track**](commands.md#tracktracklisttracksuntrack) | Track an enemy's BattleMetrics online/offline state on the current server.
-[**tracklist/tracks**](commands.md#tracktracklisttracksuntrack) | List tracked enemies and their last known presence.
+[**track**](commands.md#tracktrackinfotrackhistorytrackrelatedtracklisttracksuntrack) | Track an enemy's BattleMetrics online/offline state on the current server.
+[**trackinfo**](commands.md#tracktrackinfotrackhistorytrackrelatedtracklisttracksuntrack) | Show the tracked player's server-specific Premium summary.
+[**trackhistory**](commands.md#tracktrackinfotrackhistorytrackrelatedtracklisttracksuntrack) | Show the tracked player's recent sessions on the current server.
+[**trackrelated**](commands.md#tracktrackinfotrackhistorytrackrelatedtracklisttracksuntrack) | Show bounded BattleMetrics co-play results without inferring team membership.
+[**tracklist/tracks**](commands.md#tracktrackinfotrackhistorytrackrelatedtracklisttracksuntrack) | List tracked enemies and their last known presence.
 [**tr**](commands.md#tr) | Translate a text to another language.
 [**trf**](commands.md#trf) | Translate a text from one language to another.
 [**tts**](commands.md#tts) | Send a Text-To-Speech message to the Discord teamchat channel.
-[**untrack**](commands.md#tracktracklisttracksuntrack) | Remove an enemy from the player tracker.
+[**untrack**](commands.md#tracktrackinfotrackhistorytrackrelatedtracklisttracksuntrack) | Remove an enemy from the player tracker.
 [**unmute**](commands.md#unmute) | Unmute the bot from the In-Game Team Chat.
 [**upkeep**](commands.md#upkeep) | Get the upkeep time of all connected tool cupboard monitors.
 [**uptime**](commands.md#uptime-ingame) | Display uptime of the bot and server.
@@ -663,20 +666,24 @@ Subcommand | Description | Required
 ![In-Game Command player Image](images/ingame_commands/player_ingame.png)
 
 
-## **track/tracklist/tracks/untrack**
+## **track/trackinfo/trackhistory/trackrelated/tracklist/tracks/untrack**
 
 > **Track a BattleMetrics player on the currently active Rust server.** `!track` accepts either a SteamID64 or the complete remainder of the command as a partial pseudonym, so spaces and special characters are supported. An exact case-insensitive name wins. When several players match, the bot returns a numbered list without changing the tracker; the same requester can select one for five minutes with the same query followed by its number, for example `!track nirk 2`, or with the shorter `!track #2`. The pending choice is isolated by requester and active server and is lost on restart.
 <br>Command: `!track <partial player name|SteamID64>`
 <br>Selection after an ambiguous result: `!track #<number>` or `!track <same partial player name> <number>`
+<br>Command: `!trackinfo <tracked player>`
+<br>Command: `!trackhistory <tracked player>`
+<br>Command: `!trackrelated <tracked player>`
 <br>Command: `!tracklist` (alias: `!tracks`)
 <br>Command: `!untrack <partial player name|BattleMetrics ID|SteamID64>`
 <br>The plugin creates one native `Enemies` tracker per server. The existing 60-second BattleMetrics poller sends login/logout alerts to Discord and, by default, Rust team chat. `!tracklist` reports `online`, `last <duration>`, or `unknown`; an API failure is never reported as a logout.
 <br>On a recognized WarBandits server, `!track` also invokes the detached WarBandits provider once to enrich the selected identity with its server-specific name, SteamID64, internal WarBandits ID, aliases, rank, playtime, and available statistics. This provider performs no background polling and never emits an online/offline transition: BattleMetrics remains the sole presence source.
 <br>Presence alerts created by this plugin and their `TRACKER` info logs always use `Tracked player <name> is now online.` and `Tracked player <name> just disconnected.`. The event is logged before the optional Rust/Discord deliveries, whose failures remain isolated.
 <br>For SteamID64 input, the plugin reads the free public Steam Community profile name with a five-second timeout, then requires a strict match on the active server. A leading `[CLAN]` tag is tolerated. If BattleMetrics exposes its own Steam identifier, it must equal the requested SteamID; a mismatch, ambiguous name, private profile, or unproven loose match performs no write.
-<br>The in-game list is capped to one 122-character bot message and ends with `+N` when more entries exist. The complete readable, redacted save is `data/player-trackers/<guildId>-<battlemetricsServerId>.json`. It contains the stable BattleMetrics player ID, current name, aliases, best-effort SteamID64, status, and last-seen timestamps, but no Rust+ or Discord credentials. SteamID64 remains `null` when BattleMetrics does not expose it.
+<br>`!trackinfo`, `!trackhistory`, and `!trackrelated` are read-only, on-demand Premium calls. They persist bounded summaries in the same projection but never alter presence or emit a transition. Co-play means simultaneous activity observed by BattleMetrics; it is not proof of a Rust team, alternate identity, or relationship.
+<br>The in-game responses are capped to one 122-character bot message. The complete readable, redacted save is `data/player-trackers/<guildId>-<battlemetricsServerId>.json`. Schema 2 contains the stable BattleMetrics player ID, current name, aliases, best-effort SteamID64, status, last-seen timestamps, and bounded Premium summaries, but no token, IP address, raw API body, Rust+ credential, or Discord credential. SteamID64 remains `null` when BattleMetrics does not expose it.
 <br>The WarBandits catalogue is atomically cached in `data/warbandits/servers.json`; resolved identities and statistics are stored in `data/warbandits/<guildId>-<serverSlug>.json`. Calls are serialized with a five-second minimum gap and a five-second timeout. HTTP 429 `Retry-After` and Cloudflare challenges create a persisted cooldown with no blind retry. A WarBandits failure degrades to the normal BattleMetrics/Steam resolution and cannot undo a committed tracker change.
-<br>`RPP_BATTLEMETRICS_TOKEN` and a BattleMetrics ID on the active server are required. Offline search is scoped to that server. BattleMetrics currently requires API subscription rights for its `/players` search; without them, unique online partial matches and exact names already observed by the bot still work. [Private profiles, streamer mode, and hidden player lists](https://learn.battlemetrics.com/article/44-what-can-i-do-to-hide-my-player-profile), or other BattleMetrics API permissions, can make a player unresolvable; in that case nothing is saved.
+<br>`RPP_BATTLEMETRICS_TOKEN` belongs in the ignored repository-root `.env`; it is an access token, not an application ID. The bot loads `.env` automatically and only performs read-only player/server calls. Leave RCON, bans, flags, notes, triggers, and all write scopes disabled. BattleMetrics subscription rights are required; private profiles, streamer mode, hidden player lists, and server-owner-only identifier restrictions can still make a player unresolvable. See `docs/battlemetrics_and_trackers.md` for setup, verified endpoints, limits, and the sanitized live test.
 
 
 ## **pop**

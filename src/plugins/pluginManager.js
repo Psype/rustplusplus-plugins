@@ -39,6 +39,7 @@ function withWarBanditsProvider(context) {
 
 const plugins = Object.freeze([
     Object.freeze({ name: 'auto-translate' }),
+    Object.freeze({ name: 'battlemetrics' }),
     Object.freeze({
         name: 'custom-commands',
         handleCommand: context => CustomCommands.handleCommand(context)

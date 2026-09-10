@@ -11,6 +11,35 @@ Target observed: WarBandits EU 5X NoBPs (`eu5xnbp.warbandits.gg`, BattleMetrics 
 
 Conclusion: a passive A2S plugin could independently collect server health, population, build, map metadata, wipe hints, uptime, entity count, FPS, and memory. On this WarBandits server it must never use `A2S_PLAYER` as an enemy-presence source.
 
+### Determinism of censored names
+
+The anonymized name is not freshly randomized for each query. A reverse-engineered implementation dumped from Rust maps a SteamID64 to one entry in the game's `RandomUsernames` list with:
+
+`(steamId % 2147483647) % RandomUsernames.length`
+
+See [`realstrings/rust-de-stream-mode`](https://github.com/realstrings/rust-de-stream-mode/blob/main/de.py). The list already bundled with this bot contains 5,163 distinct names and no duplicate entry. Therefore, while the game algorithm and list remain unchanged:
+
+- one SteamID64 produces the same censored name across repeated A2S queries, reconnects, wipes, and servers;
+- two different SteamIDs can produce the same name because the mapping compresses every possible SteamID into only 5,163 outputs;
+- for one target among 99 other independently distributed players, the theoretical chance that at least one other player has the same censored name is about 1.9%; among 199 others it is about 3.8%; real SteamID allocation is not guaranteed to be uniform;
+- a future Rust update can change the list or algorithm, so this is a reverse-engineered implementation detail rather than a supported Facepunch contract.
+
+This creates a possible low-confidence sensor: calculate the expected censored name from a known SteamID64 and look for it in A2S. Presence proves only that at least one SteamID in the same collision bucket is online; absence may also be affected by A2S caching/query failure. It must not emit authoritative `online` or `just disconnected` notifications without corroboration.
+
+BattleMetrics receives the same censored A2S name when it has only the public query source. Its own documentation says unverified profiles are name-based, activity under the same name is merged, and censored non-RCON Rust lists result in functional anonymity. Thus a stable censored name may create a stable name-based BattleMetrics record, but it is not a verified link to the real SteamID and collisions can merge different players. An owner-authorized RCON feed can provide the real SteamID independently; that data is unavailable to this bot.
+
+### Cross-correlation without BattleMetrics
+
+A user-supplied `real name -> SteamID64` relation or an exact WarBandits stats result is sufficient to create the stable identity. The bot can then calculate the censored alias locally; BattleMetrics is not needed for this mapping. A detached presence provider can combine:
+
+1. the SteamID64 as the canonical key and the real/WarBandits names as aliases;
+2. the deterministic censored A2S alias;
+3. A2S player presence plus its connection-duration field to follow the visible alias session;
+4. a cached inverse index `censored alias -> known WarBandits SteamID64 set` to expose known collisions;
+5. on-demand WarBandits playtime/stat deltas and optional public Steam `playing Rust` state as corroboration.
+
+This can prove target activity when that target's WarBandits counters advance, and it can make a currently visible censored session highly probable when its known collision bucket is unique. It still cannot prove which SteamID owns a visible alias when multiple known candidates collide, nor exclude a new/uncached WarBandits account in the same bucket. Such observations must retain a confidence/source field: `ambiguous` for a collision, `probable` for a unique known alias with fresh A2S, and `activity-confirmed` only for a target-specific WarBandits delta. The final state remains probabilistic rather than server-authoritative.
+
 ## Steam sources
 
 ### Public Steam Community profile
@@ -77,20 +106,49 @@ Do not infer teams, locations, inventories, or combat relationships from simulta
 ## Other server-level sources assessed
 
 - Steam's official [`ISteamMatchmakingServers`](https://partner.steamgames.com/doc/features/multiplayer/game_servers) can discover the same class of server-browser metadata as A2S, but not a trustworthy arbitrary-player list.
-- [Just-Wiped](https://just-wiped.net/rust_servers/3040629), [WipeRadar](https://wiperadar.com/server/warbanditsgg-3x-soloduotrioquadlootx3-just-wiped-140-28015), and [GameMonitoring](https://gamemonitoring.ru/rust/servers/10815449/api) expose secondary server directory/wipe observations. They may help confirm endpoint changes or a wipe when WarBandits is unavailable, but they add no verified SteamID64-to-live-session link and may lag their upstream query. They are not recommended as player-tracker dependencies.
+- [Just-Wiped](https://just-wiped.net/rust_servers/3040629), [WipeRadar](https://wiperadar.com/server/warbanditsgg-3x-soloduotrioquadlootx3-just-wiped-140-28015), and [GameMonitoring](https://gamemonitoring.net/developers/docs/api/servers/:server_id/players/__get) expose secondary server directory/wipe observations. GameMonitoring explicitly returns players only when the game and server expose them. They may help confirm endpoint changes or a wipe when WarBandits is unavailable, but they add no verified SteamID64-to-live-session link and may lag their upstream query. They are not recommended as player-tracker dependencies.
 - Public Steam groups/friend lists can enrich known identities when visible, but membership or friendship is not evidence of a Rust team or current server presence.
+
+## BattleMetrics Premium capability audit
+
+The active Premium plan shown on 2026-09-10 exposes Player Log, Player Flags, an increased update rate for favorite servers, browser/email/SMS alerts, three months of detailed player logs and session history, advanced player searches, player notes, and the web UI's Related Player/Played With views. Only the read-only player information relevant to this bot is integrated.
+
+- Premium Player Log and session pages can answer who joined during a time window, who was online at a specific time, and each session's join/leave/duration. The implemented player-history endpoint is scoped to a tracked BattleMetrics player and locally rechecked against the active server.
+- `GET /players/{playerId}/relationships/coplay` exposes co-play data. It is distinct from RCON **Player Queries / Global Player Matching**, which targets alternate-profile research, requires organization participation/permissions, and can use private identifiers without revealing them. This bot does not call Player Queries, identifiers matching, flags, notes, bans, or any write endpoint.
+- The plan's increased update rate states that favorite servers are queried at least once every five minutes. The bot polls BattleMetrics once per minute, but it cannot make BattleMetrics refresh the upstream Rust server more frequently. Favorite the active WarBandits server manually in BattleMetrics to receive that plan benefit; the bot does not need the `Favorite Servers` token permission.
+- The access-token permission editor has no separate Player Log, Sessions, Co-play, or public Player Search checkbox. Those read surfaces are subscription/account capabilities. The plugin therefore needs no RCON or write scope. A 403 is reported as `subscription or permission denied` because BattleMetrics can still restrict a resource independently of the token's checkbox list.
+- Premium is not server-owner authority. BattleMetrics explicitly reserves SteamID/unique-identifier search for server owners and administrators, and hidden/private/streamer sessions can remain unavailable. On censored Rust lists an unverified profile can be name-based rather than a proven Steam identity.
+- BattleMetrics' current privacy documentation describes a rolling 12-month retention ceiling for granular public session data, while the Premium plan/player-log UI advertises three months of accessible detailed logs. The bot requests only a bounded recent page and does not attempt archival scraping.
+
+## Free BattleMetrics alternatives assessed
+
+| Source | Free/self-hosted | Useful signal | Blocking limitation on WarBandits |
+| --- | --- | --- | --- |
+| [RustMetrics](https://github.com/swiss-shift-ch/rustmetrics) | Yes, MIT/self-hosted | A2S population and display-name sessions; Discord transitions | Its documentation explicitly detects Rust streamer-mode anonymization and states that watchlisting cannot work there. It stores only display names from A2S and SteamIDs only when BattleMetrics surfaces them. WarBandits' observed A2S names are censored. |
+| [GameDig](https://github.com/gamedig/node-gamedig) or direct A2S | Yes | Server health, population and any public player names | GameDig can fetch only what the server publishes; its player name may be empty and its player array may differ from the population. It cannot recover SteamID64 from WarBandits' masked names. |
+| [GameMonitoring](https://gamemonitoring.net/developers/docs/api/servers/:server_id/players/__get) | Public endpoint | Cached server/player directory data when exposed | The provider documents that the player list exists only when the game/server expose it. It is therefore another view of the same censored source, not an identity bypass. |
+| Steam Web API / [RustRadar-style presence](https://rustradar.net/) | A Steam Web API key is free; up to 100 SteamIDs per `GetPlayerSummaries` request | Steam online/offline and current-game presence when public | `playing Rust` does not identify the Rust server. Private/invisible users produce incomplete evidence, so absence must remain `unknown`, not `offline on WarBandits`. |
+| WarBandits public stats | Yes but undocumented and rate-limited | Strong SteamID64/name resolution and interval activity deltas | No per-player online flag or timestamp; it cannot emit exact connect/disconnect transitions. |
+| RCON or an owner-side uMod/Carbon endpoint | Software can be self-hosted | Authoritative connected SteamID64 list | Requires cooperation and credentials from WarBandits. It is unavailable to a normal player account. |
+
+No free external service was found that can map an arbitrary SteamID64 to a live session on this specific WarBandits server after `censorplayerlist` is applied. This is a source-data limitation, not a missing client library: aggregators using A2S receive the same masked list, Steam exposes at most coarse public presence for arbitrary users, and BattleMetrics now rejects the required server/player API without a subscription.
 
 ## Recommended integration order
 
-1. Keep BattleMetrics as the sole online/offline source and alert trigger.
-2. Use the detached WarBandits provider only on demand during player resolution: SteamID64/name resolution, candidate caching, identity linking, and statistics. It must not poll in the background or emit online/offline transitions.
-3. Optionally add a detached A2S server-metadata provider for health, population, build, uptime, map seed/size, entity count, FPS, memory, and URLs. It is useful even during a BattleMetrics API outage.
-4. Optionally enrich tracked SteamID64 records through the official Steam Web API, but label presence only as `Steam online` or `playing Rust`; never infer `online on WarBandits` from that alone.
-5. Read WarBandits' public server payload for joining/queued counts and wipe schedule using the same isolated provider and cache.
-6. Do not integrate WarBandits `A2S_PLAYER`: its identities are censored on the observed server.
+1. Latest decision (2026-09-10): the user has an active BattleMetrics Premium subscription. BattleMetrics is therefore the primary configured presence source for this deployment. Its failure remains `unknown`, never a disconnect, and never cancels another provider or a committed tracker change.
+2. Keep the existing 60-second BattleMetrics server poll as the only transition source. Premium detail endpoints are invoked on demand and must not create a second poller or independently emit online/offline alerts.
+3. Keep the detached WarBandits provider on demand for SteamID64/name resolution, numbered candidates, identity caching, and statistics. It must not turn stat deltas into connect/disconnect events.
+4. Use BattleMetrics server-player information, session history, and co-play as bounded read-only enrichment. Co-play is not proof of team membership or an alternate identity.
+5. Keep Steam presence as optional coarse corroboration only. `playing Rust` does not identify the Rust server.
+6. Add server-authoritative exact SteamID presence only if WarBandits later supplies an authenticated endpoint, RCON access, or an owner-side feed. Premium does not grant a normal player access to another organization's RCON identifiers.
+7. Do not integrate WarBandits `A2S_PLAYER`: its identities are censored on the observed server. A detached A2S provider remains useful only for server metadata and health.
 
 ## Implemented integration
 
 `src/plugins/warBandits/index.js` implements the on-demand provider. The first applicable `!track` loads and caches the complete validated `/servers` array for one hour, selects the active server by exact BattleMetrics ID and then exact normalized hostname, and performs one server-scoped `/stats/<slug>` lookup for the requested SteamID64 or name. Identical concurrent lookups are coalesced and response results are held for five minutes.
 
 The provider persists `data/warbandits/servers.json` and `data/warbandits/<guildId>-<serverSlug>.json` atomically with LF endings. The sidecar records sourced identity fields, aliases, statistics, observation times, and deltas between explicit resolutions. Its presence field is `unknown` until the identity is linked to a reliable BattleMetrics observation; WarBandits data can never set it. No periodic WarBandits hook is exported.
+
+`src/plugins/battlemetrics/index.js` now owns the read-only Premium API boundary used by `playerTracker`. It provides server-scoped search, optional SteamID enrichment, server-player summaries, recent sessions, and co-play with a five-second timeout, fixed origin, bounded immutable parsing, short caches, coalescing, and 429 cooldown without retry. `!trackinfo`, `!trackhistory`, and `!trackrelated` persist only bounded sanitized summaries in the schema-2 tracker projection. The actual online/offline transition path remains the existing BattleMetrics poller.
+
+The repository-root `.env` is now loaded by `config/index.js`; the access token is stored only as `RPP_BATTLEMETRICS_TOKEN`. The committed `.env.example` contains an empty placeholder. The token is not an application ID and is never written into projections or logs. See `docs/battlemetrics_and_trackers.md` for the permission-minimized setup and the explicit sanitized live verifier.

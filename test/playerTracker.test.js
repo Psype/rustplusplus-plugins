@@ -511,6 +511,75 @@ Test('tracklist is bounded to one Rust-safe message and reports omitted entries'
     Assert.match(list.response, /\| \+\d+$/);
 });
 
+Test('Premium tracker commands persist server details, sessions and related players without changing presence', async t => {
+    const harness = createHarness(t, { 1001: onlinePlayer('1001', 'Nirks') });
+    harness.dependencies.httpClient = { get: async () => steamProfile() };
+    await PlayerTracker.handleCommand(command(harness, '!track Nirks'));
+    harness.dependencies.battlemetricsProvider = {
+        getServerPlayer: async () => ({
+            available: true,
+            reason: null,
+            player: {
+                firstSeenAt: '2026-06-01T00:00:00.000Z',
+                lastSeenAt: '2026-09-09T22:00:00.000Z',
+                timePlayedSeconds: 90061
+            }
+        }),
+        getSessions: async () => ({
+            available: true,
+            reason: null,
+            truncated: false,
+            sessions: [{
+                id: 's1',
+                startAt: '2026-09-10T10:00:00.000Z',
+                stopAt: '2026-09-10T11:00:00.000Z',
+                durationSeconds: 3600
+            }]
+        }),
+        getRelatedPlayers: async () => ({
+            available: true,
+            reason: null,
+            truncated: false,
+            players: [{
+                battlemetricsPlayerId: '2001',
+                name: 'Enemy Ally',
+                overlapSeconds: 7200,
+                sessionCount: 4
+            }]
+        })
+    };
+
+    const info = await PlayerTracker.handleCommand(command(harness, '!trackinfo Nirk'));
+    const history = await PlayerTracker.handleCommand(command(harness, '!trackhistory 1001'));
+    const related = await PlayerTracker.handleCommand(command(harness, '!trackrelated 76561198154738095'));
+
+    Assert.match(info.response, /^Nirks: online \| played 1d1h/);
+    Assert.match(history.response, /^Sessions Nirks: 09-10 10:00Z-09-10 11:00Z \(1h0m\)/);
+    Assert.equal(related.response, 'Related Nirks: Enemy Ally 2h0m');
+    const save = harness.getSave();
+    Assert.equal(save.schemaVersion, 2);
+    Assert.equal(save.players[0].status, 'online');
+    Assert.equal(save.players[0].battlemetrics.server.timePlayedSeconds, 90061);
+    Assert.equal(save.players[0].battlemetrics.sessions.items[0].id, 's1');
+    Assert.equal(save.players[0].battlemetrics.related.players[0].battlemetricsPlayerId, '2001');
+});
+
+Test('Premium API failure leaves the last tracker projection intact', async t => {
+    const harness = createHarness(t, { 1001: onlinePlayer('1001', 'Nirks') });
+    harness.dependencies.httpClient = { get: async () => steamProfile() };
+    await PlayerTracker.handleCommand(command(harness, '!track Nirks'));
+    const before = harness.getSave();
+    harness.dependencies.battlemetricsProvider = {
+        getSessions: async () => ({ available: false, reason: 'subscription or permission denied' })
+    };
+
+    const response = await PlayerTracker.handleCommand(command(harness, '!trackhistory Nirks'));
+
+    Assert.equal(response.response,
+        'BattleMetrics sessions unavailable (subscription or permission denied); tracker unchanged.');
+    Assert.deepEqual(harness.getSave(), before);
+});
+
 Test('a corrupt readable save is preserved and blocks a new tracker commit', async t => {
     const harness = createHarness(t, { 1001: onlinePlayer('1001', 'Nirks') });
     const path = Path.join(harness.dependencies.dataDirectory, 'guild-42.json');

@@ -4,16 +4,16 @@ const Axios = require('axios');
 const Fs = require('fs');
 const Path = require('path');
 
-const Config = require('../../../config');
 const Constants = require('../../util/constants.js');
 const Utils = require('../../util/utils.js');
+const BattlemetricsProvider = require('../battlemetrics');
 
-const API_ROOT = 'https://api.battlemetrics.com';
 const API_TIMEOUT_MS = 5000;
 const DATA_DIRECTORY = Path.join(__dirname, '..', '..', '..', 'data', 'player-trackers');
 const MANAGED_BY = 'player-tracker';
+const MAX_PREMIUM_RESULTS = 10;
 const MAX_QUERY_LENGTH = 64;
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const SELECTION_TTL_MS = 5 * 60 * 1000;
 const STATUS_VALUES = Object.freeze(['online', 'offline', 'unknown']);
 const mutationLocks = new Map();
@@ -40,7 +40,8 @@ function parseCommand(context) {
     const name = normalize(separator === -1 ? body : body.slice(0, separator));
     const query = sanitizeName(separator === -1 ? '' : body.slice(separator + 1));
 
-    if (!['track', 'tracklist', 'tracks', 'untrack'].includes(name)) return null;
+    if (!['track', 'trackinfo', 'trackhistory', 'trackrelated', 'tracklist', 'tracks', 'untrack']
+        .includes(name)) return null;
     return Object.freeze({ name, query });
 }
 
@@ -113,7 +114,53 @@ function validIsoDate(value) {
     return value === null || (typeof value === 'string' && !Number.isNaN(Date.parse(value)));
 }
 
+function validOptionalCount(value) {
+    return value === null || (Number.isSafeInteger(value) && value >= 0);
+}
+
+function validBattlemetricsDetails(details) {
+    if (!details || typeof details !== 'object' ||
+        !Object.prototype.hasOwnProperty.call(details, 'server') ||
+        !Object.prototype.hasOwnProperty.call(details, 'sessions') ||
+        !Object.prototype.hasOwnProperty.call(details, 'related')) return false;
+    if (details.server !== null && (!validIsoDate(details.server.fetchedAt) ||
+        details.server.fetchedAt === null || !validIsoDate(details.server.firstSeenAt) ||
+        !validIsoDate(details.server.lastSeenAt) ||
+        !validOptionalCount(details.server.timePlayedSeconds))) return false;
+    if (details.sessions !== null && (!validIsoDate(details.sessions.fetchedAt) ||
+        details.sessions.fetchedAt === null || typeof details.sessions.truncated !== 'boolean' ||
+        !Array.isArray(details.sessions.items) || details.sessions.items.length > MAX_PREMIUM_RESULTS)) return false;
+    for (const session of (details.sessions && details.sessions.items) || []) {
+        if (!session || typeof session.id !== 'string' || session.id.length === 0 || session.id.length > 128 ||
+            !validIsoDate(session.startAt) ||
+            session.startAt === null || !validIsoDate(session.stopAt) ||
+            !validOptionalCount(session.durationSeconds)) return false;
+    }
+    if (details.related !== null && (!validIsoDate(details.related.fetchedAt) ||
+        details.related.fetchedAt === null || typeof details.related.truncated !== 'boolean' ||
+        !Array.isArray(details.related.players) || details.related.players.length > MAX_PREMIUM_RESULTS)) return false;
+    for (const player of (details.related && details.related.players) || []) {
+        if (!player || !/^\d+$/.test(`${player.battlemetricsPlayerId}`) ||
+            typeof player.name !== 'string' || player.name === '' || player.name.length > 128 ||
+            !validOptionalCount(player.overlapSeconds) || !validOptionalCount(player.sessionCount)) return false;
+    }
+    return true;
+}
+
+function migrateSnapshot(snapshot) {
+    if (!snapshot || snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.players)) return snapshot;
+    return {
+        ...snapshot,
+        schemaVersion: SCHEMA_VERSION,
+        players: snapshot.players.map(player => ({
+            ...player,
+            battlemetrics: { server: null, sessions: null, related: null }
+        }))
+    };
+}
+
 function validateSnapshot(snapshot) {
+    snapshot = migrateSnapshot(snapshot);
     if (!snapshot || typeof snapshot !== 'object' || snapshot.schemaVersion !== SCHEMA_VERSION ||
         typeof snapshot.guildId !== 'string' || typeof snapshot.serverId !== 'string' ||
         !/^\d+$/.test(`${snapshot.battlemetricsServerId}`) ||
@@ -130,7 +177,7 @@ function validateSnapshot(snapshot) {
             !validIsoDate(player.lastSeenAt) || !validIsoDate(player.statusUpdatedAt) ||
             player.addedAt === null || player.statusUpdatedAt === null ||
             ![null, 'online', 'offline'].includes(player.lastKnownStatus) ||
-            typeof player.profileUrl !== 'string' ||
+            typeof player.profileUrl !== 'string' || !validBattlemetricsDetails(player.battlemetrics) ||
             (player.steamId !== null && !/^7656119\d{10}$/.test(`${player.steamId}`))) {
             throw new Error('Player tracker save contains an invalid player record.');
         }
@@ -324,62 +371,16 @@ async function linkWarBanditsPlayer(context, scope, battlemetricsPlayer, warBand
 }
 
 async function searchRemote(context, scope, query, dependencies) {
-    const token = dependencies.token !== undefined ? dependencies.token : Config.battlemetrics.token;
-    if (!token) return Object.freeze({ candidates: [], unavailable: true, reason: 'token missing' });
-
-    const httpClient = dependencies.httpClient || Axios;
-    try {
-        const response = await httpClient.get(`${API_ROOT}/players`, {
-            headers: { Authorization: `Bearer ${token}` },
-            params: {
-                'filter[search]': query,
-                'filter[servers]': scope.battlemetricsId,
-                'page[size]': 10,
-                include: 'server'
-            },
-            timeout: API_TIMEOUT_MS
-        });
-        const entities = response && response.data && response.data.data;
-        if (!Array.isArray(entities)) throw new Error('invalid response');
-        const pagination = response.data && response.data.meta && response.data.meta.pagination;
-        const parsedTotal = Number(pagination && pagination.total);
-        const total = Number.isSafeInteger(parsedTotal) && parsedTotal >= 0 ? parsedTotal : entities.length;
-        const truncated = Boolean(response.data && response.data.links && response.data.links.next) ||
-            total > entities.length;
-
-        const normalizedQuery = normalize(query);
-        const candidates = [];
-        let invalidRelationships = 0;
-        for (const entity of entities) {
-            const name = sanitizeName(entity && entity.attributes && entity.attributes.name);
-            const playerId = entity && `${entity.id || ''}`;
-            const servers = entity && entity.relationships && entity.relationships.servers &&
-                entity.relationships.servers.data;
-            if (!name || !/^\d+$/.test(playerId)) continue;
-            if (!Array.isArray(servers)) {
-                invalidRelationships += 1;
-                continue;
-            }
-            if (playerId !== query && !normalize(name).includes(normalizedQuery)) continue;
-            const relation = servers.find(server => `${server.id}` === scope.battlemetricsId);
-            if (!relation) continue;
-            const online = relation.meta && relation.meta.online;
-            candidates.push(Object.freeze({
-                playerId,
-                name,
-                status: typeof online === 'boolean' ? (online ? 'online' : 'offline') : 'unknown',
-                lastSeenAt: toIsoDate(relation.meta && relation.meta.lastSeen),
-                steamId: null
-            }));
-        }
-        if (candidates.length === 0 && invalidRelationships > 0) throw new Error('invalid response');
-        return Object.freeze({ candidates, unavailable: false, reason: null, truncated });
-    }
-    catch (error) {
-        const reason = getHttpErrorReason(error);
-        logWarning(context, `BattleMetrics player search unavailable: ${reason}.`);
-        return Object.freeze({ candidates: [], unavailable: true, reason, truncated: false });
-    }
+    const provider = dependencies.battlemetricsProvider || BattlemetricsProvider;
+    const result = await provider.searchPlayers(scope, query, dependencies);
+    if (result.available === true) return Object.freeze({
+        candidates: result.candidates,
+        unavailable: false,
+        reason: null,
+        truncated: result.truncated
+    });
+    logWarning(context, `BattleMetrics player search unavailable: ${result.reason}.`);
+    return Object.freeze({ candidates: [], unavailable: true, reason: result.reason, truncated: false });
 }
 
 async function resolveCandidate(context, scope, query, dependencies) {
@@ -422,32 +423,15 @@ async function resolveCandidate(context, scope, query, dependencies) {
 }
 
 function parseSteamId(data) {
-    if (!data || !Array.isArray(data.included)) return null;
-    for (const entity of data.included) {
-        if (!entity || entity.type !== 'identifier' || !entity.attributes) continue;
-        const type = normalize(entity.attributes.type).replace(/[^a-z0-9]/g, '');
-        const identifier = `${entity.attributes.identifier || ''}`;
-        if (type === 'steamid' && /^7656119\d{10}$/.test(identifier)) return identifier;
-    }
-    return null;
+    return BattlemetricsProvider.parseSteamId(data);
 }
 
 async function resolveSteamId(context, playerId, dependencies) {
-    const token = dependencies.token !== undefined ? dependencies.token : Config.battlemetrics.token;
-    if (!token) return null;
-    const httpClient = dependencies.httpClient || Axios;
-    try {
-        const response = await httpClient.get(`${API_ROOT}/players/${playerId}`, {
-            headers: { Authorization: `Bearer ${token}` },
-            params: { include: 'identifier' },
-            timeout: API_TIMEOUT_MS
-        });
-        return parseSteamId(response && response.data);
-    }
-    catch (error) {
-        logWarning(context, `BattleMetrics SteamID enrichment unavailable: ${getHttpErrorReason(error)}.`);
-        return null;
-    }
+    const provider = dependencies.battlemetricsProvider || BattlemetricsProvider;
+    const result = await provider.resolveSteamId(playerId, dependencies);
+    if (result.available === true) return result.steamId;
+    logWarning(context, `BattleMetrics SteamID enrichment unavailable: ${result.reason}.`);
+    return null;
 }
 
 function getPlayerRecord(previous, playerId) {
@@ -508,7 +492,12 @@ function buildSnapshot(context, scope, trackerId, tracker, previous, seeds, depe
             lastSeenAt,
             addedAt: prior ? prior.addedAt : now,
             statusUpdatedAt,
-            profileUrl: `${Constants.BATTLEMETRICS_PROFILE_URL}${playerId}`
+            profileUrl: `${Constants.BATTLEMETRICS_PROFILE_URL}${playerId}`,
+            battlemetrics: prior && validBattlemetricsDetails(prior.battlemetrics) ? prior.battlemetrics : {
+                server: null,
+                sessions: null,
+                related: null
+            }
         }));
     }
 
@@ -678,6 +667,180 @@ function formatTrackList(snapshot, dependencies) {
         return `${player.name}: unknown${age ? `, last ${age}` : ''}`;
     });
     return fitListResponse(entries);
+}
+
+function fitSingleResponse(value) {
+    const maxLength = Constants.MAX_LENGTH_TEAM_MESSAGE - '[BOT] '.length;
+    const characters = Array.from(`${value}`);
+    if (characters.length <= maxLength) return `${value}`;
+    return `${characters.slice(0, Math.max(1, maxLength - 3)).join('')}...`;
+}
+
+function formatDuration(seconds) {
+    if (!Number.isSafeInteger(seconds) || seconds < 0) return null;
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h${Math.floor((seconds % 3600) / 60)}m`;
+    return `${Math.floor(seconds / 86400)}d${Math.floor((seconds % 86400) / 3600)}h`;
+}
+
+function ambiguousTrackedResponse(selection) {
+    const candidates = selection.matches.map(player => ({
+        name: player.name,
+        playerId: `${player.playerId}`,
+        status: 'tracked'
+    }));
+    return `Ambiguous tracked player: ${formatCandidates(candidates)}.`;
+}
+
+function resolveTrackedSelection(context, query, dependencies) {
+    const scope = getScope(context);
+    if (!scope) return Object.freeze({
+        error: 'Player tracker unavailable: configure BattleMetrics for the active server.'
+    });
+    const entry = findManagedTracker(scope.instance, scope.serverId, scope.battlemetricsId);
+    if (!entry || entry.tracker.players.length === 0) return Object.freeze({ error: 'No tracked players.' });
+    const selection = selectTrackedPlayer(entry.tracker.players, query);
+    if (!selection.player) return Object.freeze({
+        error: selection.matches.length > 1 ? ambiguousTrackedResponse(selection) : `Tracked player not found: ${query}.`
+    });
+    const path = getDataPath(context.guildId, scope.battlemetricsId, dependencies);
+    const previous = readSnapshot(path);
+    const snapshot = previous || buildSnapshot(
+        context, scope, entry.trackerId, entry.tracker, null, null, dependencies);
+    const record = getPlayerRecord(snapshot, selection.player.playerId);
+    if (!record) throw new Error('Tracked player projection is missing.');
+    return Object.freeze({ error: null, scope, entry, player: selection.player, record });
+}
+
+async function persistBattlemetricsSection(context, originalScope, playerId, section, value, dependencies) {
+    const lockKey = `${context.guildId}:${originalScope.battlemetricsId}`;
+    await withMutationLock(lockKey, async () => {
+        const scope = getScope(context);
+        if (!scope || scope.battlemetricsId !== originalScope.battlemetricsId ||
+            scope.serverId !== originalScope.serverId) return;
+        const path = getDataPath(context.guildId, scope.battlemetricsId, dependencies);
+        let snapshot = readSnapshot(path);
+        const entry = findManagedTracker(scope.instance, scope.serverId, scope.battlemetricsId);
+        if (!entry) return;
+        if (!snapshot || !getPlayerRecord(snapshot, playerId)) {
+            snapshot = buildSnapshot(context, scope, entry.trackerId, entry.tracker, snapshot, null, dependencies);
+        }
+        let changed = false;
+        const players = snapshot.players.map(player => {
+            if (`${player.battlemetricsPlayerId}` !== `${playerId}`) return player;
+            changed = true;
+            return {
+                ...player,
+                battlemetrics: {
+                    ...player.battlemetrics,
+                    [section]: value
+                }
+            };
+        });
+        if (!changed) return;
+        const next = validateSnapshot({
+            ...snapshot,
+            updatedAt: (dependencies.now || (() => new Date()))().toISOString(),
+            players
+        });
+        writeSnapshot(path, next);
+    });
+}
+
+function getBattlemetricsProvider(dependencies) {
+    return dependencies.battlemetricsProvider || BattlemetricsProvider;
+}
+
+async function trackInfo(context, query, dependencies) {
+    if (!query) return handled(`Usage: ${context.prefix}trackinfo <tracked player>.`);
+    const selection = resolveTrackedSelection(context, query, dependencies);
+    if (selection.error) return handled(selection.error);
+    const result = await getBattlemetricsProvider(dependencies).getServerPlayer(
+        selection.player.playerId, selection.scope.battlemetricsId, dependencies);
+    if (result.available !== true) {
+        return handled(`BattleMetrics details unavailable (${result.reason}); tracker unchanged.`);
+    }
+    const fetchedAt = (dependencies.now || (() => new Date()))().toISOString();
+    await persistBattlemetricsSection(context, selection.scope, selection.player.playerId, 'server', {
+        fetchedAt,
+        firstSeenAt: result.player.firstSeenAt,
+        lastSeenAt: result.player.lastSeenAt,
+        timePlayedSeconds: result.player.timePlayedSeconds
+    }, dependencies);
+    const now = (dependencies.now || (() => new Date()))();
+    const status = selection.record.status === 'online' ? 'online' :
+        `${selection.record.status}${selection.record.lastSeenAt ? `, last ${formatAge(selection.record.lastSeenAt, now)}` : ''}`;
+    const played = formatDuration(result.player.timePlayedSeconds);
+    const first = formatAge(result.player.firstSeenAt, now);
+    return handled(fitSingleResponse([
+        `${selection.record.name}: ${status}`,
+        played ? `played ${played}` : null,
+        first ? `first ${first}` : null,
+        `BM:${selection.record.battlemetricsPlayerId}`,
+        selection.record.steamId ? `Steam:${selection.record.steamId}` : null
+    ].filter(Boolean).join(' | ')));
+}
+
+function compactSessionDate(value) {
+    if (!value) return 'online';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '?';
+    return `${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')} ` +
+        `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}Z`;
+}
+
+function formatSession(session) {
+    const start = compactSessionDate(session.startAt);
+    const stop = session.stopAt ? compactSessionDate(session.stopAt) : 'online';
+    const duration = formatDuration(session.durationSeconds);
+    return `${start}-${stop}${duration ? ` (${duration})` : ''}`;
+}
+
+async function trackHistory(context, query, dependencies) {
+    if (!query) return handled(`Usage: ${context.prefix}trackhistory <tracked player>.`);
+    const selection = resolveTrackedSelection(context, query, dependencies);
+    if (selection.error) return handled(selection.error);
+    const result = await getBattlemetricsProvider(dependencies).getSessions(
+        selection.player.playerId, selection.scope.battlemetricsId, dependencies);
+    if (result.available !== true) {
+        return handled(`BattleMetrics sessions unavailable (${result.reason}); tracker unchanged.`);
+    }
+    await persistBattlemetricsSection(context, selection.scope, selection.player.playerId, 'sessions', {
+        fetchedAt: (dependencies.now || (() => new Date()))().toISOString(),
+        truncated: result.truncated,
+        items: result.sessions
+    }, dependencies);
+    if (result.sessions.length === 0) {
+        return handled(`No BattleMetrics sessions found for ${selection.record.name} on the current server.`);
+    }
+    const suffix = result.truncated || result.sessions.length > 2 ? ` | +${Math.max(1, result.sessions.length - 2)}` : '';
+    return handled(fitSingleResponse(`Sessions ${selection.record.name}: ${result.sessions.slice(0, 2)
+        .map(formatSession).join(' | ')}${suffix}`));
+}
+
+async function trackRelated(context, query, dependencies) {
+    if (!query) return handled(`Usage: ${context.prefix}trackrelated <tracked player>.`);
+    const selection = resolveTrackedSelection(context, query, dependencies);
+    if (selection.error) return handled(selection.error);
+    const result = await getBattlemetricsProvider(dependencies).getRelatedPlayers(
+        selection.player.playerId, selection.scope.battlemetricsId, dependencies);
+    if (result.available !== true) {
+        return handled(`BattleMetrics related players unavailable (${result.reason}); tracker unchanged.`);
+    }
+    await persistBattlemetricsSection(context, selection.scope, selection.player.playerId, 'related', {
+        fetchedAt: (dependencies.now || (() => new Date()))().toISOString(),
+        truncated: result.truncated,
+        players: result.players
+    }, dependencies);
+    if (result.players.length === 0) return handled(`No BattleMetrics related players found for ${selection.record.name}.`);
+    const entries = result.players.slice(0, 3).map(player => {
+        const overlap = formatDuration(player.overlapSeconds);
+        const sessions = player.sessionCount !== null ? `${player.sessionCount} sessions` : null;
+        return `${player.name}${overlap ? ` ${overlap}` : sessions ? ` ${sessions}` : ''}`;
+    });
+    const suffix = result.truncated || result.players.length > 3 ? ` | +${Math.max(1, result.players.length - 3)}` : '';
+    return handled(fitSingleResponse(`Related ${selection.record.name}: ${entries.join(' | ')}${suffix}`));
 }
 
 async function track(context, query, dependencies) {
@@ -920,6 +1083,9 @@ async function handleCommand(context) {
     const dependencies = context.playerTrackerDependencies || {};
     try {
         if (parsed.name === 'track') return await track(context, parsed.query, dependencies);
+        if (parsed.name === 'trackinfo') return await trackInfo(context, parsed.query, dependencies);
+        if (parsed.name === 'trackhistory') return await trackHistory(context, parsed.query, dependencies);
+        if (parsed.name === 'trackrelated') return await trackRelated(context, parsed.query, dependencies);
         if (parsed.name === 'untrack') return await untrack(context, parsed.query, dependencies);
         return await trackList(context, dependencies);
     }

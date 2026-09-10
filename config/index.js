@@ -18,6 +18,8 @@
 
 */
 
+require('dotenv').config({ quiet: true });
+
 module.exports = {
     general: {
         language: process.env.RPP_LANGUAGE || 'en',
@@ -32,6 +34,6 @@ module.exports = {
         needAdminPrivileges: process.env.RPP_NEED_ADMIN_PRIVILEGES || true, /* If true, only admins can delete (server, switch..), manage credentials and reset a channel */
     },
     battlemetrics: {
-        token: process.env.RPP_BATTLEMETRICS_TOKEN || ''
+        token: (process.env.RPP_BATTLEMETRICS_TOKEN || '').trim()
     }
 };
