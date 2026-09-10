@@ -26,11 +26,11 @@ organization's private identifiers.
 | Signal | BattleMetrics endpoint | Bot behavior |
 | --- | --- | --- |
 | Current roster/status | `GET /servers/{serverId}?include=player` | Existing 60-second BattleMetrics poll; sole source of online/offline transitions and notifications. |
-| Server-scoped player search | `GET /players?filter[search]=...&filter[servers]=...` | Resolves `!track`; ambiguous or truncated results require numbered selection. |
+| Server-scoped player search | `GET /players?filter[search]=...&filter[servers]=...` | Resolves `!track`; a direct BM ID wins, then currently-online name matches are ranked before historical offline profiles. Ambiguous or truncated results require numbered selection. |
 | Player identifier | `GET /players/{playerId}?include=identifier` | Adds SteamID64 only when BattleMetrics exposes a valid Steam identifier. |
 | Server-specific player summary | `GET /players/{playerId}/servers/{serverId}` | Read on demand by `!trackinfo`; persists first/last seen and playtime when supplied. |
 | Session history | `GET /players/{playerId}/relationships/sessions` | Read on demand by `!trackhistory`, filtered again locally to the active server. |
-| Co-play/related players | `GET /players/{playerId}/relationships/coplay` | Read on demand by `!trackrelated`; never labelled as a team or identity proof. |
+| Co-play/related players | `GET /players/{playerId}/relationships/coplay` | Read on demand without unsupported server/include parameters; locally filters a server relation when BattleMetrics supplies one. Never labelled as a team or identity proof. |
 
 The Premium provider is isolated in `src/plugins/battlemetrics`. It uses one five-second request per command endpoint,
 fixed HTTPS origin, no redirects, bounded responses, strict JSON:API validation, five- or ten-minute caches, and
@@ -47,6 +47,11 @@ sanitized failures. Tokens and raw response bodies are never logged.
 - `!trackhistory <tracked player>` obtains recent sessions on the active server.
 - `!trackrelated <tracked player>` obtains BattleMetrics co-play results.
 - `!untrack <partial name|BattleMetrics ID|SteamID64>` stops tracking.
+
+Tracking is idempotent by BattleMetrics player ID and by a proven SteamID64. If a player was first added from a
+BattleMetrics profile whose Steam identifier was unavailable, a later `!track <SteamID64>` resolving to that same
+profile enriches the existing entry atomically. It returns `Tracking updated`, keeps one native tracker/player record,
+and preserves its aliases, timestamps, presence, and Premium summaries instead of creating a duplicate.
 
 Presence notifications remain exactly `Tracked player <name> is now online.` and
 `Tracked player <name> just disconnected.`. A failed API call never becomes an offline transition and never erases the

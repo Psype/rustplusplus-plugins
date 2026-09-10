@@ -65,7 +65,7 @@
 - **team** - `!team` - Get team information (names of all teammates).
 - **time** - `!time` - Get in-game time.
 - **timer/timers** - `!timer [duration] [message]` or `!timers` - Set or list timers.
-- **track** - `!track [partial player name|SteamID64]` - Resolve a player on the current BattleMetrics server, enrich it ponctually from WarBandits when supported, and start BattleMetrics online/offline tracking. When several players match, use `!track #[number]` or `!track [same partial name] [number]`.
+- **track** - `!track [partial player name|SteamID64]` - Resolve a player on the current BattleMetrics server, prioritizing currently-online name matches over historical offline profiles, enrich it on demand from WarBandits when supported, and start BattleMetrics online/offline tracking. Re-adding a proven SteamID/BattleMetrics identity enriches the existing entry instead of duplicating it. When several equally ranked players match, use `!track #[number]` or `!track [same partial name] [number]`.
 - **trackhistory** - `!trackhistory [tracked player]` - Show recent BattleMetrics Premium sessions for a tracked player on the active server.
 - **trackinfo** - `!trackinfo [tracked player]` - Show the BattleMetrics Premium server-specific summary for a tracked player.
 - **tracklist/tracks** - `!tracklist` or `!tracks` - List tracked players with online or last-seen status.

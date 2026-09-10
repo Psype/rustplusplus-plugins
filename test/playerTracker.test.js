@@ -157,6 +157,32 @@ Test('ambiguous partial names require an explicit numbered selection', async t =
     Assert.equal(harness.getInstance().trackers[7].players.length, 2);
 });
 
+Test('current online partial match outranks stale exact-name BattleMetrics profiles', async t => {
+    const harness = createHarness(t, {
+        3001: onlinePlayer('3001', 'Jeffrey Kirkstein The 3rd')
+    });
+    harness.dependencies.battlemetricsProvider = {
+        searchPlayers: async () => ({
+            available: true,
+            reason: null,
+            truncated: false,
+            candidates: [
+                { playerId: '982774904', name: 'Kirkstein', status: 'offline', lastSeenAt: null, steamId: null },
+                { playerId: '1189505547', name: 'Kirkstein', status: 'offline', lastSeenAt: null, steamId: null }
+            ]
+        }),
+        resolveSteamId: async () => ({ available: true, reason: null, steamId: null })
+    };
+
+    const response = await PlayerTracker.handleCommand(command(harness, '!track kirkstein'));
+
+    Assert.equal(response.response,
+        'Tracking: Jeffrey Kirkstein The 3rd | BM:3001 | Steam:unavailable | online.');
+    Assert.deepEqual(harness.getInstance().trackers[7].players, [{
+        name: 'Jeffrey Kirkstein The 3rd', steamId: null, playerId: '3001', playerIdLocked: true
+    }]);
+});
+
 Test('numbered selections are scoped to the requester and expire after five minutes', async t => {
     const harness = createHarness(t, {
         1001: onlinePlayer('1001', 'Nirks'),
@@ -220,6 +246,34 @@ Test('SteamID64 resolves a public Steam name and proves the BattleMetrics identi
     Assert.match(response.response, /Tracking: \[TEAM\] Nirks \| BM:1001 \| Steam:76561198154738095/);
     Assert.equal(harness.getInstance().trackers[7].players[0].steamId, steamId);
     Assert.equal(harness.getSave().players[0].steamId, steamId);
+});
+
+Test('tracking a SteamID merges into the existing BattleMetrics player instead of duplicating it', async t => {
+    const steamId = '76561197975836271';
+    const harness = createHarness(t, { 63764632: onlinePlayer('63764632', 'Tingtong') });
+    harness.dependencies.httpClient = {
+        get: async () => ({ data: { data: { type: 'player', id: '63764632' }, included: [] } })
+    };
+    harness.dependencies.steamHttpClient = {
+        get: async () => ({ data: '<profile><steamID><![CDATA[Tingtong]]></steamID></profile>' })
+    };
+
+    const first = await PlayerTracker.handleCommand(command(harness, '!track Tingtong'));
+    const second = await PlayerTracker.handleCommand(command(harness, `!track ${steamId}`));
+
+    Assert.equal(first.response,
+        'Tracking: Tingtong | BM:63764632 | Steam:unavailable | online.');
+    Assert.equal(second.response,
+        `Tracking updated: Tingtong | BM:63764632 | Steam:${steamId}.`);
+    Assert.deepEqual(harness.getInstance().trackers[7].players, [{
+        name: 'Tingtong', steamId, playerId: '63764632', playerIdLocked: true
+    }]);
+    Assert.equal(Object.keys(harness.getInstance().trackers).length, 1);
+    const save = harness.getSave();
+    Assert.equal(save.players.length, 1);
+    Assert.equal(save.players[0].battlemetricsPlayerId, '63764632');
+    Assert.equal(save.players[0].steamId, steamId);
+    Assert.deepEqual(save.players[0].aliases, ['Tingtong']);
 });
 
 Test('SteamID64 uses WarBandits identity before the generic Steam profile and links BattleMetrics', async t => {

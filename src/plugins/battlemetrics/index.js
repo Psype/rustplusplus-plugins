@@ -435,11 +435,8 @@ async function getRelatedPlayers(playerId, serverId, dependencies = {}) {
     try {
         const validPlayerId = validateId(playerId, 'Player ID');
         const validServerId = validateId(serverId, 'Server ID');
-        const document = await requestDocument(`/players/${validPlayerId}/relationships/coplay`, {
-            'filter[servers]': validServerId,
-            'page[size]': MAX_RELATED_PLAYERS,
-            include: 'player,server'
-        }, dependencies, { collection: true, cacheTtlMs: 10 * 60 * 1000 });
+        const document = await requestDocument(`/players/${validPlayerId}/relationships/coplay`, {},
+            dependencies, { collection: true, cacheTtlMs: 10 * 60 * 1000 });
         return immutable({
             available: true,
             reason: null,

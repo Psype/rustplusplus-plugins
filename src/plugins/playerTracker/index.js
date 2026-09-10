@@ -246,15 +246,19 @@ function selectCandidate(candidates, query) {
     const byId = unique.filter(candidate => `${candidate.playerId}` === query);
     if (byId.length === 1) return Object.freeze({ candidate: byId[0], candidates: unique });
 
-    const exact = unique.filter(candidate => normalize(candidate.name) === normalizedQuery);
+    const nameMatches = unique.filter(candidate => normalize(candidate.name).includes(normalizedQuery));
+    const onlineMatches = nameMatches.filter(candidate => candidate.status === 'online');
+    const prioritized = onlineMatches.length > 0 ? onlineMatches : nameMatches;
+
+    const exact = prioritized.filter(candidate => normalize(candidate.name) === normalizedQuery);
     if (exact.length === 1) return Object.freeze({ candidate: exact[0], candidates: unique });
     if (exact.length > 1) return Object.freeze({ candidate: null, candidates: exact });
 
-    const prefix = unique.filter(candidate => normalize(candidate.name).startsWith(normalizedQuery));
+    const prefix = prioritized.filter(candidate => normalize(candidate.name).startsWith(normalizedQuery));
     if (prefix.length === 1) return Object.freeze({ candidate: prefix[0], candidates: unique });
     if (prefix.length > 1) return Object.freeze({ candidate: null, candidates: prefix });
 
-    const partial = unique.filter(candidate => normalize(candidate.name).includes(normalizedQuery));
+    const partial = prioritized;
     return Object.freeze({ candidate: partial.length === 1 ? partial[0] : null, candidates: partial });
 }
 

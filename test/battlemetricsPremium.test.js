@@ -48,8 +48,9 @@ test('BattleMetrics search is server-scoped, bounded and returns immutable candi
 });
 
 test('BattleMetrics Premium parsers retain only current-server sessions and normalized co-players', async () => {
+    let relatedRequest = null;
     const httpClient = {
-        get: async url => {
+        get: async (url, options) => {
             if (url.endsWith('/relationships/sessions')) {
                 return {
                     status: 200,
@@ -72,6 +73,7 @@ test('BattleMetrics Premium parsers retain only current-server sessions and norm
                     }
                 };
             }
+            relatedRequest = { url, options };
             return {
                 status: 200,
                 data: {
@@ -98,6 +100,9 @@ test('BattleMetrics Premium parsers retain only current-server sessions and norm
     Assert.deepEqual(related.players, [{
         battlemetricsPlayerId: '2001', name: 'Enemy Ally', overlapSeconds: 7200, sessionCount: 4
     }]);
+    Assert.equal(relatedRequest.url,
+        'https://api.battlemetrics.com/players/1001/relationships/coplay');
+    Assert.deepEqual(relatedRequest.options.params, {});
 });
 
 test('BattleMetrics 429 establishes a provider cooldown without a blind retry', async () => {
