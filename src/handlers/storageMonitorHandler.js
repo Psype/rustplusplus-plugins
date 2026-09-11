@@ -41,15 +41,19 @@ module.exports = {
             for (const entityId in instance.serverList[serverId].storageMonitors) {
                 instance = client.getInstance(guildId);
 
+                const monitor = instance.serverList[serverId].storageMonitors[entityId];
                 const info = await rustplus.getEntityInfoAsync(entityId);
-                if (!(await rustplus.isResponseValid(info))) {
-                    if (instance.serverList[serverId].storageMonitors[entityId].reachable) {
+                if (!(await rustplus.isResponseValid(info, {
+                    logError: monitor.reachable,
+                    context: `Storage Monitor ${monitor.name} (${entityId})`
+                }))) {
+                    if (monitor.reachable) {
                         await DiscordMessages.sendStorageMonitorNotFoundMessage(guildId, serverId, entityId);
                     }
-                    instance.serverList[serverId].storageMonitors[entityId].reachable = false;
+                    monitor.reachable = false;
                 }
                 else {
-                    instance.serverList[serverId].storageMonitors[entityId].reachable = true;
+                    monitor.reachable = true;
                 }
                 client.setInstance(guildId, instance);
 

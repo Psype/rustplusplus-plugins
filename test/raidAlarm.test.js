@@ -15,6 +15,8 @@ function createContext({ notifyInGame = true, title = RaidAlarm.DEFAULT_TITLE,
     };
     const rustplus = {
         serverId,
+        generalSettings: { muteInGameBotMessages: false },
+        team: { allOffline: false },
         sendInGameMessage: async text => calls.push(Object.freeze({ output: 'in-game', text }))
     };
     const client = {
@@ -74,4 +76,27 @@ Test('uMod Raid Alarm recognizes its canonical body when the title is customized
     const fixture = createContext({ title: 'ALERTE RAID' });
     Assert.equal(RaidAlarm.matches(fixture.context), true);
     Assert.equal(RaidAlarm.matches({ ...fixture.context, message: 'unrelated alarm' }), false);
+});
+
+Test('custom raid title variants are recognized and localized', () => {
+    for (const title of ['Getting raided!', 'you are getting raided', 'YOU’RE GETTING RAIDED!']) {
+        const fixture = createContext({ title, message: 'custom WarBandits payload' });
+        Assert.equal(RaidAlarm.matches(fixture.context), true);
+        Assert.deepEqual(RaidAlarm.getText(fixture.context.client, 'guild', title, fixture.context.message), {
+            title: 'Base under attack',
+            message: 'custom WarBandits payload'
+        });
+    }
+});
+
+Test('Raid Alarm logs why in-game delivery is skipped', async () => {
+    const fixture = createContext();
+    fixture.context.client.rustplusInstances.guild.team.allOffline = true;
+
+    await RaidAlarm.handleFcmAlarm(fixture.context, {
+        sendDiscord: async () => fixture.calls.push(Object.freeze({ output: 'discord' }))
+    });
+
+    Assert.deepEqual(fixture.calls.map(call => call.output), ['discord']);
+    Assert.ok(fixture.logs.some(log => String(log[1]).includes('all team members are offline')));
 });

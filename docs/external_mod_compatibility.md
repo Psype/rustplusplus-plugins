@@ -1,6 +1,6 @@
 # External Server Mod Compatibility
 
-Last verified: **2026-09-08 (Europe/Paris)**.
+Last verified: **2026-09-10 (Europe/Paris)**.
 
 ## Scope
 
@@ -29,8 +29,10 @@ modded server requires a separately validated server-authoritative plugin bridge
 
 Version 0.4.2 is the current uMod release and is identified as the November 2025 Rust compatibility patch. Its source
 uses `NotificationChannel.SmartAlarm` with `Util.TryGetServerPairingData()`. The bot accepts the canonical
-`You're getting raided!` title or an `<entity> destroyed at <grid>` body, validates the FCM server identity, and only
-routes the alert to the matching currently connected Rust+ server.
+`You're getting raided!` title, normalized `Getting raided!`/`You are getting raided!` variants used by custom server
+integrations, or an `<entity> destroyed at <grid>` body. It validates the FCM server identity and only routes the alert
+to the matching currently connected Rust+ server. In-game routing logs whether delivery was queued or the precise
+setting/runtime condition that skipped it.
 
 The shared **Smart Alarm and uMod Raid Alarm alerts In-Game** setting controls team-chat delivery. Rust team chat is
 queued before Discord, and a Discord delivery failure does not cancel it. The global in-game mute and Rust+'s
@@ -39,6 +41,11 @@ all-team-offline guard still apply.
 The published source contract and the bot adapter are verified by deterministic tests. Runtime compilation of the C#
 plugin against the September 2026 Rust/Oxide assemblies is not verified in this repository because those assemblies
 and a live server are outside the bot workspace. No release newer than 0.4.2 is listed by uMod.
+
+WarBandits displays raid notifications in Rust+, but its underlying server plugin and full payload contract are not
+identified. The normalized raid-title adapter is compatible with the observed `Getting raided!` title. The exact
+`/raidalarm` spelling must be tested before ruling out haggbart's plugin, and a captured bot-side FCM payload remains
+required to verify the complete WarBandits contract.
 
 Server verification procedure:
 

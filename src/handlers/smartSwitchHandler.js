@@ -42,11 +42,15 @@ module.exports = {
         const changedSwitches = [];
         if (rustplus.smartSwitchIntervalCounter === 0) {
             for (const entityId in instance.serverList[serverId].switches) {
+                const smartSwitch = instance.serverList[serverId].switches[entityId];
                 const info = await rustplus.getEntityInfoAsync(entityId);
-                if (!(await rustplus.isResponseValid(info))) {
-                    if (instance.serverList[serverId].switches[entityId].reachable) {
+                if (!(await rustplus.isResponseValid(info, {
+                    logError: smartSwitch.reachable,
+                    context: `Smart Switch ${smartSwitch.name} (${entityId})`
+                }))) {
+                    if (smartSwitch.reachable) {
                         await DiscordMessages.sendSmartSwitchNotFoundMessage(guildId, serverId, entityId);
-                        instance.serverList[serverId].switches[entityId].reachable = false;
+                        smartSwitch.reachable = false;
                         client.setInstance(guildId, instance);
 
                         await DiscordMessages.sendSmartSwitchMessage(guildId, serverId, entityId);
@@ -54,8 +58,8 @@ module.exports = {
                     }
                 }
                 else {
-                    if (!instance.serverList[serverId].switches[entityId].reachable) {
-                        instance.serverList[serverId].switches[entityId].reachable = true;
+                    if (!smartSwitch.reachable) {
+                        smartSwitch.reachable = true;
                         client.setInstance(guildId, instance);
 
                         await DiscordMessages.sendSmartSwitchMessage(guildId, serverId, entityId);

@@ -9,10 +9,15 @@ const Path = require('path');
 
 const DEFAULT_TITLE = 'You\'re getting raided!';
 const DEFAULT_MESSAGE = /^.+ destroyed at [A-Z]+\d+$/i;
+const RAID_TITLE = /^(?:you(?:'|’)?re|you\s+are)?\s*getting\s+raided!?\s*$/i;
+
+function isRaidTitle(title) {
+    return typeof title === 'string' && RAID_TITLE.test(title);
+}
 
 function matches(context) {
     if (!context || context.channelId !== 'alarm') return false;
-    if (context.title === DEFAULT_TITLE) return true;
+    if (isRaidTitle(context.title)) return true;
     return typeof context.message === 'string' && DEFAULT_MESSAGE.test(context.message);
 }
 
@@ -36,7 +41,7 @@ function getText(client, guildId, title, message) {
     let translatedTitle = title;
     let translatedMessage = message;
 
-    if (title === DEFAULT_TITLE) translatedTitle = client.intlGet(guildId, 'baseIsUnderAttack');
+    if (isRaidTitle(title)) translatedTitle = client.intlGet(guildId, 'baseIsUnderAttack');
 
     const destroyedMatch = /^(.*) destroyed at (.*)$/i.exec(message);
     if (destroyedMatch) {
@@ -56,10 +61,28 @@ function logFailure(client, guildId, output, error) {
 async function deliver(client, guildId, output, callback) {
     try {
         await callback();
+        return true;
     }
     catch (error) {
         logFailure(client, guildId, output, error);
+        return false;
     }
+}
+
+function getInGameBlockReason(instance, rustplus) {
+    if (!rustplus) return 'Rust+ is not connected';
+    if (!instance.generalSettings.smartAlarmNotifyInGame) return 'the Raid Alarm in-game setting is disabled';
+    if (instance.generalSettings.muteInGameBotMessages ||
+        (rustplus.generalSettings && rustplus.generalSettings.muteInGameBotMessages)) {
+        return 'in-game bot messages are muted';
+    }
+    if (!rustplus.team) return 'team information is unavailable';
+    if (rustplus.team.allOffline) return 'all team members are offline';
+    return null;
+}
+
+function logInGameRoute(client, guildId, message, level = 'info') {
+    client.log('PLUGIN', `GuildID: ${guildId}, raid-alarm.in-game: ${message}`, level);
 }
 
 function getDefaultDiscordAdapter() {
@@ -103,10 +126,21 @@ async function handleFcmAlarm(context, adapters = {}) {
         return true;
     }
 
-    if (rustplus && rustplus.serverId === serverId) {
-        if (instance.generalSettings.smartAlarmNotifyInGame) {
-            await deliver(context.client, guildId, 'in-game', () =>
-                rustplus.sendInGameMessage(`${raidText.title}: ${raidText.message}`));
+    if (!rustplus) {
+        logInGameRoute(context.client, guildId, 'skipped; Rust+ is not connected.', 'warn');
+    }
+    else if (rustplus.serverId !== serverId) {
+        logInGameRoute(context.client, guildId,
+            `skipped; notification server ${serverId} does not match active server ${rustplus.serverId}.`, 'warn');
+    }
+    else {
+        const blockReason = getInGameBlockReason(instance, rustplus);
+        if (blockReason) {
+            logInGameRoute(context.client, guildId, `skipped; ${blockReason}.`, 'warn');
+        }
+        else if (await deliver(context.client, guildId, 'in-game', () =>
+            rustplus.sendInGameMessage(`${raidText.title}: ${raidText.message}`))) {
+            logInGameRoute(context.client, guildId, `queued for ${serverId}.`);
         }
 
         const sendDiscord = adapters.sendDiscord || getDefaultDiscordAdapter();
@@ -121,5 +155,6 @@ module.exports = Object.freeze({
     DEFAULT_TITLE,
     getText,
     handleFcmAlarm,
+    isRaidTitle,
     matches
 });

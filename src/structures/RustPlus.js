@@ -646,26 +646,28 @@ class RustPlus extends RustPlusLib {
         }
     }
 
-    async isResponseValid(response) {
+    async isResponseValid(response, options = {}) {
+        const logError = options.logError !== false;
+        const context = typeof options.context === 'string' && options.context.trim() !== '' ?
+            `${options.context.trim()}: ` : '';
+        const logInvalidResponse = message => {
+            if (logError) this.log(Client.client.intlGet(null, 'errorCap'), `${context}${message}`, 'error');
+        };
+
         if (response === undefined) {
-            this.log(Client.client.intlGet(null, 'errorCap'),
-                Client.client.intlGet(null, 'responseIsUndefined'), 'error');
+            logInvalidResponse(Client.client.intlGet(null, 'responseIsUndefined'));
             return false;
         }
         else if (response.toString() === 'Error: Timeout reached while waiting for response') {
-            this.log(Client.client.intlGet(null, 'errorCap'),
-                Client.client.intlGet(null, 'responseTimeout'), 'error');
+            logInvalidResponse(Client.client.intlGet(null, 'responseTimeout'));
             return false;
         }
         else if (response.hasOwnProperty('error')) {
-            this.log(Client.client.intlGet(null, 'errorCap'), Client.client.intlGet(null, 'responseContainError', {
-                error: response.error
-            }), 'error');
+            logInvalidResponse(Client.client.intlGet(null, 'responseContainError', { error: response.error }));
             return false;
         }
         else if (Object.keys(response).length === 0) {
-            this.log(Client.client.intlGet(null, 'errorCap'),
-                Client.client.intlGet(null, 'responseIsEmpty'), 'error');
+            logInvalidResponse(Client.client.intlGet(null, 'responseIsEmpty'));
             clearInterval(this.pollingTaskId);
             return false;
         }
