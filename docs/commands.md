@@ -674,9 +674,9 @@ Subcommand | Description | Required
 <br>Command: `!trackinfo <tracked player>`
 <br>Command: `!trackhistory <tracked player>`
 <br>Command: `!trackrelated <tracked player>`
-<br>Command: `!tracklist` (alias: `!tracks`)
+<br>Command: `!tracklist [all]` (alias: `!tracks [all]`)
 <br>Command: `!untrack <partial player name|BattleMetrics ID|SteamID64>`
-<br>The plugin creates one native `Enemies` tracker per server. The existing 60-second BattleMetrics poller sends login/logout alerts to Discord and, by default, Rust team chat. `!tracklist` reports `online`, `last <duration>`, or `unknown`; an API failure is never reported as a logout.
+<br>The plugin creates one native `Enemies` tracker per server. The existing 60-second BattleMetrics poller sends login/logout alerts to Discord and, by default, Rust team chat. `!tracklist` and `!tracks` always queue every tracked player over minimal Rust-safe messages as `name: Online`, `name: <duration> ago`, or `name: Unknown`, without page headers. Adding `all` packs multiple complete `name,BattleMetricsID,SteamID,status` records per message; `-` means the SteamID is unknown and status is `on`, `off:<age>`, or `unk:<age>`. An API failure is never reported as a logout.
 <br>On a recognized WarBandits server, `!track` also invokes the detached WarBandits provider once to enrich the selected identity with its server-specific name, SteamID64, internal WarBandits ID, aliases, rank, playtime, and available statistics. This provider performs no background polling and never emits an online/offline transition: BattleMetrics remains the sole presence source.
 <br>Presence alerts created by this plugin and their `TRACKER` info logs always use `Tracked player <name> is now online.` and `Tracked player <name> just disconnected.`. The event is logged before the optional Rust/Discord deliveries, whose failures remain isolated.
 <br>For SteamID64 input, the plugin reads the free public Steam Community profile name with a five-second timeout, then requires a strict match on the active server. A leading `[CLAN]` tag is tolerated. If BattleMetrics exposes its own Steam identifier, it must equal the requested SteamID; a mismatch, ambiguous name, private profile, or unproven loose match performs no write.

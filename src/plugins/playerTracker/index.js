@@ -632,30 +632,64 @@ function formatAge(value, now) {
     return `${Math.floor(seconds / 86400)}d`;
 }
 
-function fitListResponse(entries) {
+function splitBoundedResponse(value) {
     const maxLength = Constants.MAX_LENGTH_TEAM_MESSAGE - '[BOT] '.length;
-    const prefix = `Tracked (${entries.length}): `;
-    let response = prefix;
-    let included = 0;
-    for (const entry of entries) {
-        const separator = included === 0 ? '' : ' | ';
-        const remainingAfter = entries.length - included - 1;
-        const suffix = remainingAfter > 0 ? ` | +${remainingAfter}` : '';
-        if ((response + separator + entry + suffix).length > maxLength) break;
-        response += separator + entry;
-        included += 1;
+    const messages = [];
+    let remaining = `${value}`.trim();
+    while (Array.from(remaining).length > maxLength) {
+        const characters = Array.from(remaining);
+        const candidate = characters.slice(0, maxLength).join('');
+        const whitespace = candidate.lastIndexOf(' ');
+        const cut = whitespace > 0 ? whitespace : maxLength;
+        messages.push(characters.slice(0, cut).join('').trim());
+        remaining = characters.slice(cut).join('').trim();
     }
-    if (included === 0) {
-        const suffix = entries.length > 1 ? ` | +${entries.length - 1}` : '';
-        const available = Math.max(1, maxLength - prefix.length - suffix.length - 3);
-        response += `${Array.from(entries[0]).slice(0, available).join('')}...${suffix}`;
-        return response.slice(0, maxLength);
-    }
-    if (included < entries.length) response += ` | +${entries.length - included}`;
-    return response;
+    if (remaining !== '') messages.push(remaining);
+    return messages;
 }
 
-function formatTrackList(snapshot, dependencies) {
+function packCompactList(entries) {
+    const maxLength = Constants.MAX_LENGTH_TEAM_MESSAGE - '[BOT] '.length;
+    const messages = [];
+    let message = '';
+
+    for (const entry of entries) {
+        const parts = splitBoundedResponse(entry);
+        if (parts.length > 1) {
+            if (message !== '') messages.push(message);
+            messages.push(...parts);
+            message = '';
+            continue;
+        }
+        const separator = message === '' ? '' : ' | ';
+        if (message !== '' && Array.from(message + separator + entry).length > maxLength) {
+            messages.push(message);
+            message = entry;
+        }
+        else {
+            message += separator + entry;
+        }
+    }
+    if (message !== '') messages.push(message);
+    return messages.length === 1 ? messages[0] : Object.freeze(messages);
+}
+
+function formatDetailedList(players, now) {
+    const entries = players.map(player => {
+        const age = formatAge(player.lastSeenAt, now);
+        const status = player.status === 'online' ? 'on' :
+            `${player.status === 'offline' ? 'off' : 'unk'}${age ? `:${age}` : ''}`;
+        return [
+            player.name,
+            player.battlemetricsPlayerId,
+            player.steamId || '-',
+            status
+        ].join(',');
+    });
+    return packCompactList(entries);
+}
+
+function formatTrackList(snapshot, dependencies, all = false) {
     if (!snapshot || snapshot.players.length === 0) return 'No tracked players.';
     const now = (dependencies.now || (() => new Date()))();
     const rank = { online: 0, offline: 1, unknown: 2 };
@@ -664,13 +698,16 @@ function formatTrackList(snapshot, dependencies) {
         const lastSeen = (Date.parse(b.lastSeenAt) || 0) - (Date.parse(a.lastSeenAt) || 0);
         return lastSeen || normalize(a.name).localeCompare(normalize(b.name));
     });
+    if (all) return formatDetailedList(players, now);
+
     const entries = players.map(player => {
-        if (player.status === 'online') return `${player.name}: online`;
+        if (player.status === 'online') return `${player.name}: Online`;
         const age = formatAge(player.lastSeenAt, now);
-        if (player.status === 'offline') return `${player.name}: ${age ? `last ${age}` : 'offline'}`;
-        return `${player.name}: unknown${age ? `, last ${age}` : ''}`;
+        const seen = age === 'now' ? 'now' : (age ? `${age} ago` : null);
+        if (player.status === 'offline') return `${player.name}: ${seen || 'Offline'}`;
+        return `${player.name}: Unknown${seen ? ` (${seen})` : ''}`;
     });
-    return fitListResponse(entries);
+    return packCompactList(entries);
 }
 
 function fitSingleResponse(value) {
@@ -1008,7 +1045,11 @@ async function track(context, query, dependencies) {
     });
 }
 
-async function trackList(context, dependencies) {
+async function trackList(context, query, dependencies) {
+    const normalizedQuery = normalize(query);
+    if (normalizedQuery !== '' && normalizedQuery !== 'all') {
+        return handled(`Usage: ${context.prefix}tracklist [all] or ${context.prefix}tracks [all].`);
+    }
     const scope = getScope(context);
     if (!scope) return handled('Player tracker unavailable: configure BattleMetrics for the active server.');
     const lockKey = `${context.guildId}:${scope.battlemetricsId}`;
@@ -1026,7 +1067,7 @@ async function trackList(context, dependencies) {
         const snapshot = buildSnapshot(context, freshScope, entry.trackerId, entry.tracker,
             previous, null, dependencies);
         writeSnapshot(path, snapshot);
-        return handled(formatTrackList(snapshot, dependencies));
+        return handled(formatTrackList(snapshot, dependencies, normalizedQuery === 'all'));
     });
 }
 
@@ -1091,7 +1132,7 @@ async function handleCommand(context) {
         if (parsed.name === 'trackhistory') return await trackHistory(context, parsed.query, dependencies);
         if (parsed.name === 'trackrelated') return await trackRelated(context, parsed.query, dependencies);
         if (parsed.name === 'untrack') return await untrack(context, parsed.query, dependencies);
-        return await trackList(context, dependencies);
+        return await trackList(context, parsed.query, dependencies);
     }
     catch (error) {
         logWarning(context, `Command failed safely: ${error.message || error}.`);

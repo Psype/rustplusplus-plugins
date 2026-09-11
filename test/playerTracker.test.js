@@ -536,7 +536,7 @@ Test('poll sync, tracklist and untrack preserve last seen without deleting the n
     });
 
     const list = await PlayerTracker.handleCommand(command(harness, '!tracklist'));
-    Assert.equal(list.response, 'Tracked (1): Nirks Renamed: last 10m');
+    Assert.equal(list.response, 'Nirks Renamed: 10m ago');
     Assert.equal(harness.getSave().players[0].status, 'offline');
     Assert.equal(harness.getSave().players[0].lastSeenAt, '2026-09-09T11:50:00.000Z');
     Assert.equal(harness.getInstance().trackers[7].players[0].name, 'Nirks Renamed');
@@ -547,7 +547,7 @@ Test('poll sync, tracklist and untrack preserve last seen without deleting the n
     Assert.deepEqual(harness.getSave().players, []);
 });
 
-Test('tracklist is bounded to one Rust-safe message and reports omitted entries', async t => {
+Test('tracklist returns every player in compact bounded messages without headers', async t => {
     const harness = createHarness(t, { 1001: onlinePlayer('1001', 'Nirks') });
     harness.dependencies.httpClient = { get: async () => steamProfile() };
     await PlayerTracker.handleCommand(command(harness, '!track Nirks'));
@@ -561,8 +561,37 @@ Test('tracklist is bounded to one Rust-safe message and reports omitted entries'
 
     const list = await PlayerTracker.handleCommand(command(harness, '!tracklist'));
 
-    Assert.equal(list.response.length <= 122, true);
-    Assert.match(list.response, /\| \+\d+$/);
+    Assert.equal(Array.isArray(list.response), true);
+    Assert.equal(list.response.every(message => message.length <= 122), true);
+    Assert.equal(list.response.some(message => /^Tracked /.test(message)), false);
+    Assert.equal(list.response.some(message => /\| \+\d+$/.test(message)), false);
+    const complete = list.response.join(' | ');
+    for (let index = 2; index <= 12; index += 1) {
+        Assert.match(complete, new RegExp(`Enemy-${index}-with-a-long-name: Online`));
+    }
+});
+
+Test('tracklist all packs every complete detailed entry into bounded messages', async t => {
+    const harness = createHarness(t, { 1001: onlinePlayer('1001', 'Nirks') });
+    harness.dependencies.httpClient = { get: async () => steamProfile() };
+    await PlayerTracker.handleCommand(command(harness, '!track Nirks'));
+    const tracker = harness.getInstance().trackers[7];
+    const names = ['Puzzle', 'Sumdumsit', 'BOGDANGEL', 'Rw', 'Lyron', 'Enemy-7', 'Enemy-8'];
+    names.forEach((name, index) => {
+        const playerId = `${1002 + index}`;
+        tracker.players.push({ name, steamId: null, playerId, playerIdLocked: true });
+        harness.battlemetrics.players[playerId] = onlinePlayer(playerId, name);
+    });
+
+    const list = await PlayerTracker.handleCommand(command(harness, '!tracks all'));
+
+    Assert.equal(Array.isArray(list.response), true);
+    Assert.equal(list.response.length < 8, true);
+    Assert.equal(list.response.every(message => message.length <= 122), true);
+    Assert.equal(list.response.some(message => /^Tracked /.test(message)), false);
+    const complete = list.response.join(' | ');
+    Assert.match(complete, /Nirks,1001,7656119\d{10},on/);
+    for (const name of names) Assert.match(complete, new RegExp(`${name},\\d+,-,on`));
 });
 
 Test('Premium tracker commands persist server details, sessions and related players without changing presence', async t => {
