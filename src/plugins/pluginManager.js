@@ -9,6 +9,7 @@ const AutoTranslate = require('./autoTranslate');
 const CustomCommands = require('./customCommands');
 const DeepSea = require('./deepSea');
 const HiddenVendors = require('./hiddenVendors');
+const MapMarkerCapabilities = require('./mapMarkerCapabilities');
 const PlayerTracker = require('./playerTracker');
 const RaidAlarm = require('./raidAlarm');
 const TeammateLanguageDatabase = require('./teammateLanguageDatabase');
@@ -41,6 +42,10 @@ const plugins = Object.freeze([
     Object.freeze({ name: 'auto-translate' }),
     Object.freeze({ name: 'battlemetrics' }),
     Object.freeze({
+        name: 'map-marker-capabilities',
+        handleCommand: context => MapMarkerCapabilities.handleCommand(context)
+    }),
+    Object.freeze({
         name: 'custom-commands',
         handleCommand: context => CustomCommands.handleCommand(context)
     }),
@@ -52,7 +57,8 @@ const plugins = Object.freeze([
     }),
     Object.freeze({
         name: 'raid-alarm',
-        onFcmAlarm: context => RaidAlarm.handleFcmAlarm(context)
+        handleCommand: context => RaidAlarm.handleCommand(context),
+        onFcmAlarm: context => RaidAlarm.handleFcmAlarm(context, context.raidAlarmAdapters || {})
     }),
     Object.freeze({
         name: 'teammate-language-database',
@@ -165,6 +171,8 @@ module.exports = Object.freeze({
     afterMapMarkersUpdate: context => runHook('afterMapMarkersUpdate', context),
     beforeMapMarkersUpdate: context => runHook('beforeMapMarkersUpdate', context),
     getPluginNames: () => Object.freeze(plugins.map(plugin => plugin.name)),
+    getDisabledMapMarkerCommandNames: () => MapMarkerCapabilities.getDisabledCommandNames(),
+    getDisabledMapMarkerSyntaxKeys: () => MapMarkerCapabilities.getDisabledSyntaxKeys(),
     getDeepSeaStatus: (rustplus, isInfoChannel = false) => runSyncExtension(
         { name: 'deep-sea' }, 'formatCommand', { rustplus }, null,
         () => DeepSea.formatCommand(rustplus, isInfoChannel)),
@@ -176,6 +184,7 @@ module.exports = Object.freeze({
         }),
     handleCommand,
     handleFcmAlarm: context => runFirstHandled('onFcmAlarm', context),
+    isSlashCommandEnabled: commandName => MapMarkerCapabilities.isSlashCommandEnabled(commandName),
     install: context => runHook('install', context),
     onBattlemetricsUpdated: context => runHook('onBattlemetricsUpdated', context),
     onTeamInfo: context => runHook('onTeamInfo', context),

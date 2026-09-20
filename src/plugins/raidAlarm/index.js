@@ -1,24 +1,23 @@
 /*
-    Integration for haggbart's uMod Raid Alarm notifications.
+    Relay Rust+ SmartAlarm-channel FCM notifications to the active Rust team.
 
-    The server plugin sends a Rust+ SmartAlarm-channel FCM payload directly;
-    no vanilla Smart Alarm entity is involved or required.
+    This covers vanilla Smart Alarms, haggbart Raid Alarm and server-specific
+    raid integrations without depending on a fragile title/body contract.
 */
 
 const Path = require('path');
 
 const DEFAULT_TITLE = 'You\'re getting raided!';
-const DEFAULT_MESSAGE = /^.+ destroyed at [A-Z]+\d+$/i;
-const RAID_TITLE = /^(?:you(?:'|’)?re|you\s+are)?\s*getting\s+raided!?\s*$/i;
+const RAID_TITLE = /^(?:you(?:'|\u2019)?re|you\s+are)?\s*getting\s+raided!?\s*$/i;
+const DEDUPLICATION_MS = 5000;
+const recentAlerts = new Map();
 
 function isRaidTitle(title) {
     return typeof title === 'string' && RAID_TITLE.test(title);
 }
 
 function matches(context) {
-    if (!context || context.channelId !== 'alarm') return false;
-    if (isRaidTitle(context.title)) return true;
-    return typeof context.message === 'string' && DEFAULT_MESSAGE.test(context.message);
+    return Boolean(context && context.channelId === 'alarm');
 }
 
 function validateContext(context) {
@@ -32,18 +31,16 @@ function validateContext(context) {
         !['string', 'number'].includes(typeof context.body.port)) {
         throw new TypeError('Raid Alarm server identity is invalid.');
     }
-    if (typeof context.title !== 'string' || typeof context.message !== 'string') {
-        throw new TypeError('Raid Alarm text is invalid.');
-    }
 }
 
 function getText(client, guildId, title, message) {
-    let translatedTitle = title;
-    let translatedMessage = message;
+    let translatedTitle = typeof title === 'string' && title.trim() !== '' ?
+        title.trim() : client.intlGet(guildId, 'smartAlarm');
+    let translatedMessage = typeof message === 'string' ? message.trim() : '';
 
-    if (isRaidTitle(title)) translatedTitle = client.intlGet(guildId, 'baseIsUnderAttack');
+    if (isRaidTitle(translatedTitle)) translatedTitle = client.intlGet(guildId, 'baseIsUnderAttack');
 
-    const destroyedMatch = /^(.*) destroyed at (.*)$/i.exec(message);
+    const destroyedMatch = /^(.*) destroyed at (.*)$/i.exec(translatedMessage);
     if (destroyedMatch) {
         translatedMessage = client.intlGet(guildId, 'raidAlarmDestroyedAt', {
             item: destroyedMatch[1],
@@ -71,13 +68,12 @@ async function deliver(client, guildId, output, callback) {
 
 function getInGameBlockReason(instance, rustplus) {
     if (!rustplus) return 'Rust+ is not connected';
+    if (!instance || !instance.generalSettings) return 'guild settings are unavailable';
     if (!instance.generalSettings.smartAlarmNotifyInGame) return 'the Raid Alarm in-game setting is disabled';
     if (instance.generalSettings.muteInGameBotMessages ||
         (rustplus.generalSettings && rustplus.generalSettings.muteInGameBotMessages)) {
         return 'in-game bot messages are muted';
     }
-    if (!rustplus.team) return 'team information is unavailable';
-    if (rustplus.team.allOffline) return 'all team members are offline';
     return null;
 }
 
@@ -90,7 +86,7 @@ function getDefaultDiscordAdapter() {
     const DiscordEmbeds = require('../../discordTools/discordEmbeds.js');
     const DiscordMessages = require('../../discordTools/discordMessages.js');
 
-    return async (context, raidText, instance) => {
+    return async (context, alertText, instance) => {
         const files = [];
         if (typeof context.body.img !== 'string' || context.body.img === '') {
             files.push(new Discord.AttachmentBuilder(
@@ -99,7 +95,7 @@ function getDefaultDiscordAdapter() {
 
         const content = Object.freeze({
             embeds: Object.freeze([
-                DiscordEmbeds.getAlarmRaidAlarmEmbed(raidText, context.body)
+                DiscordEmbeds.getAlarmRaidAlarmEmbed(alertText, context.body)
             ]),
             content: '@everyone',
             files: Object.freeze(files)
@@ -110,16 +106,72 @@ function getDefaultDiscordAdapter() {
     };
 }
 
+function getServerId(body) {
+    return `${body.ip}`.trim() + '-' + `${body.port}`.trim();
+}
+
+function formatAlert(alertText) {
+    return [alertText.title, alertText.message].filter(value => value !== '').join(': ');
+}
+
+function getDeduplicationKey(guildId, serverId, alertText) {
+    return `${guildId}|${serverId}|${alertText.title}|${alertText.message}`.toLocaleLowerCase('en');
+}
+
+function claimAlert(key, now) {
+    for (const [storedKey, timestamp] of recentAlerts) {
+        if (now - timestamp >= DEDUPLICATION_MS) recentAlerts.delete(storedKey);
+    }
+    if (recentAlerts.has(key)) return false;
+    recentAlerts.set(key, now);
+    return true;
+}
+
+async function sendInGameAlert(rustplus, text) {
+    const sender = typeof rustplus.sendCriticalInGameMessage === 'function' ?
+        rustplus.sendCriticalInGameMessage.bind(rustplus) : rustplus.sendInGameMessage.bind(rustplus);
+    const result = await sender(text);
+    if (result === false) throw new Error('Rust+ rejected the in-game alarm.');
+}
+
+async function handleCommand(context) {
+    const expected = `${context.prefix}raidtest`.toLowerCase();
+    if (context.commandLowerCase !== expected) return Object.freeze({ handled: false });
+
+    const instance = context.client.getInstance(context.guildId);
+    const rustplus = context.client.rustplusInstances[context.guildId];
+    const blockReason = getInGameBlockReason(instance, rustplus);
+    if (blockReason) {
+        logInGameRoute(context.client, context.guildId, `test failed; ${blockReason}.`, 'warn');
+        return Object.freeze({
+            handled: true,
+            response: `Raid alert test failed: ${blockReason}.`,
+            logType: 'RaidAlarmTest'
+        });
+    }
+
+    const alert = `[RAID TEST] ${context.client.intlGet(context.guildId, 'baseIsUnderAttack')}`;
+    const delivered = await deliver(context.client, context.guildId, 'in-game-test', () =>
+        sendInGameAlert(rustplus, alert));
+    if (delivered) logInGameRoute(context.client, context.guildId, `test delivered for ${rustplus.serverId}.`);
+    return Object.freeze({
+        handled: true,
+        response: context.source === 'discord' ?
+            (delivered ? 'Raid alert test delivered to Rust team chat.' : 'Raid alert test failed; check bot logs.') : null,
+        logType: 'RaidAlarmTest'
+    });
+}
+
 async function handleFcmAlarm(context, adapters = {}) {
     if (!matches(context)) return false;
     validateContext(context);
 
     const guildId = context.guild.id;
     const instance = context.client.getInstance(guildId);
-    const serverId = `${context.body.ip}-${context.body.port}`;
+    const serverId = getServerId(context.body);
     const server = instance && instance.serverList && instance.serverList[serverId];
-    const rustplus = context.client.rustplusInstances[guildId];
-    const raidText = getText(context.client, guildId, context.title, context.message);
+    const rustplus = context.client.rustplusInstances && context.client.rustplusInstances[guildId];
+    const alertText = getText(context.client, guildId, context.title, context.message);
 
     if (!server) {
         context.client.log('PLUGIN', `GuildID: ${guildId}, Raid Alarm server is not registered: ${serverId}.`, 'warn');
@@ -134,26 +186,40 @@ async function handleFcmAlarm(context, adapters = {}) {
             `skipped; notification server ${serverId} does not match active server ${rustplus.serverId}.`, 'warn');
     }
     else {
+        const deduplicationKey = getDeduplicationKey(guildId, serverId, alertText);
+        const now = typeof adapters.now === 'function' ? adapters.now() : Date.now();
+        if (adapters.deduplicate !== false && !claimAlert(deduplicationKey, now)) {
+            context.client.log('PLUGIN',
+                `GuildID: ${guildId}, raid-alarm.duplicate: suppressed for ${serverId}.`);
+            return true;
+        }
+
         const blockReason = getInGameBlockReason(instance, rustplus);
+        let inGameFailed = false;
         if (blockReason) {
             logInGameRoute(context.client, guildId, `skipped; ${blockReason}.`, 'warn');
         }
         else if (await deliver(context.client, guildId, 'in-game', () =>
-            rustplus.sendInGameMessage(`${raidText.title}: ${raidText.message}`))) {
-            logInGameRoute(context.client, guildId, `queued for ${serverId}.`);
+            sendInGameAlert(rustplus, formatAlert(alertText)))) {
+            logInGameRoute(context.client, guildId, `delivered for ${serverId}.`);
+        }
+        else {
+            inGameFailed = true;
         }
 
         const sendDiscord = adapters.sendDiscord || getDefaultDiscordAdapter();
-        await deliver(context.client, guildId, 'discord', () => sendDiscord(context, raidText, instance));
+        await deliver(context.client, guildId, 'discord', () => sendDiscord(context, alertText, instance));
+        if (inGameFailed) recentAlerts.delete(deduplicationKey);
     }
 
-    context.client.log(context.client.intlGet(null, 'infoCap'), `${raidText.title} ${raidText.message}`);
+    context.client.log(context.client.intlGet(null, 'infoCap'), `${alertText.title} ${alertText.message}`.trim());
     return true;
 }
 
 module.exports = Object.freeze({
     DEFAULT_TITLE,
     getText,
+    handleCommand,
     handleFcmAlarm,
     isRaidTitle,
     matches

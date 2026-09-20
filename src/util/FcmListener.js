@@ -28,6 +28,7 @@ const DiscordButtons = require('../discordTools/discordButtons.js');
 const DiscordEmbeds = require('../discordTools/discordEmbeds.js');
 const DiscordMessages = require('../discordTools/discordMessages.js');
 const DiscordTools = require('../discordTools/discordTools.js');
+const FcmAlarmRouter = require('./fcmAlarmRouter.js');
 const InstanceUtils = require('../util/instanceUtils.js');
 const Map = require('../util/map.js');
 const PluginManager = require('../plugins/pluginManager.js');
@@ -68,6 +69,8 @@ module.exports = async (client, guild) => {
     const securityToken = credentials[hoster].gcm.security_token;
     client.fcmListeners[guild.id] = new PushReceiverClient(androidId, securityToken, [])
     client.fcmListeners[guild.id].on('ON_DATA_RECEIVED', async (data) => {
+        if (await FcmAlarmRouter.handle(client, guild, hoster, data)) return;
+
         const appData = data.appData;
 
         if (!appData) {

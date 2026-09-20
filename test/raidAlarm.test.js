@@ -17,7 +17,7 @@ function createContext({ notifyInGame = true, title = RaidAlarm.DEFAULT_TITLE,
         serverId,
         generalSettings: { muteInGameBotMessages: false },
         team: { allOffline: false },
-        sendInGameMessage: async text => calls.push(Object.freeze({ output: 'in-game', text }))
+        sendCriticalInGameMessage: async text => calls.push(Object.freeze({ output: 'in-game', text }))
     };
     const client = {
         getInstance: () => instance,
@@ -48,6 +48,7 @@ function createContext({ notifyInGame = true, title = RaidAlarm.DEFAULT_TITLE,
 Test('uMod Raid Alarm queues in-game before an isolated Discord failure', async () => {
     const fixture = createContext();
     const handled = await RaidAlarm.handleFcmAlarm(fixture.context, {
+        deduplicate: false,
         sendDiscord: async () => {
             fixture.calls.push(Object.freeze({ output: 'discord' }));
             throw new Error('deterministic Discord failure');
@@ -65,6 +66,7 @@ Test('uMod Raid Alarm queues in-game before an isolated Discord failure', async 
 Test('uMod Raid Alarm honors the in-game Smart Alarm output setting without a vanilla entity', async () => {
     const fixture = createContext({ notifyInGame: false });
     const handled = await RaidAlarm.handleFcmAlarm(fixture.context, {
+        deduplicate: false,
         sendDiscord: async () => fixture.calls.push(Object.freeze({ output: 'discord' }))
     });
 
@@ -72,10 +74,11 @@ Test('uMod Raid Alarm honors the in-game Smart Alarm output setting without a va
     Assert.deepEqual(fixture.calls.map(call => call.output), ['discord']);
 });
 
-Test('uMod Raid Alarm recognizes its canonical body when the title is customized', () => {
+Test('every SmartAlarm-channel notification is accepted despite a custom payload', () => {
     const fixture = createContext({ title: 'ALERTE RAID' });
     Assert.equal(RaidAlarm.matches(fixture.context), true);
-    Assert.equal(RaidAlarm.matches({ ...fixture.context, message: 'unrelated alarm' }), false);
+    Assert.equal(RaidAlarm.matches({ ...fixture.context, message: 'unrelated alarm' }), true);
+    Assert.equal(RaidAlarm.matches({ ...fixture.context, channelId: 'team' }), false);
 });
 
 Test('custom raid title variants are recognized and localized', () => {
@@ -89,14 +92,46 @@ Test('custom raid title variants are recognized and localized', () => {
     }
 });
 
-Test('Raid Alarm logs why in-game delivery is skipped', async () => {
+Test('a stale all-offline projection cannot suppress a critical raid alert', async () => {
     const fixture = createContext();
     fixture.context.client.rustplusInstances.guild.team.allOffline = true;
 
     await RaidAlarm.handleFcmAlarm(fixture.context, {
+        deduplicate: false,
         sendDiscord: async () => fixture.calls.push(Object.freeze({ output: 'discord' }))
     });
 
-    Assert.deepEqual(fixture.calls.map(call => call.output), ['discord']);
-    Assert.ok(fixture.logs.some(log => String(log[1]).includes('all team members are offline')));
+    Assert.deepEqual(fixture.calls.map(call => call.output), ['in-game', 'discord']);
+    Assert.ok(fixture.logs.some(log => String(log[1]).includes('delivered for')));
+});
+
+Test('duplicate FCM delivery from multiple registered accounts emits one alert', async () => {
+    const fixture = createContext({ message: 'duplicate wall destroyed at H14' });
+    const adapters = {
+        now: () => 1000,
+        sendDiscord: async () => fixture.calls.push(Object.freeze({ output: 'discord' }))
+    };
+
+    await RaidAlarm.handleFcmAlarm(fixture.context, adapters);
+    await RaidAlarm.handleFcmAlarm({ ...fixture.context, hoster: 'second-account' }, adapters);
+
+    Assert.deepEqual(fixture.calls.map(call => call.output), ['in-game', 'discord']);
+    Assert.ok(fixture.logs.some(log => String(log[1]).includes('raid-alarm.duplicate')));
+});
+
+Test('raidtest uses the same critical in-game route', async () => {
+    const fixture = createContext();
+    const response = await RaidAlarm.handleCommand({
+        source: 'inGame',
+        client: fixture.context.client,
+        rustplus: fixture.context.client.rustplusInstances.guild,
+        guildId: 'guild',
+        command: '!raidtest',
+        commandLowerCase: '!raidtest',
+        prefix: '!'
+    });
+
+    Assert.equal(response.handled, true);
+    Assert.equal(response.response, null);
+    Assert.deepEqual(fixture.calls, [{ output: 'in-game', text: '[RAID TEST] Base under attack' }]);
 });

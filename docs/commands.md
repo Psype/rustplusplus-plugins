@@ -21,7 +21,6 @@ Slash Command | Description
 [**/item**](commands.md#item) | Get the details of an item.
 [**/leader**](commands.md#leader) | Give or take the leadership from/to a team member.
 [**/map**](commands.md#map) | Get the currently connected server map image.
-[**/market**](commands.md#market) | Operations for In-Game Vending Machines.
 [**/players**](commands.md#players) | Get player/players information based on battlemetrics.
 [**/recycle**](commands.md#recycle) | Display the output of recycling an item.
 [**/research**](commands.md#research) | Display the cost to research an item.
@@ -194,29 +193,6 @@ Subcommand | Options | Description | Required
 ![Discord Slash Command map Image](images/slash_commands/map.png)
 
 
-## **/market**
-
-> **Operations for In-Game Vending Machines.**.
-
-Subcommand | Options | Description | Required
----------- | ------- | ----------- | --------
-`search` | &nbsp; | Search for an item in Vending Machines. | &nbsp;
-&nbsp; | `order` | The order type to search for (all, buy, sell). | `True`
-&nbsp; | `name` | The name of the item to search for. | `False`
-&nbsp; | `id` | The ID of the item to search for. | `False`
-`subscribe` | &nbsp; | Subscribe to an item in Vending Machines. | &nbsp;
-&nbsp; | `order` | The order type (all, buy, sell). | `True`
-&nbsp; | `name` | The name of the item to subscribe to. | `False`
-&nbsp; | `id` | The ID of the item to subscribe to. | `False`
-`unsubscribe` | &nbsp; | Unsubscribe to an item in Vending Machines. | &nbsp;
-&nbsp; | `order` | The order type (all, buy, sell). | `True`
-&nbsp; | `name` | The name of the item to unsubscribe to. | `False`
-&nbsp; | `id` | The ID of the item to unsubscribe to. | `False`
-`list` | &nbsp; | Display the subscription list. | &nbsp;
-
-![Discord Slash Command market Image](images/slash_commands/market.png)
-
-
 ## **/players**
 
 > **Get player/players information based on Battlemetrics.** Calling the subcommand name without the name option will display all players depending on status option. By calling the subcommand playerid, you will get more specific information about a single player.
@@ -367,28 +343,24 @@ Subcommand | Options | Description | Required
 
 These commands work in Rust team chat and in the configured Discord commands channel unless a command section says otherwise.
 
+Commands that depended exclusively on event or vending-machine map markers are intentionally absent. Facepunch stopped
+exposing those markers through the public Rust+ stream on 2026-08-06; see
+[the payload audit](rustplus_payload_audit_2026-09-10.md).
+
 Command | Description
 ------- | -----------
 [**afk**](commands.md#afk) | Get the currently afk players in your team.
 [**alive**](commands.md#alive) | Get the player with the longest time alive.
 [**autotranslate**](commands.md#autotranslate) | Automatically translate relayed team-chat messages in Discord.
-[**cargo**](commands.md#cargo) | Get information about CargoShip (Location, time till enters egress stage, time since last on map).
-[**chinook**](commands.md#chinook) | Get information about Chinook 47 (Location, time since last on map).
 [**commands/help**](commands.md#commandshelp) | List available commands or show the documented synopsis and description for a command.
 [**connection/connections**](commands.md#connectionconnections) | Get recent connection events.
 [**craft**](commands.md#craft-ingame) | Display the cost to craft an item.
 [**death/deaths**](commands.md#deathdeaths) | Get recent death events.
 [**decay**](commands.md#decay-ingame) | Display the decay time of an item.
 [**despawn**](commands.md#despawn-ingame) | Display the despawn time of an item.
-[**deepsea**](commands.md#deepsea) | Track Deep Sea activity from the Rust+ map marker when exposed by the server.
-[**events**](commands.md#events) | Get recent events.
-[**heli**](commands.md#heli) | Get information about Patrol Helicopter (Location, time since last downed, time since last on map).
-[**hv/hvw/hvt**](commands.md#hidden-vendors) | Show former vendor locations; `!hvw` filters water suspects and `!hvt` sorts by shortest broadcast time.
-[**large**](commands.md#large) | Get information about Large Oil Rig (Time till crate unlocks, time since last trigger).
 [**language**](commands.md#language) | Show or change the bot language for this server and config file.
 [**leader**](commands.md#leader-1) | Give/Take the Team Leadership.
 [**marker/markers**](commands.md#marker) | Set or list custom markers anywhere on the map.
-[**market**](commands.md#market-ingame) | Search for items in vending machines or subscribe/unsubscribe to items.
 [**logs**](commands.md#logs) | Show, enable, or disable bot file/debug logging.
 [**mute**](commands.md#mute) | Mute the bot from the In-Game Team Chat.
 [**note/notes**](commands.md#notenotes) | Create notes about meaningful things.
@@ -397,11 +369,11 @@ Command | Description
 [**player/players**](commands.md#playerplayers) | Get the names and playtime of the currently online players on the server (Based on Battlemetrics).
 [**pop**](commands.md#pop) | Get the current population of the server including queue size and max population.
 [**prox**](commands.md#prox) | Get the distance to the three closest teammates.
+[**raidtest**](commands.md#raidtest) | Send a critical test alert through the production Rust team-chat raid path.
 [**recycle**](commands.md#recycle-ingame) | Display the output of recycling an item.
 [**research**](commands.md#research-ingame) | Display the cost to research an item.
 [**record**](commands.md#record) | Manually record a SteamID and pseudonym in the teammate language CSV database.
 [**send**](commands.md#send) | Send a message to a discord user.
-[**small**](commands.md#small) | Get information about Small Oil Rig (Time till crate unlocks, time since last trigger).
 [**stack**](commands.md#stack-ingame) | Display stack size information for an item.
 [**steamid**](commands.md#steamid) | Get the steamid of a teammate.
 [**team**](commands.md#team) | Get the names of all members in the team.
@@ -419,7 +391,6 @@ Command | Description
 [**unmute**](commands.md#unmute) | Unmute the bot from the In-Game Team Chat.
 [**upkeep**](commands.md#upkeep) | Get the upkeep time of all connected tool cupboard monitors.
 [**uptime**](commands.md#uptime-ingame) | Display uptime of the bot and server.
-[**vendor**](commands.md#vendor) | Get information about the Traveling Vendor (Current Location, Time since last vendor)
 [**wipe**](commands.md#wipe) | Get the time since it was wiped.
 [**who**](commands.md#who) | List all known pseudonyms for a SteamID from the teammate language CSV database.
 
@@ -451,29 +422,12 @@ Command | Description
 ![In-Game Command alive Image](images/ingame_commands/alive_ingame.png)
 
 
-## **cargo**
-
-> **Get information about CargoShip (Location, time till enters egress stage, time since last on map).**
-<br>Command: `!cargo`
-
-![In-Game Command cargo Image](images/ingame_commands/cargo_ingame.png)
-
-
-## **chinook**
-
-> **Get information about Chinook 47 (Location, time since last on map).**
-<br>Command: `!chinook`
-
-![In-Game Command chinook Image](images/ingame_commands/chinook_ingame.png)
-
-
-
 ## **commands/help**
 
-> **List available commands or show the documented synopsis and description for one command.** The command catalog is parsed from `docs/full_list_features.md` at runtime so both commands use the same canonical source. Aliases such as `tracks`, `hvw`, and `markers` are accepted. Works from in-game team chat and from the Discord commands channel.
+> **List available commands or show the documented synopsis and description for one command.** The command catalog is parsed from `docs/full_list_features.md` at runtime so both commands use the same canonical source. Active aliases such as `tracks` and `markers` are accepted. Works from in-game team chat and from the Discord commands channel.
 <br>Command: `!commands [command]`
 <br>Command: `!help [command]`
-<br>Examples: `!help track`, `!help hv`, `!commands despawn`
+<br>Examples: `!help track`, `!help marker`, `!commands despawn`
 
 ## **connection/connections**
 
@@ -492,12 +446,6 @@ Command | Description
 <br>Command: `!craft rocket 100`
 
 ![In-Game Command craft Image](images/ingame_commands/craft_ingame.png)
-
-
-## **deepsea**
-
-> **Track Deep Sea activity from the Rust+ map marker when exposed by the server.** When an off-map Deep Sea vendor cluster appears, the bot records it like other map events and `!deepsea` reports active/remaining status, last seen time, and an estimated next open window from default Deep Sea timing. Works from in-game team chat and from the Discord commands channel.
-<br>Command: `!deepsea`
 
 
 ## **death/deaths**
@@ -525,41 +473,6 @@ Command | Description
 > **Display the despawn time of an item.** The item name can contain spaces.
 <br>Command: `!despawn <item-name>`
 <br>Example: `!despawn assault rifle`
-
-
-## **events**
-
-> **Get recent In-Game events.** Available events are cargo, heli, small, large, chinook/ch47, deepsea. Compatibility aliases include oil_rig_small and large_oil_rig.
-<br>Command: `!events` - Get last 5 events
-<br>Command: `!events 3` - Get last 3 events
-<br>Command: `!events cargo` - Get last 5 events from cargo
-<br>Command: `!events cargo 2` - Get last 2 events from cargo
-
-![In-Game Command events Image](images/ingame_commands/events_ingame.png)
-
-
-## **heli**
-
-> **Get information about Patrol Helicopter (Location, time since last downed, time since last on map).**
-<br>Command: `!heli`
-
-![In-Game Command heli Image](images/ingame_commands/heli_ingame.png)
-
-
-
-## **hidden vendors**
-
-> **Show former vendor locations grouped by grid.** The bot records each vending-machine marker seen for the current server/map signature, keeps it after it disappears, and `!hv` reports former vendors that are not currently broadcasting. `!hvw` uses the same database but only includes short-lived former vendors, which are the best water-stash suspects. `!hvt` shows hidden vendors from shortest tracked broadcast time upward, helping find vendors that were visible for the least polling cycles. Vendors that never broadcast through Rust+ cannot be recovered. Works from in-game team chat and from the Discord commands channel.
-<br>Command: `!hv`
-<br>Command: `!hvw`
-<br>Command: `!hvt`
-
-## **large**
-
-> **Get information about Large Oil Rig (Time till crate unlocks, time since last trigger).**
-<br>Command: `!large`
-
-![In-Game Command large Image](images/ingame_commands/large_ingame.png)
 
 
 ## **language**
@@ -601,25 +514,6 @@ Subcommand | Description | Required
 <br>Command: `!logs` - Show the current logging status.
 <br>Command: `!logs off` - Disable file/debug logging.
 <br>Command: `!logs on` - Enable file/debug logging.
-
-
-## **market ingame**
-
-> **Search for items in vending machines or subscribe/unsubscribe to items.**
-<br>Command: `!market search sell Thompson`
-<br>Command: `!market sub sell m249`
-<br>Command: `!market sub all Scrap`
-<br>Command: `!market unsub sell m249`
-<br>Command: `!market list`
-
-Subcommand | Description | Required
----------- | ----------- | --------
-`search` | Search for an item in Vending Machines (`!market search sell thompson`). | `False`
-`sub` | Subscribe to an item in Vending Machines (`!market sub all thompson`). | `False`
-`unsub` | Unsubscribe to an item in Vending Machines (`!market unsub sell thompson`). | `False`
-`list` | Display the subscription list (`!market list`). | `False`
-
-![In-Game Command market Image](images/ingame_commands/market_ingame.png)
 
 
 ## **mute**
@@ -702,6 +596,14 @@ Subcommand | Description | Required
 ![In-Game Command prox Image](images/ingame_commands/prox_ingame.png)
 
 
+## **raidtest**
+
+> **Verify critical in-game raid-alert delivery without waiting for a real raid.** The command uses the same immediate,
+> acknowledged Rust team-message path as an incoming FCM alarm. It works from Rust team chat and the Discord commands
+> channel. The bot logs either `raid-alarm.in-game: test delivered` or the precise failure reason.
+<br>Command: `!raidtest`
+
+
 ## **recycle ingame**
 
 > **Display the output of recycling an item (Quantity is optional).**
@@ -739,14 +641,6 @@ Subcommand | Description | Required
 <br>Command: `!send Alle Hello my friend!`
 
 ![In-Game Command send Image](images/ingame_commands/send_ingame.png)
-
-
-## **small**
-
-> **Get information about Small Oil Rig (Time till crate unlocks, time since last trigger).**
-<br>Command: `!small`
-
-![In-Game Command small Image](images/ingame_commands/small_ingame.png)
 
 
 ## **stack ingame**
@@ -847,14 +741,6 @@ Subcommand | Description | Required
 <br>Command: `!uptime`
 
 ![In-Game Command uptime Image](images/ingame_commands/uptime_ingame.png)
-
-
-## **vendor**
-
-> **Get information about the Traveling Vendor (Current Location, Time since last Traveling Vendor).**
-<br>Command: `!vendor`
-
-![In-Game Command vendor Image](images/ingame_commands/vendor_ingame.png)
 
 
 ## **wipe**

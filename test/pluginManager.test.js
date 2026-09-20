@@ -24,6 +24,7 @@ function createClient() {
                 commandSyntaxWho: 'who'
             };
             if (syntaxes[key]) return syntaxes[key];
+            if (key === 'unavailable') return 'Unavailable';
             if (key === 'commandsList') return `Commands: ${variables.commands}`;
             if (key === 'commandsUsage') return `${variables.usage} - ${variables.description}`;
             if (key === 'commandsUnknown') return `Unknown command: ${variables.command}.`;
@@ -52,8 +53,8 @@ function createRustplus() {
 Test('plugin registry exposes an immutable stable list', () => {
     const names = PluginManager.getPluginNames();
     Assert.deepEqual(names, [
-        'auto-translate', 'battlemetrics', 'custom-commands', 'warbandits', 'player-tracker', 'raid-alarm',
-        'teammate-language-database', 'hidden-vendors', 'deep-sea'
+        'auto-translate', 'battlemetrics', 'map-marker-capabilities', 'custom-commands', 'warbandits',
+        'player-tracker', 'raid-alarm', 'teammate-language-database', 'hidden-vendors', 'deep-sea'
     ]);
     Assert.equal(Object.isFrozen(names), true);
 });
@@ -83,17 +84,28 @@ Test('a synchronous optional plugin failure preserves the core fallback', () => 
     }
 });
 
-Test('custom Deep Sea command is handled outside core command handlers', async () => {
+Test('map-marker commands are disabled before stale handlers can run', async () => {
     const client = createClient();
     const rustplus = createRustplus();
-    const response = await PluginManager.handleCommand({
-        source: 'inGame', client, rustplus, guildId: 'guild',
-        message: {}, command: '!deepsea', commandLowerCase: '!deepsea', prefix: '!'
-    });
+    const disabled = PluginManager.getDisabledMapMarkerCommandNames();
 
-    Assert.equal(response.handled, true);
-    Assert.equal(response.response, 'deepseaInfoUnknown');
-    Assert.equal(Object.isFrozen(response), true);
+    Assert.deepEqual(disabled, [
+        'cargo', 'chinook', 'deepsea', 'events', 'heli', 'hvt',
+        'hv', 'hvw', 'large', 'market', 'small', 'vendor'
+    ]);
+    Assert.equal(Object.isFrozen(disabled), true);
+    for (const commandName of disabled) {
+        const response = await PluginManager.handleCommand({
+            source: 'inGame', client, rustplus, guildId: 'guild', message: {},
+            command: `!${commandName}`, commandLowerCase: `!${commandName}`, prefix: '!'
+        });
+        Assert.equal(response.handled, true, commandName);
+        Assert.equal(response.response, 'Rust+ map API: Unavailable.', commandName);
+        Assert.equal(Object.isFrozen(response), true, commandName);
+    }
+
+    Assert.equal(PluginManager.isSlashCommandEnabled('market'), false);
+    Assert.equal(PluginManager.isSlashCommandEnabled('map'), true);
 });
 
 Test('unknown commands fall through without side effects', async () => {
@@ -120,9 +132,10 @@ Test('canonical documentation covers every static in-game command', () => {
     }
     runtimeKeys.delete('commandSyntaxOn');
     runtimeKeys.delete('commandSyntaxOff');
+    for (const syntaxKey of PluginManager.getDisabledMapMarkerSyntaxKeys()) runtimeKeys.delete(syntaxKey);
     const runtimeNames = new Set([...runtimeKeys].map(key => language[key]));
     for (const name of [
-        'help', 'track', 'trackhistory', 'trackinfo', 'tracklist', 'trackrelated', 'tracks', 'untrack'
+        'help', 'raidtest', 'track', 'trackhistory', 'trackinfo', 'tracklist', 'trackrelated', 'tracks', 'untrack'
     ]) runtimeNames.add(name);
 
     Assert.deepEqual([...CommandCatalog.getCommandNames()].sort(), [...runtimeNames].sort());
@@ -140,6 +153,7 @@ Test('both command documents cover every Discord slash command module', () => {
     const slashNames = Fs.readdirSync(Path.join(__dirname, '..', 'src', 'commands'))
         .filter(name => name.endsWith('.js'))
         .map(name => Path.basename(name, '.js'))
+        .filter(name => PluginManager.isSlashCommandEnabled(name))
         .sort();
     const canonical = Fs.readFileSync(
         Path.join(__dirname, '..', 'docs', 'full_list_features.md'), 'utf8');
@@ -170,7 +184,7 @@ Test('help and commands share immutable documented synopsis data', async () => {
     };
 
     const help = await PluginManager.handleCommand({
-        ...base, command: '!help hvw', commandLowerCase: '!help hvw'
+        ...base, command: '!help marker', commandLowerCase: '!help marker'
     });
     const commands = await PluginManager.handleCommand({
         ...base, command: '!commands despawn', commandLowerCase: '!commands despawn'
@@ -179,12 +193,15 @@ Test('help and commands share immutable documented synopsis data', async () => {
         ...base, command: '!help', commandLowerCase: '!help'
     });
 
-    Assert.equal(help.response,
-        '!hvw - Show former vendor locations grouped by grid; !hvw filters short-lived water suspects and !hvt sorts by shortest broadcast time.');
+    Assert.equal(help.response, '!marker [name] - Set markers to navigate to.');
     Assert.equal(commands.response, '!despawn [item] - Display the despawn time of an item.');
     Assert.match(list.response, /^Commands: /);
     for (const name of ['despawn', 'help', 'stack', 'track', 'untrack']) {
         Assert.equal(list.response.split(/[:,] /).includes(name), true);
+    }
+    for (const name of PluginManager.getDisabledMapMarkerCommandNames()) {
+        Assert.equal(list.response.split(/[:,] /).includes(name), false, name);
+        Assert.equal(CommandCatalog.getCommand(name), null, name);
     }
     Assert.equal(Object.isFrozen(CommandCatalog.getCommands()), true);
     Assert.equal(Object.isFrozen(CommandCatalog.getCommand('track')), true);

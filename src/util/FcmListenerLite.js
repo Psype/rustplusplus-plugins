@@ -24,6 +24,7 @@ const Constants = require('../util/constants.js');
 const DiscordEmbeds = require('../discordTools/discordEmbeds.js');
 const DiscordMessages = require('../discordTools/discordMessages.js');
 const DiscordTools = require('../discordTools/discordTools.js');
+const FcmAlarmRouter = require('./fcmAlarmRouter.js');
 const InstanceUtils = require('../util/instanceUtils.js');
 const Map = require('../util/map.js');
 const Scrape = require('../util/scrape.js');
@@ -62,7 +63,9 @@ module.exports = async (client, guild, steamId) => {
     const androidId = credentials[steamId].gcm.android_id;
     const securityToken = credentials[steamId].gcm.security_token;
     client.fcmListenersLite[guild.id][steamId] = new PushReceiverClient(androidId, securityToken, [])
-    client.fcmListenersLite[guild.id][steamId].on('ON_DATA_RECEIVED', (data) => {
+    client.fcmListenersLite[guild.id][steamId].on('ON_DATA_RECEIVED', async (data) => {
+        if (await FcmAlarmRouter.handle(client, guild, steamId, data, { source: 'FCM LITE' })) return;
+
         const appData = data.appData;
 
         if (!appData) {

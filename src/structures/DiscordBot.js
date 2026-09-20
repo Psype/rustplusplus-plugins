@@ -32,6 +32,7 @@ const InstanceUtils = require('../util/instanceUtils.js');
 const Items = require('./Items');
 const Logger = require('./Logger.js');
 const PermissionHandler = require('../handlers/permissionHandler.js');
+const PluginManager = require('../plugins/pluginManager.js');
 const RustLabs = require('../structures/RustLabs');
 const RustPlus = require('../structures/RustPlus');
 
@@ -83,6 +84,7 @@ class DiscordBot extends Discord.Client {
             .filter(file => file.endsWith('.js'));
         for (const file of commandFiles) {
             const command = require(`../commands/${file}`);
+            if (!PluginManager.isSlashCommandEnabled(command.name)) continue;
             this.commands.set(command.name, command);
         }
     }

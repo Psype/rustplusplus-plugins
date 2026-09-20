@@ -24,6 +24,7 @@ const Rest = require('@discordjs/rest');
 const Types = require('discord-api-types/v9');
 
 const Config = require('../../config');
+const PluginManager = require('../plugins/pluginManager.js');
 
 module.exports = async (client, guild) => {
     const commands = [];
@@ -31,6 +32,7 @@ module.exports = async (client, guild) => {
 
     for (const file of commandFiles) {
         const command = require(`../commands/${file}`);
+        if (!PluginManager.isSlashCommandEnabled(command.name)) continue;
         commands.push(command.getData(client, guild.id).toJSON());
     }
 

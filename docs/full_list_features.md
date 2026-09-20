@@ -13,7 +13,6 @@
 - **/item** - Get the details of an item.
 - **/leader** - Transfer leadership.
 - **/map** - Display the In-Game Map.
-- **/market** - Search for or subscribe to items in vending machines.
 - **/players** - Get Battlemetrics data on all connected players.
 - **/recycle** - Display the output of recycling an item.
 - **/research** - Display the cost to research an item.
@@ -30,24 +29,16 @@
 - **afk** - `!afk` - Display AFK teammates.
 - **alive** - `!alive` - Display who has been alive longest.
 - **autotranslate** - `!autotranslate on [language[,language...]]` or `!autotranslate off` - Translate a teammate only when the message matches one of their recorded languages and the active translation pair; relay the result to Rust team chat and Discord.
-- **cargo** - `!cargo` - Display information regarding Cargoship.
-- **chinook** - `!chinook` - Display information regarding Chinook 47.
 - **commands/help** - `!commands [command]` or `!help [command]` - List all commands or show the documented synopsis and description for one command.
 - **connection/connections** - `!connection [steamid]` or `!connections` - Display latest team connections.
 - **craft** - `!craft [item] [quantity]` - Display the cost to craft an item.
 - **death/deaths** - `!death [steamid]` or `!deaths` - Display latest deaths.
 - **decay** - `!decay [item]` - Display the decay time of an item.
 - **despawn** - `!despawn [item]` - Display the despawn time of an item.
-- **deepsea** - `!deepsea` - Track Deep Sea activity from off-map vendor clusters and predict open/close windows.
-- **events** - `!events [event]` - Get recent events and event timing summaries.
-- **heli** - `!heli` - Get information regarding Patrol Helicopter.
-- **hv/hvw/hvt** - `!hv` / `!hvw` / `!hvt` - Show former vendor locations grouped by grid; `!hvw` filters short-lived water suspects and `!hvt` sorts by shortest broadcast time.
 - **language** - `!language [code]` - Show or change the bot language for this server.
-- **large** - `!large` - Get information regarding Large Oil Rig.
 - **leader** - `!leader [teammate]` - Transfer leadership.
 - **logs** - `!logs [on|off]` - Show, enable, or disable bot file/debug logging.
 - **marker/markers** - `!marker [name]` or `!markers` - Set markers to navigate to.
-- **market** - `!market [item]` - Search for or subscribe to items in vending machines.
 - **mute** - `!mute` - Mute rustplusplus in-game.
 - **note/notes** - `!note [text]` or `!notes` - Add or list notes.
 - **offline** - `!offline` - Display offline teammates.
@@ -55,11 +46,11 @@
 - **player/players** - `!player [name]` or `!players` - Get Battlemetrics information about players.
 - **pop** - `!pop` - Get population of the server.
 - **prox** - `!prox` - Display teammates that are nearby.
+- **raidtest** - `!raidtest` - Send a critical test alert through the same immediate Rust team-chat path used by FCM raid alarms.
 - **record** - `!record [steamid] [pseudonym]` - Add a pseudonym; player languages are edited directly in the teammate CSV.
 - **recycle** - `!recycle [item] [quantity]` - Display the output of recycling an item.
 - **research** - `!research [item]` - Display the cost to research an item.
 - **send** - `!send [discord user] [message]` - Send a message through rustplusplus to a person on Discord.
-- **small** - `!small` - Get information regarding Small Oil Rig.
 - **stack** - `!stack [item]` - Display stack size information for an item.
 - **steamid** - `!steamid [teammate]` - Get teammate SteamID.
 - **team** - `!team` - Get team information (names of all teammates).
@@ -77,7 +68,6 @@
 - **unmute** - `!unmute` - Unmute rustplusplus in-game.
 - **upkeep** - `!upkeep` - Check upkeep of Storage Monitor Tool Cupboards.
 - **uptime** - `!uptime` - Display the uptime of rustplusplus and currently connected server.
-- **vendor** - `!vendor` - Get information regarding the Traveling Vendor.
 - **who** - `!who [steamid]` - List known pseudonyms for a SteamID from the teammate language CSV database.
 - **wipe** - `!wipe` - Display time since wipe.
 
@@ -100,18 +90,13 @@
 - See Map Name.
 - F1 console connect information.
 
-## In-Game Event Notifications
-> **Current Rust+ limitation (since 2026-08-06):** Facepunch no longer sends vending-machine or event map markers
-> (cargo, helicopters, travelling vendor) through the public Rust+ stream. The capabilities below are retained for
-> protocol history, but cannot receive new live state unless Facepunch restores the signal or the server provides a
-> separately integrated authoritative bridge.
+## Unavailable Rust+ map capabilities
 
-> Receive notifications for In-Game Events such as:
-- **Cargo Ship** - When it spawns, despawns, how long before it enters egress stage. How long time since it was last out. step-trace.
-- **Patrol Helicopter** - When it spawns, despawns or gets taken down. How long time since it was last out and how long since it was taken down. step-trace.
-- **Oil Rig** - When Oil Rig calls in Heavy Scientists and how long till the Locked Crate unlocks.
-- **Chinook 47** - When it enters map and when it leaves.
-- **Vending Machines** - Whenever a new Vending Machine appears on the map.
+Since Facepunch's 2026-08-06 Power Trip update, the public Rust+ stream no longer supplies the event and
+vending-machine markers needed for Cargo Ship, Patrol Helicopter, Chinook, Oil Rig, Deep Sea, travelling vendor,
+market, or hidden-vendor state. Their commands are disabled and omitted from the active command catalog so the bot
+cannot present stale history as current information. Historical handlers remain isolated for a future authoritative
+signal. See [the payload audit](rustplus_payload_audit_2026-09-10.md) for captured evidence.
 
 ## Teammate Information
 > Get information about teammates such as Online/Offline/AFK/Alive/Dead/Location/Paired/Leader.

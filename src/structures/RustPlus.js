@@ -280,6 +280,10 @@ class RustPlus extends RustPlusLib {
         return InGameChatHandler.inGameChatHandler(this, Client.client, message);
     }
 
+    sendCriticalInGameMessage(message) {
+        return InGameChatHandler.sendCriticalMessage(this, Client.client, message);
+    }
+
     async sendEvent(setting, text, event, embed_color, firstPoll = false, image = null) {
         const img = (image !== null) ? image : setting.image;
 

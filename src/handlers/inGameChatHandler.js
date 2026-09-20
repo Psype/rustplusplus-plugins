@@ -70,14 +70,45 @@ module.exports = {
             rustplus.inGameChatTimeout = setTimeout(module.exports.inGameChatHandler, commandDelayMs, rustplus, client);
         }
     },
+
+    sendCriticalMessage: async function (rustplus, client, message) {
+        if (rustplus.generalSettings.muteInGameBotMessages) {
+            throw new Error('in-game bot messages are muted');
+        }
+
+        const trademarkString = rustplus.generalSettings.trademark === 'NOT SHOWING' ? '' : '[BOT] ';
+        const messageMaxLength = Constants.MAX_LENGTH_TEAM_MESSAGE - trademarkString.length;
+        const messages = formatMessages(message, trademarkString, messageMaxLength);
+        if (messages.length === 0) throw new TypeError('Critical in-game message is empty.');
+
+        for (const formattedMessage of messages) {
+            rustplus.updateBotMessages(formattedMessage);
+            const response = await rustplus.sendTeamMessageAsync(formattedMessage);
+            const valid = typeof rustplus.isResponseValid === 'function' ?
+                await rustplus.isResponseValid(response, { logError: false }) : isResponseValid(response);
+            if (!valid) throw new Error('Rust+ rejected the critical in-game message.');
+            rustplus.log(client.intlGet(rustplus.guildId, 'messageCap'), formattedMessage);
+        }
+        return true;
+    }
 };
 
 function handleMessage(rustplus, message, trademarkString, maxLength) {
-    if (typeof message !== 'string') return;
+    for (const formattedMessage of formatMessages(message, trademarkString, maxLength)) {
+        rustplus.inGameChatQueue.push(formattedMessage);
+    }
+}
+
+function formatMessages(message, trademarkString, maxLength) {
+    if (typeof message !== 'string' || message === '') return [];
 
     const strings = message.match(new RegExp(`.{1,${maxLength}}(\\s|$)`, 'g'));
+    if (!strings) return [];
+    return strings.map(str => `${trademarkString}${str}`);
+}
 
-    for (const str of strings) {
-        rustplus.inGameChatQueue.push(`${trademarkString}${str}`);
-    }
+function isResponseValid(response) {
+    if (response === undefined || response instanceof Error) return false;
+    if (response && Object.prototype.hasOwnProperty.call(response, 'error')) return false;
+    return typeof response !== 'object' || response === null || Object.keys(response).length > 0;
 }

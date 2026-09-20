@@ -137,3 +137,12 @@ Do not infer world events from population changes, team movement, frame size, ex
 ## Conclusion
 
 For this capture, the bot receives a healthy Rust+ connection and complete regular polling, but the server returns a team-only marker view. The missing cargo, helicopter, CH47, vendor, Deep Sea and oil-rig notifications have no automatic input signal to process. Retrying, changing enum formatting or parsing the raw socket cannot restore data that was not transmitted. Useful new work should therefore build on team reports, team state, positions, population, time and static map data while preserving their evidence level.
+
+## Runtime action — 2026-09-20
+
+The bot now capability-gates every command whose live state depended exclusively on the missing markers. The disabled
+in-game/Discord-chat names are `cargo`, `chinook`, `deepsea`, `events`, `heli`, `hv`, `hvw`, `hvt`, `large`, `market`,
+`small`, and `vendor`; Discord slash command `/market` is not registered. They are omitted from `!help`, `!commands`,
+and the active command documentation. A direct legacy invocation returns a short unavailable response instead of
+historical state. The underlying marker handlers remain isolated and testable so the capability can be restored if an
+authoritative signal returns.

@@ -28,24 +28,30 @@ modded server requires a separately validated server-authoritative plugin bridge
 ### Raid Alarm 0.4.2
 
 Version 0.4.2 is the current uMod release and is identified as the November 2025 Rust compatibility patch. Its source
-uses `NotificationChannel.SmartAlarm` with `Util.TryGetServerPairingData()`. The bot accepts the canonical
-`You're getting raided!` title, normalized `Getting raided!`/`You are getting raided!` variants used by custom server
-integrations, or an `<entity> destroyed at <grid>` body. It validates the FCM server identity and only routes the alert
-to the matching currently connected Rust+ server. In-game routing logs whether delivery was queued or the precise
-setting/runtime condition that skipped it.
+uses `NotificationChannel.SmartAlarm` with `Util.TryGetServerPairingData()`. The bot now relays every authenticated FCM
+notification on that channel for the exactly matching active Rust+ server, rather than requiring a particular title,
+body, `type`, or vanilla entity registration. This also covers server-specific integrations such as WarBandits whose
+complete payload contract is not published. Canonical raid titles and `<entity> destroyed at <grid>` bodies are still
+localized when recognized.
 
-The shared **Smart Alarm and uMod Raid Alarm alerts In-Game** setting controls team-chat delivery. Rust team chat is
-queued before Discord, and a Discord delivery failure does not cancel it. The global in-game mute and Rust+'s
-all-team-offline guard still apply.
+The shared **Smart Alarm and uMod Raid Alarm alerts In-Game** setting controls team-chat delivery. Host and secondary
+FCM credentials use the same route; identical multi-account deliveries are suppressed for five seconds. The raid alert
+bypasses the ordinary delayed chat queue and the potentially stale all-team-offline projection, then waits for the Rust+
+server response before logging `raid-alarm.in-game: delivered`. Discord is attempted afterward and cannot cancel the
+in-game transaction. The explicit global in-game mute still applies.
+
+`!raidtest` sends `[RAID TEST] ...` through this same critical acknowledged Rust team-chat boundary. It is the first
+deployment check: use it in Rust team chat or the Discord commands channel. Incoming FCM logs include `alarm received`
+with the source SteamID, server endpoint, type, title, and message; malformed bodies are rejected without crashing the
+listener.
 
 The published source contract and the bot adapter are verified by deterministic tests. Runtime compilation of the C#
 plugin against the September 2026 Rust/Oxide assemblies is not verified in this repository because those assemblies
 and a live server are outside the bot workspace. No release newer than 0.4.2 is listed by uMod.
 
 WarBandits displays raid notifications in Rust+, but its underlying server plugin and full payload contract are not
-identified. The normalized raid-title adapter is compatible with the observed `Getting raided!` title. The exact
-`/raidalarm` spelling must be tested before ruling out haggbart's plugin, and a captured bot-side FCM payload remains
-required to verify the complete WarBandits contract.
+identified. The channel-level relay no longer depends on identifying that plugin or its title. A captured production
+`alarm received` line remains useful to verify its exact endpoint and fields, but is no longer required for routing.
 
 Server verification procedure:
 
