@@ -8,7 +8,11 @@ that boundary and must not import individual feature plugins.
 - `deepSea`: detects and reports Deep Sea from Rust+ marker polling.
 - `hiddenVendors`: persists vendors that disappear from map marker polling.
 - `autoTranslate`: translates eligible relayed team-chat messages.
-- `raidAlarm`: handles direct Rust+ FCM alerts from haggbart's uMod Raid Alarm without requiring a vanilla Smart Alarm.
+- `raidAlarm`: relays the generic Rust+ `SmartAlarm` notification channel into team chat. FCM is only the bot-side
+  transport; vanilla Smart Alarms, haggbart's uMod plugin, and unpublished server integrations are producers of the
+  same native Rust notification channel. No specific mod, title, or vanilla entity is required. The transport remains
+  outside the plugin in `src/util/reliableFcmReceiver.js`, which exposes the stable `ON_DATA_RECEIVED` boundary only
+  after an accepted MCS login.
 - `teammateLanguageDatabase`: records teammate names and detected languages.
 - `playerTracker`: resolves current-server BattleMetrics players, owns the `Enemies` native tracker, and persists a
   redacted status/last-seen projection plus bounded Premium summaries without adding another poller.

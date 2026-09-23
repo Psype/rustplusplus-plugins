@@ -57,6 +57,7 @@ class DiscordBot extends Discord.Client {
         this.rustplusLiteReconnectTimers = new Object();
         this.rustplusReconnecting = new Object();
         this.rustplusMaps = new Object();
+        this.discordGuildSetupComplete = new Object();
 
         this.uptimeBot = null;
 
@@ -179,6 +180,11 @@ class DiscordBot extends Discord.Client {
     }
 
     build() {
+        /* Rust+ is authoritative for in-game features and must not wait for Discord's gateway. */
+        this.loadLocalInstancesFromConfig();
+        this.createRustplusInstancesFromConfig();
+        this.startLocalFcmListenersFromConfig();
+
         this.login(Config.discord.token).catch(error => {
             switch (error.code) {
                 case 502: {
@@ -196,6 +202,67 @@ class DiscordBot extends Discord.Client {
                 } break;
             }
         });
+    }
+
+    loadLocalInstancesFromConfig() {
+        const directory = Path.join(__dirname, '..', '..', 'instances');
+        const files = Fs.readdirSync(directory).filter(file => file.endsWith('.json')).sort();
+
+        for (const file of files) {
+            const guildId = file.slice(0, -'.json'.length);
+            try {
+                require('../util/CreateInstanceFile')(this, { id: guildId });
+                require('../util/CreateCredentialsFile')(this, { id: guildId });
+                this.fcmListenersLite[guildId] ??= new Object();
+                this.loadGuildIntl(guildId);
+            }
+            catch (error) {
+                this.log(this.intlGet(null, 'errorCap'),
+                    `Could not load local instance ${guildId}: ${error}`, 'error');
+            }
+        }
+    }
+
+    startLocalFcmListenersFromConfig() {
+        for (const guildId of Object.keys(this.instances)) {
+            this.startFcmListenersForGuild({ id: guildId }).catch(error => {
+                this.log('FCM', `Could not start local listeners for guild ${guildId}: ${error}`, 'error');
+            });
+        }
+    }
+
+    async startFcmListenersForGuild(guild, adapters = {}) {
+        const guildId = guild.id;
+        const readCredentials = adapters.readCredentials || InstanceUtils.readCredentialsFile;
+        const startHost = adapters.startHost || require('../util/FcmListener');
+        const startLite = adapters.startLite || require('../util/FcmListenerLite');
+        const starts = [];
+        const schedule = (label, callback) => {
+            try {
+                starts.push({ label, promise: Promise.resolve(callback()) });
+            }
+            catch (error) {
+                this.log('FCM', `${label} failed for guild ${guildId}: ${error}`, 'error');
+            }
+        };
+        this.fcmListenersLite[guildId] ??= new Object();
+
+        if (!this.fcmListeners[guildId]) schedule('Host listener', () => startHost(this, guild));
+
+        const credentials = readCredentials(guildId);
+        for (const steamId of Object.keys(credentials)) {
+            if (steamId === credentials.hoster || steamId === 'hoster') continue;
+            if (!this.fcmListenersLite[guildId][steamId]) {
+                schedule(`Lite listener ${steamId}`, () => startLite(this, guild, steamId));
+            }
+        }
+
+        const results = await Promise.allSettled(starts.map(start => start.promise));
+        for (let index = 0; index < results.length; index += 1) {
+            if (results[index].status === 'rejected') {
+                this.log('FCM', `${starts[index].label} failed for guild ${guildId}: ${results[index].reason}`, 'error');
+            }
+        }
     }
 
     log(title, text, level = 'info') {
@@ -233,19 +300,14 @@ class DiscordBot extends Discord.Client {
             }
         }
 
-        require('../util/FcmListener')(this, guild);
-        const credentials = InstanceUtils.readCredentialsFile(guild.id);
-        for (const steamId of Object.keys(credentials)) {
-            if (steamId !== credentials.hoster && steamId !== 'hoster') {
-                require('../util/FcmListenerLite')(this, guild, steamId);
-            }
-        }
+        await this.startFcmListenersForGuild(guild);
 
         await require('../discordTools/SetupSettingsMenu')(this, guild);
 
         if (firstTime) await PermissionHandler.resetPermissionsAllChannels(this, guild);
 
-        this.resetRustplusVariables(guild.id);
+        if (!this.rustplusInstances[guild.id]) this.resetRustplusVariables(guild.id);
+        this.discordGuildSetupComplete[guild.id] = true;
     }
 
     async syncCredentialsWithUsers(guild) {
@@ -307,6 +369,9 @@ class DiscordBot extends Discord.Client {
     }
 
     createRustplusInstance(guildId, serverIp, appPort, steamId, playerToken) {
+        const current = this.rustplusInstances[guildId];
+        if (current && !current.isDeleted) return current;
+
         let rustplus = new RustPlus(guildId, serverIp, appPort, steamId, playerToken);
 
         /* Add rustplus instance to Object */
@@ -319,14 +384,9 @@ class DiscordBot extends Discord.Client {
     }
 
     createRustplusInstancesFromConfig() {
-        const files = Fs.readdirSync(Path.join(__dirname, '..', '..', 'instances'));
-
-        files.forEach(file => {
-            if (!file.endsWith('.json')) return;
-
-            const guildId = file.replace('.json', '');
-            const instance = this.getInstance(guildId);
-            if (!instance) return;
+        for (const [guildId, instance] of Object.entries(this.instances)) {
+            const current = this.rustplusInstances[guildId];
+            if (current && !current.isDeleted) continue;
 
             if (instance.activeServer !== null && instance.serverList.hasOwnProperty(instance.activeServer)) {
                 this.createRustplusInstance(
@@ -336,7 +396,11 @@ class DiscordBot extends Discord.Client {
                     instance.serverList[instance.activeServer].steamId,
                     instance.serverList[instance.activeServer].playerToken);
             }
-        });
+        }
+    }
+
+    isDiscordGuildReady(guildId) {
+        return this.isReady() && this.discordGuildSetupComplete[guildId] === true;
     }
 
     resetRustplusVariables(guildId) {

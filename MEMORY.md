@@ -98,8 +98,26 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 ## Upstream and plugin architecture
 - The canonical bot upstream is configured as Git remote `upstream` at `https://github.com/alexemanuelol/rustplusplus.git`.
 - Optional fork features integrate only through `src/plugins/pluginManager.js`; core handlers must not import individual feature plugins.
+- Startup is intentionally split into two independent lanes. Saved `instances/*.json` are loaded and their active Rust+
+  connections plus saved FCM listeners start before the Discord gateway login; Discord guild/channel/BattleMetrics
+  setup continues from the `ready` event and synchronizes any already-operational Rust+ instance afterward. Discord
+  unavailability must never delay in-game commands, polling, or the `[BOT] RUSTPLUS OPERATIONAL.` announcement.
+- `createRustplusInstancesFromConfig()` is idempotent. The Discord `ready` path may call it to pick up missing guilds,
+  but it must not replace or duplicate a Rust+ connection started by the local bootstrap.
+- Discord projection waits for both the gateway and that guild's channel setup. This prevents a Rust+ connection racing
+  the asynchronous `ready` handler and publishing into channels before setup has completed.
+- Generated map-image rendering belongs to the Discord projection and runs after Rust+ becomes operational; it must not
+  delay the first poll, in-game command handling, or the in-game operational announcement.
+- Saved host/lite FCM credentials start before Discord login as well, after Rust+ instances have been created. This keeps
+  the critical raid-alarm route available during a slow Discord login. The later guild setup reuses those listeners.
+- FCM startup must await the receiver's asynchronous initial check-in. A failed check-in destroys/removes the dead
+  receiver so Discord-ready setup can make one meaningful retry; otherwise an object can exist while receiving nothing.
+  Lifecycle logs expose `connected`, `disconnected; receiver reconnect scheduled`, and `initial connection failed`.
 - Deep Sea state/detection and custom fork commands live behind the plugin boundary. The base `MapMarkers` and `RustPlus` structures must not carry duplicate Deep Sea implementations or runtime method monkey-patches.
-- The Rust+ dependency remains pinned to `alexemanuelol/rustplus.js#089cfd3` because it is version 2.5.0 plus Proto3/current-server compatibility fixes absent from Liam's current master. Any replacement must pass the protocol compatibility fixtures first.
+- The Rust+ dependency remains pinned to `alexemanuelol/rustplus.js#089cfd3` because it is version 2.5.0 plus
+  Proto3/current-server compatibility fixes absent from Liam's current master. Any replacement must pass the protocol
+  compatibility fixtures first. The upstream/schema comparison and safe update path are recorded in
+  `docs/rustplus_js_audit_2026-09-23.md`.
 - `npm test` runs deterministic Node tests before the TypeScript no-emit check. `npm run benchmark:plugins` measures dispatch overhead.
 - TypeScript uses the paired `module: Node16` and `moduleResolution: Node16` settings. The package has no ESM `type`, so Node16 preserves its CommonJS runtime while avoiding the deprecated `node`/`node10` resolver.
 - The repository enforces UTF-8/LF through `.gitattributes` and `.editorconfig` for Linux compatibility. Keep `update.sh` tracked as executable (`100755`).
@@ -134,11 +152,33 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 - User-supplied real-name/SteamID64 relations and exact WarBandits identity results are sufficient to compute censored aliases locally, removing BattleMetrics from identity resolution. A future detached presence provider may correlate fresh A2S alias sessions/durations, a cached inverse alias-to-known-SteamIDs index, target-specific WarBandits stat deltas, and optional Steam `playing Rust` state. A unique known alias is still only probable presence because an uncached account may collide; a target WarBandits delta confirms interval activity, not current presence.
 
 ## Raid alarm plugin localization
-- Raid alarm plugin messages translate recognized `You're getting raided!` variants through `baseIsUnderAttack` and translate `X destroyed at Y` payloads through `raidAlarmDestroyedAt`; unrecognized server-specific text is preserved verbatim.
+- Rust+ alarm routing is generic: the server producer emits Rust's native `NotificationChannel.SmartAlarm`, Facepunch
+  delivers it to the bot's registered virtual device over FCM, and the bot routes canonical `channelId=alarm` without
+  requiring haggbart Raid Alarm, a vanilla Smart Alarm entity, a fixed title, or `body.type`. Paired vanilla Smart
+  Alarms also have a separate Rust+ WebSocket entity-change path. FCM is transport, not a mod-specific contract.
+- SmartAlarm push messages translate recognized `You're getting raided!` variants through `baseIsUnderAttack` and translate `X destroyed at Y` payloads through `raidAlarmDestroyedAt`; unrecognized server-specific text is preserved verbatim.
 - The supported server plugin is haggbart Raid Alarm `0.4.2`, which sends Rust+ FCM alerts directly to TC-authorized players via `Util.TryGetServerPairingData()` and does not require a vanilla Smart Alarm entity.
-- Superseding runtime decision (2026-09-20): every authenticated FCM notification on channel `alarm` for the exactly matching active server is relayed, regardless of title/body/type/entity shape. Both host and Lite credential listeners use `src/util/fcmAlarmRouter.js`; identical multi-account notifications are deduplicated for five seconds. This fixes the former paths where custom payloads and every Lite-account alarm could be silently discarded. Malformed external bodies degrade to an actionable log without crashing the listener.
+- Superseding runtime decision (2026-09-20): every authenticated FCM notification on channel `alarm` for the exactly matching active server is relayed, regardless of title, `body.type`, or entity shape; the body must still carry the server IP/port required for authoritative routing. Both host and Lite credential listeners use `src/util/fcmAlarmRouter.js`; identical multi-account notifications are deduplicated for five seconds. This fixes the former paths where custom payloads and every Lite-account alarm could be silently discarded. Malformed external bodies degrade to an actionable log without crashing the listener.
 - Raid delivery honors `smartAlarmNotifyInGame` and the explicit global mute, but bypasses the ordinary delayed team-chat queue and stale `team.allOffline` state. It calls the critical send boundary, validates the Rust+ response, and only then logs `raid-alarm.in-game: delivered`; Discord runs afterward and cannot cancel the in-game send. `!raidtest` uses the same critical route and is listed in `!help`/`!commands`.
 - WarBandits sends Rust+ raid notifications, but its actual server plugin and complete payload contract remain unverified. The channel-level relay no longer needs exact `/raidalarm` spelling or title matching; an `alarm received` production log is still useful to document its endpoint and fields. Do not describe it as haggbart Raid Alarm based only on the phone notification.
+- Runtime evidence supplied 2026-09-23: historical WarBandits journals from 2026-07-13 through 2026-07-17 contain 107
+  old-handler `INFO` alarm lines and 74 matching Rust team-chat `MESSAGE` lines. The visible English title is the bot's
+  localization of the exact raw title required by the old handler. Haggbart Raid Alarm registers
+  `You're getting raided!` as its default, but public Facepunch documentation does not establish whether that shared
+  title originated as a vanilla default; do not infer the producer from it. The `<entity> destroyed at <grid>` body is
+  explicitly generated by the uMod plugin. From 2026-07-17 01:01 onward, the final 33 received alarms have no chat
+  output, proving that the old route could receive a push yet suppress delivery. Its logs cannot distinguish
+  active-server mismatch, mute, or `team.allOffline`; the current critical route logs the exact outcome and bypasses
+  the offline projection. The extract has no current September alarm, so current FCM delivery and payload remain
+  unproven.
+- FCM transport correction (2026-09-23): no published Facepunch evidence or maintained-client code indicates a Rust+
+  alarm payload migration. `src/util/reliableFcmReceiver.js` now retains the legacy GCM credentials/check-in and wire
+  parser but replaces the incomplete `@liamcottle/push-receiver` socket client. Readiness requires an accepted MCS
+  `LoginResponse`; the adapter tracks stream position, answers and sends heartbeats, sends `StreamAck` for every data
+  message, handles server close/parser/socket/inactivity failures, tries ports 5228 then 443, uses capped reconnect
+  backoff, and fails fast on authentication rejection. `test/reliableFcmReceiver.test.js` covers the full MCS alarm to
+  acknowledged Rust team-chat route. See `docs/fcm_transport_audit_2026-09-23.md`; live production receipt still
+  requires a real post-deployment alarm.
 - A recurring Rust+ `not_found` every 30 polling cycles (five minutes at a 10-second poll interval) comes from the periodic reachability check of a registered Smart Switch, Smart Alarm, or Storage Monitor that no longer exists/replies. It does not stop the polling loop. Reachability checks log the device type/name/ID only on the transition to unreachable, keep probing silently so recovery still works, and require the stale device to be removed from the bot when permanently gone.
 - As verified on 2026-09-07, Raid Alarm 0.4.2 is the only external Rust server mod with an explicit bot integration. The canonical inventory is `docs/external_mod_compatibility.md`; Deep Sea and Smart Alarm are vanilla Rust features, while Hidden Vendors, AutoTranslate, and Teammate Language Database are bot-local.
 - Item names from FCM/plugin payloads remain as provided because the payload does not include stable item IDs.

@@ -1,5 +1,15 @@
 # Discord Bot Setup Documentation
 
+## Startup behavior
+
+The bot starts the active Rust+ connection directly from the saved `instances/*.json` configuration. It does not wait
+for the Discord gateway to become ready, so Rust team-chat commands, polling, and saved FCM listeners can become
+operational while Discord is still connecting. Once Discord emits `ready`, the bot configures its guild channels and
+BattleMetrics, then publishes the already-running Rust+ state into Discord without opening a second Rust+ connection.
+
+In the service logs, `CONNECTING`, `CONNECTED`, and `RUSTPLUS OPERATIONAL` may therefore appear before `LOGGED IN AS`.
+This ordering is expected. A Discord outage does not disable the authoritative in-game path.
+
 ## Create a Discord Bot
 
 1. Go to [`Discord Developers Applications`](https://discord.com/developers/applications).

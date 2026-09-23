@@ -23,6 +23,7 @@ const EventDebugLogger = require('../util/eventDebugLogger.js');
 const Info = require('../structures/Info');
 const Map = require('../structures/Map');
 const PollingHandler = require('../handlers/pollingHandler.js');
+const SyncRustplusDiscordState = require('../util/SyncRustplusDiscordState.js');
 
 module.exports = {
     name: 'connected',
@@ -51,8 +52,10 @@ module.exports = {
             instance.activeServer = null;
             client.setInstance(guildId, instance);
 
-            await DiscordMessages.sendServerConnectionInvalidMessage(guildId, serverId);
-            await DiscordMessages.sendServerMessage(guildId, serverId, null);
+            if (client.isReady()) {
+                await DiscordMessages.sendServerConnectionInvalidMessage(guildId, serverId);
+                await DiscordMessages.sendServerMessage(guildId, serverId, null);
+            }
 
             client.resetRustplusVariables(guildId);
 
@@ -65,47 +68,19 @@ module.exports = {
         const info = await rustplus.getInfoAsync();
         if (await rustplus.isResponseValid(info)) rustplus.info = new Info(info.info)
 
-        if (client.rustplusMaps.hasOwnProperty(guildId)) {
-            if (client.isJpgImageChanged(guildId, map.map)) {
-                rustplus.map = new Map(map.map, rustplus);
+        const hadMap = client.rustplusMaps.hasOwnProperty(guildId);
+        const mapChanged = hadMap && client.isJpgImageChanged(guildId, map.map);
+        rustplus.map = new Map(map.map, rustplus);
 
-                await rustplus.map.writeMap(false, true);
-                await DiscordMessages.sendServerWipeDetectedMessage(guildId, serverId);
-                await DiscordMessages.sendInformationMapMessage(guildId);
-            }
-            else {
-                rustplus.map = new Map(map.map, rustplus);
-
-                await rustplus.map.writeMap(false, true);
-                await DiscordMessages.sendInformationMapMessage(guildId);
-            }
-        }
-        else {
-            rustplus.map = new Map(map.map, rustplus);
-
-            await rustplus.map.writeMap(false, true);
-            await DiscordMessages.sendInformationMapMessage(guildId);
-        }
-
-        if (client.rustplusReconnecting[guildId]) {
+        const reconnected = Boolean(client.rustplusReconnecting[guildId]);
+        if (reconnected) {
             client.rustplusReconnecting[guildId] = false;
 
             if (client.rustplusReconnectTimers[guildId]) {
                 clearTimeout(client.rustplusReconnectTimers[guildId]);
                 client.rustplusReconnectTimers[guildId] = null;
             }
-
-            await DiscordMessages.sendServerChangeStateMessage(guildId, serverId, 0);
         }
-
-        await DiscordMessages.sendServerMessage(guildId, serverId, null);
-
-        /* Setup Smart Devices */
-        await require('../discordTools/SetupSwitches')(client, rustplus);
-        await require('../discordTools/SetupSwitchGroups')(client, rustplus);
-        await require('../discordTools/SetupAlarms')(client, rustplus);
-        await require('../discordTools/SetupStorageMonitors')(client, rustplus);
-        rustplus.isNewConnection = false;
         rustplus.loadMarkers();
 
         await PollingHandler.pollingHandler(rustplus, client);
@@ -114,5 +89,7 @@ module.exports = {
 
         rustplus.updateLeaderRustPlusLiteInstance();
         rustplus.sendInGameMessage(client.intlGet(guildId, 'rustplusOperational'));
+
+        await SyncRustplusDiscordState.synchronize(client, rustplus, { mapChanged, reconnected });
     },
 };

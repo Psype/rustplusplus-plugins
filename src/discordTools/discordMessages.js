@@ -36,6 +36,14 @@ module.exports = {
             return;
         }
 
+        /* Discord is an optional projection; Rust+ may already be operational while it connects. */
+        const discordReady = typeof Client.client.isDiscordGuildReady === 'function' ?
+            Client.client.isDiscordGuildReady(guildId) :
+            typeof Client.client.isReady !== 'function' || Client.client.isReady();
+        if (!discordReady) {
+            return { id: messageId };
+        }
+
         let message = messageId !== null ?
             await DiscordTools.getMessageById(guildId, channelId, messageId) : undefined;
 

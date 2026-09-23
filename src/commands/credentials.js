@@ -27,6 +27,15 @@ const DiscordMessages = require('../discordTools/discordMessages.js');
 const DiscordTools = require('../discordTools/discordTools.js');
 const InstanceUtils = require('../util/instanceUtils.js');
 
+async function startFcmSafely(client, label, callback) {
+    try {
+        await callback();
+    }
+    catch (error) {
+        client.log('FCM', `${label} failed after credentials update: ${error}`, 'error');
+    }
+}
+
 module.exports = {
     name: 'credentials',
 
@@ -146,14 +155,18 @@ async function addCredentials(client, interaction, verifyId) {
     InstanceUtils.writeCredentialsFile(guildId, credentials);
 
     /* Start Fcm Listener */
+    const guild = DiscordTools.getGuild(interaction.guildId);
     if (isHoster) {
-        require('../util/FcmListener')(client, DiscordTools.getGuild(interaction.guildId));
+        await startFcmSafely(client, `Host listener ${steamId}`, () =>
+            require('../util/FcmListener')(client, guild));
         if (prevHoster !== null) {
-            require('../util/FcmListenerLite')(client, DiscordTools.getGuild(interaction.guildId), prevHoster);
+            await startFcmSafely(client, `Lite listener ${prevHoster}`, () =>
+                require('../util/FcmListenerLite')(client, guild, prevHoster));
         }
     }
     else {
-        require('../util/FcmListenerLite')(client, DiscordTools.getGuild(interaction.guildId), steamId);
+        await startFcmSafely(client, `Lite listener ${steamId}`, () =>
+            require('../util/FcmListenerLite')(client, guild, steamId));
 
         const rustplus = client.rustplusInstances[guildId];
         if (rustplus && rustplus.team.leaderSteamId === steamId) {
@@ -288,9 +301,12 @@ async function setHosterCredentials(client, interaction, verifyId) {
         await DiscordMessages.sendServerMessage(guildId, rustplus.serverId);
     }
 
-    require('../util/FcmListener')(client, DiscordTools.getGuild(interaction.guildId));
+    const guild = DiscordTools.getGuild(interaction.guildId);
+    await startFcmSafely(client, `Host listener ${steamId}`, () =>
+        require('../util/FcmListener')(client, guild));
     if (prevHoster !== null) {
-        require('../util/FcmListenerLite')(client, DiscordTools.getGuild(interaction.guildId), prevHoster);
+        await startFcmSafely(client, `Lite listener ${prevHoster}`, () =>
+            require('../util/FcmListenerLite')(client, guild, prevHoster));
     }
 
     client.log(client.intlGet(null, 'infoCap'), client.intlGet(null, 'slashCommandValueChange', {

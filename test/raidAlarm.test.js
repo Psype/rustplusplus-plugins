@@ -45,7 +45,7 @@ function createContext({ notifyInGame = true, title = RaidAlarm.DEFAULT_TITLE,
     };
 }
 
-Test('uMod Raid Alarm queues in-game before an isolated Discord failure', async () => {
+Test('generic SmartAlarm notification queues in-game before an isolated Discord failure', async () => {
     const fixture = createContext();
     const handled = await RaidAlarm.handleFcmAlarm(fixture.context, {
         deduplicate: false,
@@ -63,7 +63,7 @@ Test('uMod Raid Alarm queues in-game before an isolated Discord failure', async 
     Assert.equal(failureLog[2], 'warn');
 });
 
-Test('uMod Raid Alarm honors the in-game Smart Alarm output setting without a vanilla entity', async () => {
+Test('generic SmartAlarm notification honors its in-game output setting without a vanilla entity', async () => {
     const fixture = createContext({ notifyInGame: false });
     const handled = await RaidAlarm.handleFcmAlarm(fixture.context, {
         deduplicate: false,

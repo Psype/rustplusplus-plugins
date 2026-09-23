@@ -4,7 +4,7 @@ const Test = require('node:test');
 const FcmAlarmRouter = require('../src/util/fcmAlarmRouter.js');
 const InGameChatHandler = require('../src/handlers/inGameChatHandler.js');
 
-Test('raw custom FCM alarm reaches the acknowledged Rust team-message boundary', async () => {
+Test('generic Rust+ SmartAlarm push reaches the acknowledged Rust team-message boundary', async () => {
     const sent = [];
     const logs = [];
     const serverId = '185.29.166.79-28083';
@@ -79,4 +79,40 @@ Test('malformed alarm FCM is rejected without throwing or entering legacy parsin
 
     Assert.equal(handled, true);
     Assert.ok(logs.some(values => String(values[1]).includes('body is not valid JSON')));
+});
+
+Test('FCM envelope diagnostics expose non-alarm channels without consuming them', async () => {
+    const logs = [];
+    const handled = await FcmAlarmRouter.handle({
+        log: (...values) => logs.push(values)
+    }, { id: 'guild' }, 'steam', {
+        appData: { channelId: 'team', body: '{}' }
+    }, { source: 'FCM LITE' });
+
+    Assert.equal(handled, false);
+    Assert.ok(logs.some(values => String(values[1]).includes('channel="team"')));
+});
+
+Test('generic SmartAlarm routing accepts normalized channel casing and an already parsed body', async () => {
+    const calls = [];
+    const handled = await FcmAlarmRouter.handle({
+        log: () => {}
+    }, { id: 'guild' }, 'steam', {
+        appData: {
+            channelId: ' ALARM ',
+            title: 'Server alert',
+            message: 'Custom producer payload',
+            body: { ip: '127.0.0.1', port: 28082 }
+        }
+    }, {
+        handleFcmAlarm: async context => {
+            calls.push(context);
+            return true;
+        }
+    });
+
+    Assert.equal(handled, true);
+    Assert.equal(calls.length, 1);
+    Assert.equal(calls[0].channelId, 'alarm');
+    Assert.deepEqual(calls[0].body, { ip: '127.0.0.1', port: 28082 });
 });

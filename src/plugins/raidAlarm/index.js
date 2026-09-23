@@ -1,8 +1,9 @@
 /*
-    Relay Rust+ SmartAlarm-channel FCM notifications to the active Rust team.
+    Relay generic Rust+ SmartAlarm push notifications to the active Rust team.
 
-    This covers vanilla Smart Alarms, haggbart Raid Alarm and server-specific
-    raid integrations without depending on a fragile title/body contract.
+    FCM is the bot transport, not the notification producer. This covers native
+    Smart Alarms and every server integration that emits Rust's native
+    NotificationChannel.SmartAlarm without depending on a mod or title contract.
 */
 
 const Path = require('path');

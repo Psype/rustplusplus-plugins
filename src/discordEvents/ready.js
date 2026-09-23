@@ -23,15 +23,16 @@ const Path = require('path');
 
 const BattlemetricsHandler = require('../handlers/battlemetricsHandler.js');
 const Config = require('../../config');
+const SyncRustplusDiscordState = require('../util/SyncRustplusDiscordState.js');
 
 module.exports = {
     name: 'ready',
     once: true,
     async execute(client) {
         for (const guild of client.guilds.cache) {
-            require('../util/CreateInstanceFile')(client, guild[1]);
+            if (!client.getInstance(guild[0])) require('../util/CreateInstanceFile')(client, guild[1]);
             require('../util/CreateCredentialsFile')(client, guild[1]);
-            client.fcmListenersLite[guild[0]] = new Object();
+            client.fcmListenersLite[guild[0]] ??= new Object();
         }
 
         client.loadGuildsIntl();
@@ -71,6 +72,11 @@ module.exports = {
             }
             await client.syncCredentialsWithUsers(guild);
             await client.setupGuild(guild);
+
+            const rustplus = client.rustplusInstances[guild.id];
+            if (rustplus && rustplus.isOperational) {
+                await SyncRustplusDiscordState.synchronize(client, rustplus);
+            }
         }
 
         if (Config.battlemetrics.token !== '') {

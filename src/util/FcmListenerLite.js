@@ -18,13 +18,14 @@
 
 */
 
-const PushReceiverClient = require('@liamcottle/push-receiver/src/client');
+const PushReceiverClient = require('./reliableFcmReceiver.js');
 
 const Constants = require('../util/constants.js');
 const DiscordEmbeds = require('../discordTools/discordEmbeds.js');
 const DiscordMessages = require('../discordTools/discordMessages.js');
 const DiscordTools = require('../discordTools/discordTools.js');
 const FcmAlarmRouter = require('./fcmAlarmRouter.js');
+const FcmListenerLifecycle = require('./fcmListenerLifecycle.js');
 const InstanceUtils = require('../util/instanceUtils.js');
 const Map = require('../util/map.js');
 const Scrape = require('../util/scrape.js');
@@ -62,11 +63,14 @@ module.exports = async (client, guild, steamId) => {
 
     const androidId = credentials[steamId].gcm.android_id;
     const securityToken = credentials[steamId].gcm.security_token;
-    client.fcmListenersLite[guild.id][steamId] = new PushReceiverClient(androidId, securityToken, [])
-    client.fcmListenersLite[guild.id][steamId].on('ON_DATA_RECEIVED', async (data) => {
+    const receiver = new PushReceiverClient(androidId, securityToken, []);
+    client.fcmListenersLite[guild.id][steamId] = receiver;
+    const identity = { source: 'FCM LITE', guildId: guild.id, steamId };
+    FcmListenerLifecycle.attach(receiver, client, identity);
+    receiver.on('ON_DATA_RECEIVED', async (data) => {
         if (await FcmAlarmRouter.handle(client, guild, steamId, data, { source: 'FCM LITE' })) return;
 
-        const appData = data.appData;
+        const appData = FcmAlarmRouter.normalizeAppData(data.appData);
 
         if (!appData) {
             client.log('FCM LITE', `GuildID: ${guild.id}, SteamID: ${hoster}, appData could not be found.`)
@@ -154,7 +158,15 @@ module.exports = async (client, guild, steamId) => {
         }
     });
 
-    client.fcmListenersLite[guild.id][steamId].connect();
+    try {
+        await FcmListenerLifecycle.connect(receiver, client, identity);
+    }
+    catch (error) {
+        if (client.fcmListenersLite[guild.id][steamId] === receiver) {
+            delete client.fcmListenersLite[guild.id][steamId];
+        }
+        throw error;
+    }
 };
 
 function isValidUrl(url) {

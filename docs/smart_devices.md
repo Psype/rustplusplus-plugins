@@ -67,11 +67,23 @@ By clicking the `@everyone` button you decide if the @everyone tag should be use
 <br><br>
 There are a few more settings for Smart Alarms that can be found in the `settings` channel. The first one lets you decide if Smart Alarms that are not part of the currently connected server still should notify when triggered. The second one lets you decide if Smart Alarms should notify In-Game when triggered.
 
-### uMod Raid Alarm (without a vanilla Smart Alarm)
+### Generic Rust+ SmartAlarm notifications
+
+The bot has two independent alarm inputs. A paired vanilla Smart Alarm can emit a Rust+ WebSocket entity-state
+broadcast. Separately, Rust/Facepunch distributes the native `NotificationChannel.SmartAlarm` push channel to paired
+accounts; the bot receives that push through its own registered FCM virtual device. FCM is the transport used by this
+standalone bot, not a dependency on a particular server mod.
+
+The listener is considered operational only after Google returns a valid MCS `LoginResponse`. It maintains the
+connection with heartbeats, acknowledges every delivered message and reconnects on a dead or explicitly closed
+socket; the corresponding startup log is `MCS login accepted; notification listener ready.`.
 
 Modded servers can use [haggbart's Raid Alarm](https://umod.org/plugins/raid-alarm) to send Rust+ raid notifications directly to players authorized on the Tool Cupboard. No vanilla Smart Alarm entity is required. Use the current `0.4.2` plugin, which calls `Util.TryGetServerPairingData()`, then run `/raidalarm test` in game.
 
-The bot recognizes the official `You're getting raided!` title or the canonical `<entity> destroyed at <grid>` body. For the currently connected server, the global Smart Alarm in-game setting also controls these raid messages. In-game delivery is queued before Discord and a Discord failure cannot cancel it. The bot's global in-game mute still takes precedence.
+Any server integration using the same native SmartAlarm notification channel follows the same route. The bot does not
+require the haggbart plugin, its command, a fixed notification title, or an entity ID. For the currently connected
+server, the global Smart Alarm in-game setting controls these messages. In-game delivery is queued before Discord and
+a Discord failure cannot cancel it. The bot's global in-game mute still takes precedence.
 
 
 ## Storage Monitors

@@ -38,6 +38,8 @@ const client = new DiscordBot({
     disableEveryone: false
 });
 
+/* Rust+ startup may run before Discord is ready; expose the client before build(). */
+exports.client = client;
 client.build();
 
 function createMissingDirectories() {
@@ -64,5 +66,3 @@ process.on('unhandledRejection', error => {
     }), 'error');
     console.log(error);
 });
-
-exports.client = client;
