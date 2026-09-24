@@ -127,3 +127,46 @@ Test('native tracker logs and delivers exact online/offline messages despite Dis
     Assert.deepEqual(logs[3], ['TRACKER', 'Tracked player Nirks just disconnected.', 'info']);
     Assert.equal(logs.filter(values => values[2] === 'warn').length, 4);
 });
+
+Test('legacy global settings never publish non-tracked BattleMetrics presence changes', async () => {
+    const guildId = 'test-global-presence-suppressed';
+    const instance = {
+        activeServer: '127.0.0.1-28082',
+        generalSettings: {
+            battlemetricsGlobalLogin: true,
+            battlemetricsGlobalLogout: true,
+            battlemetricsGlobalNameChanges: false
+        },
+        serverList: {
+            '127.0.0.1-28082': { battlemetricsId: '42' }
+        },
+        trackers: {}
+    };
+    const client = {
+        battlemetricsInstances: {
+            42: {
+                lastUpdateSuccessful: true,
+                players: {
+                    1001: { id: '1001', name: 'Untracked Player', status: true }
+                },
+                nameChangedPlayers: [],
+                newPlayers: ['1001'],
+                loginPlayers: ['1001'],
+                logoutPlayers: ['1001']
+            }
+        },
+        getInstance: () => instance
+    };
+
+    let deliveries = 0;
+    const original = DiscordMessages.sendBattlemetricsEventMessage;
+    DiscordMessages.sendBattlemetricsEventMessage = async () => { deliveries += 1; };
+    try {
+        await BattlemetricsHandler.handleBattlemetricsChanges(client, guildId);
+    }
+    finally {
+        DiscordMessages.sendBattlemetricsEventMessage = original;
+    }
+
+    Assert.equal(deliveries, 0);
+});

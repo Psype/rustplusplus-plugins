@@ -564,17 +564,6 @@ module.exports = {
                     customId: 'BattlemetricsGlobalNameChanges',
                     label: Client.client.intlGet(guildId, 'battlemetricsGlobalNameChangesCap'),
                     style: instance.generalSettings.battlemetricsGlobalNameChanges ? SUCCESS : DANGER
-                })),
-            new Discord.ActionRowBuilder().addComponents(
-                module.exports.getButton({
-                    customId: 'BattlemetricsGlobalLogin',
-                    label: Client.client.intlGet(guildId, 'battlemetricsGlobalLoginCap'),
-                    style: instance.generalSettings.battlemetricsGlobalLogin ? SUCCESS : DANGER
-                }),
-                module.exports.getButton({
-                    customId: 'BattlemetricsGlobalLogout',
-                    label: Client.client.intlGet(guildId, 'battlemetricsGlobalLogoutCap'),
-                    style: instance.generalSettings.battlemetricsGlobalLogout ? SUCCESS : DANGER
                 }))];
     },
 }

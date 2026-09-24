@@ -409,34 +409,20 @@ module.exports = async (client, interaction) => {
             components: DiscordButtons.getSubscribeToChangesBattlemetricsButtons(guildId)
         });
     }
-    else if (Config.battlemetrics.token !== '' && interaction.customId === 'BattlemetricsGlobalLogin') {
-        instance.generalSettings.battlemetricsGlobalLogin =
-            !instance.generalSettings.battlemetricsGlobalLogin;
+    else if (Config.battlemetrics.token !== '' &&
+        ['BattlemetricsGlobalLogin', 'BattlemetricsGlobalLogout'].includes(interaction.customId)) {
+        instance.generalSettings.battlemetricsGlobalLogin = false;
+        instance.generalSettings.battlemetricsGlobalLogout = false;
         client.setInstance(guildId, instance);
 
-        if (rustplus) rustplus.generalSettings.battlemetricsGlobalLogin =
-            instance.generalSettings.battlemetricsGlobalLogin;
+        if (rustplus) {
+            rustplus.generalSettings.battlemetricsGlobalLogin = false;
+            rustplus.generalSettings.battlemetricsGlobalLogout = false;
+        }
 
         client.log(client.intlGet(null, 'infoCap'), client.intlGet(null, 'buttonValueChange', {
             id: `${verifyId}`,
-            value: `${instance.generalSettings.battlemetricsGlobalLogin}`
-        }));
-
-        await client.interactionUpdate(interaction, {
-            components: DiscordButtons.getSubscribeToChangesBattlemetricsButtons(guildId)
-        });
-    }
-    else if (Config.battlemetrics.token !== '' && interaction.customId === 'BattlemetricsGlobalLogout') {
-        instance.generalSettings.battlemetricsGlobalLogout =
-            !instance.generalSettings.battlemetricsGlobalLogout;
-        client.setInstance(guildId, instance);
-
-        if (rustplus) rustplus.generalSettings.battlemetricsGlobalLogout =
-            instance.generalSettings.battlemetricsGlobalLogout;
-
-        client.log(client.intlGet(null, 'infoCap'), client.intlGet(null, 'buttonValueChange', {
-            id: `${verifyId}`,
-            value: `${instance.generalSettings.battlemetricsGlobalLogout}`
+            value: 'false'
         }));
 
         await client.interactionUpdate(interaction, {
