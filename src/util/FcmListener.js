@@ -76,6 +76,7 @@ module.exports = async (client, guild) => {
     receiver.on('ON_DATA_RECEIVED', async (data) => {
         EventDebugLogger.logFcmPayload(client, identity, data);
         FcmListenerLifecycle.markNotification(receiver, client, identity, data);
+        void PluginManager.onFcmNotification({ client, guild, steamId: hoster, data, source: identity.source });
         if (await FcmAlarmRouter.handle(client, guild, hoster, data)) return;
 
         const appData = FcmAlarmRouter.normalizeAppData(data.appData);

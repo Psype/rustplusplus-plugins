@@ -1,5 +1,11 @@
 # Credentials Documentation (Web Version)
 
+> **Legacy reference only.** The canonical supported flow is now
+> [`docs/credentials.md`](credentials.md) using local `rustplus.js fcm-register`. A browser extension or redirect URL
+> that returns only a Rust+ `AuthToken` is insufficient for this bot: it must also provision GCM/FCM/Expo and expose
+> the matching `fcm_credentials.gcm.androidId` and `securityToken`. Never paste a third-party bot registration token
+> into this project or publish a URL containing `token=`.
+
 > To be able to use an instance of the bot properly, you need to set up your Credentials. Adding these credentials makes it possible for you to pair with servers as well as connecting to them. Note that unlike the previous .exe version, the web version requires Chrome or Firefox browsers.
 
 ## **❗️Before You Start**

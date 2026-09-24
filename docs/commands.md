@@ -116,7 +116,7 @@ Subcommand | Options | Description | Required
 &nbsp; | `steam_id` | Steam ID. | `True`
 &nbsp; | `issued_date` | Optional legacy credential registration date. | `False`
 &nbsp; | `expire_date` | Optional legacy Rust+ auth-token expiry date. | `False`
-&nbsp; | `hoster` | Should be hoster. | `False`
+&nbsp; | `host` | Make this credential the Host listener. | `False`
 `remove` | &nbsp; | Remove Credentials. | &nbsp;
 &nbsp; | `steam_id` | Steam ID. | `False`
 `show` | &nbsp; | Show all registered Credentials. | &nbsp;
@@ -600,10 +600,12 @@ Subcommand | Description | Required
 ## **alarmstatus**
 
 > **Inspect the incoming raid-notification route.** Reports the Google MCS connection, whether a Facepunch push has
-> actually reached this bot process, whether an alarm has been observed since startup, whether the listener account
+> actually reached this bot process, whether a server-pair notification and an alarm have been observed since startup, whether the listener account
 > matches the active server pairing, whether raw FCM capture is enabled, whether in-game output is enabled or muted, and the five latest alarms with their
 > relative receipt times. `push unverified` is not treated
-> as connected: pair the active server once in Rust to produce a deterministic incoming notification.
+> as connected. If no server-pair notification has been observed, the command arms a non-blocking 120-second check:
+> use **Pair with Server** in Rust, then the bot reports success or timeout automatically in team chat. Only a pairing
+> notification for the active server and matching listener account completes the check.
 <br>Command: `!alarmstatus`
 
 

@@ -63,6 +63,8 @@ const plugins = Object.freeze([
         name: 'raid-alarm',
         install: context => RaidAlarm.logReadiness(context),
         handleCommand: context => RaidAlarm.handleCommand(context),
+        onFcmNotification: context => RaidAlarm.handleFcmNotification(
+            context, context.raidAlarmAdapters || {}),
         onFcmAlarm: context => RaidAlarm.handleFcmAlarm(context, context.raidAlarmAdapters || {})
     }),
     Object.freeze({
@@ -198,6 +200,7 @@ module.exports = Object.freeze({
         MapMarkerCapabilities.isNotificationSettingEnabled(settingName),
     isSlashCommandEnabled: commandName => MapMarkerCapabilities.isSlashCommandEnabled(commandName),
     install: context => runHook('install', context),
+    onFcmNotification: context => runHook('onFcmNotification', context),
     onBattlemetricsUpdated: context => runHook('onBattlemetricsUpdated', context),
     onTeamInfo: context => runHook('onTeamInfo', context),
     onTeamMessage: context => runHook('onTeamMessage', context),

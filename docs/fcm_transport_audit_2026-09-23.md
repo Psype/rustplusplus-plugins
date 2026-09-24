@@ -128,10 +128,11 @@ The runtime now records separate health evidence:
 - `alarm received` proves the canonical alarm channel reached the router;
 - `raid-alarm.in-game: delivered` proves Rust accepted the resulting team-chat message.
 
-`!alarmstatus` exposes the same states, active-server account matching, output/mute settings, and up to five alarms
-received since the process started. Re-pairing the active server while the listener is connected is the deterministic
-inbound test. If no pairing notification arrives, renew the device registration through the current `rustplus.js`
-`fcm-register` flow and replace the same SteamID64 through `/credentials add`.
+`!alarmstatus` exposes the same states, the last pairing receipt, active-server account matching, output/mute settings,
+and up to five alarms received since process start. Until a matching server-pair notification has been observed, it
+arms a non-blocking 120-second check and automatically reports receipt or timeout in Rust team chat. Only `pairing`
+with `body.type=server`, the active IP/port and the listener SteamID64 completes it. On timeout, renew the device
+registration through current `rustplus.js fcm-register` and replace the same SteamID64 through `/credentials add`.
 
 When file logging is enabled with `!logs on`, every decoded MCS data notification is also captured before lifecycle
 tracking, channel parsing, body parsing, deduplication or plugin routing in `logs/rustplusplus-fcm-raw.jsonl`. Each

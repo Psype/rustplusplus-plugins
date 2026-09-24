@@ -26,6 +26,21 @@ function cleanAlarmText(value) {
     return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim() : '';
 }
 
+function isServerPairing(data) {
+    const bodyValue = getAppDataValue(data, 'body');
+    let body = bodyValue;
+    if (typeof bodyValue === 'string') {
+        try {
+            body = JSON.parse(bodyValue);
+        }
+        catch (_error) {
+            return false;
+        }
+    }
+    return body && typeof body === 'object' && !Array.isArray(body) &&
+        String(body.type).toLowerCase() === 'server';
+}
+
 function attach(receiver, client, { source, guildId, steamId }) {
     const state = {
         source,
@@ -38,6 +53,8 @@ function attach(receiver, client, { source, guildId, steamId }) {
         notificationCount: 0,
         lastNotificationAt: null,
         lastChannelId: null,
+        serverPairingCount: 0,
+        lastServerPairingAt: null,
         alarmCount: 0,
         lastAlarmAt: null,
         recentAlarms: []
@@ -85,6 +102,10 @@ function markNotification(receiver, client, { source, guildId, steamId }, data) 
     state.notificationCount += 1;
     state.lastNotificationAt = now;
     state.lastChannelId = channelId;
+    if (channelId === 'pairing' && isServerPairing(data)) {
+        state.serverPairingCount += 1;
+        state.lastServerPairingAt = now;
+    }
     if (channelId === 'alarm') {
         state.alarmCount += 1;
         state.lastAlarmAt = now;

@@ -12,7 +12,9 @@ const LoggingSettings = require('../../util/loggingSettings.js');
 const DEFAULT_TITLE = 'You\'re getting raided!';
 const RAID_TITLE = /^(?:you(?:'|\u2019)?re|you\s+are)?\s*getting\s+raided!?\s*$/i;
 const DEDUPLICATION_MS = 5000;
+const PAIR_WATCH_MS = 120000;
 const recentAlerts = new Map();
+const pairWatches = new Map();
 
 function formatAge(timestamp, now = Date.now()) {
     const parsed = Date.parse(timestamp);
@@ -43,6 +45,7 @@ function getReadiness(client, guildId, rustplus, now = Date.now()) {
         mcs: state?.status || 'missing',
         push: state?.lastNotificationAt ? 'verified' : 'unverified',
         lastChannelId: state?.lastChannelId || null,
+        pairing: state?.lastServerPairingAt ? formatAge(state.lastServerPairingAt, now) : 'unseen',
         alarm: state?.lastAlarmAt ? formatAge(state.lastAlarmAt, now) : 'unseen',
         account,
         inGame,
@@ -55,19 +58,21 @@ function getReadiness(client, guildId, rustplus, now = Date.now()) {
 
 function readinessSignature(readiness) {
     return [readiness.mcs, readiness.push, readiness.lastChannelId || '-', readiness.alarm === 'unseen' ?
-        'unseen' : 'seen', readiness.account, readiness.inGame, readiness.mute, readiness.rawLog,
+        'unseen' : 'seen', readiness.pairing === 'unseen' ? 'unseen' : 'seen', readiness.account,
+    readiness.inGame, readiness.mute, readiness.rawLog,
     readiness.pairedVanillaAlarms].join('|');
 }
 
 function formatReadiness(readiness, compact = false) {
     if (compact) {
-        return `Alarm: MCS ${readiness.mcs} | push ${readiness.push} | alarm ${readiness.alarm} | ` +
-            `account ${readiness.account} | output ${readiness.inGame} | mute ${readiness.mute} | ` +
-            `rawlog ${readiness.rawLog}.`;
+        return `Alarm MCS ${readiness.mcs} | push ${readiness.push} | pair ${readiness.pairing} | ` +
+            `alarm ${readiness.alarm} | account ${readiness.account} | out ${readiness.inGame} | ` +
+            `mute ${readiness.mute} | raw ${readiness.rawLog}`;
     }
     return `mcs=${readiness.mcs}; push=${readiness.push}` +
         `${readiness.lastChannelId ? ` (last-channel=${readiness.lastChannelId})` : ''}; ` +
-        `alarm=${readiness.alarm}; account=${readiness.account}; in-game=${readiness.inGame}; ` +
+        `pair=${readiness.pairing}; alarm=${readiness.alarm}; account=${readiness.account}; ` +
+        `in-game=${readiness.inGame}; ` +
         `mute=${readiness.mute}; rawlog=${readiness.rawLog}; ` +
         `paired-vanilla-alarms=${readiness.pairedVanillaAlarms}.`;
 }
@@ -213,13 +218,124 @@ async function sendInGameAlert(rustplus, text) {
     if (result === false) throw new Error('Rust+ rejected the in-game alarm.');
 }
 
+function getAppDataValue(data, key) {
+    const appData = data && data.appData;
+    if (Array.isArray(appData)) return appData.find(item => item && item.key === key)?.value;
+    return appData && typeof appData === 'object' ? appData[key] : undefined;
+}
+
+function parseNotificationBody(data) {
+    const bodyValue = getAppDataValue(data, 'body');
+    if (bodyValue && typeof bodyValue === 'object' && !Array.isArray(bodyValue)) return bodyValue;
+    if (typeof bodyValue !== 'string') return null;
+    try {
+        const body = JSON.parse(bodyValue);
+        return body && typeof body === 'object' && !Array.isArray(body) ? body : null;
+    }
+    catch (_error) {
+        return null;
+    }
+}
+
+function clearPairWatch(guildId, watch) {
+    if (watch.timer) watch.scheduler.clearTimeout(watch.timer);
+    if (pairWatches.get(guildId) === watch) pairWatches.delete(guildId);
+}
+
+async function sendPairCheckResult(watch, text, outcome) {
+    const rustplus = watch.client.rustplusInstances && watch.client.rustplusInstances[watch.guildId];
+    if (!rustplus || rustplus.serverId !== watch.serverId) {
+        watch.client.log('PLUGIN', `GuildID: ${watch.guildId}, raid-alarm.pair-check: ${outcome}; ` +
+            'active Rust+ server is unavailable.', 'warn');
+        return false;
+    }
+    return deliver(watch.client, watch.guildId, `pair-check-${outcome}`, () =>
+        sendInGameAlert(rustplus, text));
+}
+
+async function expirePairWatch(guildId, watch) {
+    if (pairWatches.get(guildId) !== watch) return;
+    clearPairWatch(guildId, watch);
+    watch.client.log('PLUGIN', `GuildID: ${guildId}, raid-alarm.pair-check: timed out after 120s.`, 'warn');
+    await sendPairCheckResult(watch,
+        'Pairing not received within 120s; renew the FCM registration.', 'timeout');
+}
+
+function armPairWatch(context, readiness, adapters = {}) {
+    const now = typeof adapters.now === 'function' ? adapters.now() : Date.now();
+    const current = pairWatches.get(context.guildId);
+    if (current && current.expiresAt > now) {
+        return `Pair check already active for ${Math.ceil((current.expiresAt - now) / 1000)}s.`;
+    }
+    if (current) clearPairWatch(context.guildId, current);
+
+    const listener = context.client.fcmListeners && context.client.fcmListeners[context.guildId];
+    const state = listener && listener.rppConnectionState;
+    if (!state || !['connected', 'connecting', 'reconnecting'].includes(state.status)) {
+        return `Pair check unavailable: FCM listener ${readiness.mcs}.`;
+    }
+    if (readiness.account !== 'match') {
+        return `Pair check unavailable: listener account ${readiness.account}.`;
+    }
+
+    const scheduler = adapters.scheduler || { setTimeout, clearTimeout };
+    const watch = {
+        client: context.client,
+        guildId: context.guildId,
+        serverId: context.rustplus.serverId,
+        steamId: String(state.steamId),
+        expiresAt: now + PAIR_WATCH_MS,
+        scheduler,
+        timer: null
+    };
+    pairWatches.set(context.guildId, watch);
+    watch.timer = scheduler.setTimeout(() => expirePairWatch(context.guildId, watch), PAIR_WATCH_MS);
+    if (watch.timer && typeof watch.timer.unref === 'function') watch.timer.unref();
+    context.client.log('PLUGIN', `GuildID: ${context.guildId}, raid-alarm.pair-check: armed for 120s ` +
+        `on ${watch.serverId}, SteamID: ${watch.steamId}.`);
+    return 'Pair check armed for 120s. Use Pair with Server now.';
+}
+
+async function handleFcmNotification(context, adapters = {}) {
+    const guildId = context && context.guild && context.guild.id;
+    const watch = guildId && pairWatches.get(guildId);
+    if (!watch) return false;
+
+    const now = typeof adapters.now === 'function' ? adapters.now() : Date.now();
+    if (now >= watch.expiresAt) {
+        await expirePairWatch(guildId, watch);
+        return false;
+    }
+    const channelId = getAppDataValue(context.data, 'channelId');
+    if (typeof channelId !== 'string' || channelId.trim().toLowerCase() !== 'pairing') return false;
+    if (String(context.steamId) !== watch.steamId) return false;
+
+    const body = parseNotificationBody(context.data);
+    if (!body || String(body.type).toLowerCase() !== 'server' ||
+        typeof body.ip !== 'string' || !['string', 'number'].includes(typeof body.port) ||
+        getServerId(body) !== watch.serverId) return false;
+    if (body.playerId !== undefined && String(body.playerId) !== watch.steamId) return false;
+
+    clearPairWatch(guildId, watch);
+    watch.client.log('PLUGIN', `GuildID: ${guildId}, raid-alarm.pair-check: pairing received for ` +
+        `${watch.serverId}, SteamID: ${watch.steamId}, source: ${context.source || 'FCM'}.`);
+    await sendPairCheckResult(watch,
+        'Pairing received: Facepunch push delivery verified.', 'received');
+    return true;
+}
+
 async function handleCommand(context) {
     const alarmStatus = `${context.prefix}alarmstatus`.toLowerCase();
     if (context.commandLowerCase === alarmStatus) {
         const readiness = getReadiness(context.client, context.guildId, context.rustplus);
+        const response = [formatReadiness(readiness, true)];
+        if (readiness.pairing === 'unseen') {
+            response.push(armPairWatch(context, readiness, context.raidAlarmAdapters || {}));
+        }
+        response.push(...formatAlarmHistory(readiness));
         return Object.freeze({
             handled: true,
-            response: Object.freeze([formatReadiness(readiness, true), ...formatAlarmHistory(readiness)]),
+            response: Object.freeze(response),
             logType: 'AlarmStatus'
         });
     }
@@ -307,12 +423,14 @@ async function handleFcmAlarm(context, adapters = {}) {
 
 module.exports = Object.freeze({
     DEFAULT_TITLE,
+    PAIR_WATCH_MS,
     formatAlarmHistory,
     formatReadiness,
     getReadiness,
     getText,
     handleCommand,
     handleFcmAlarm,
+    handleFcmNotification,
     isRaidTitle,
     logReadiness,
     matches

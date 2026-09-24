@@ -8,13 +8,24 @@ The old rustplusplus credential application is no longer the canonical registrat
 [`rustplus.js` FCM registration flow](https://github.com/liamcottle/rustplus.js#using-the-command-line-tool) on a trusted
 desktop with Chrome installed:
 
-```bash
-npx @liamcottle/rustplus.js --config-file=rustplus.config.json fcm-register
+```powershell
+npx.cmd --yes @liamcottle/rustplus.js@latest --config-file=rustplus.config.json fcm-register
 ```
 
 This performs the complete required chain: Google GCM/Firebase registration, FCM token creation, Expo token exchange,
 Steam login, and registration of that Expo token with the Facepunch Rust Companion service. Keep the resulting JSON
 private; it contains long-lived push credentials.
+
+Run it on a trusted desktop, not the headless dedicated server. The CLI starts a loopback callback on port `3000` and
+launches a temporary Chrome profile with browser security disabled so it can emulate the Rust app's
+`ReactNativeWebView.postMessage` login bridge. Close that temporary browser after completion. If port 3000 is already
+occupied, stop the local process using it before retrying.
+
+Opening `https://companion-rust.facepunch.com/login` or using a Chrome extension can yield a short-lived Rust+
+`AuthToken`, but that token alone is insufficient: the bot listener needs the separately generated GCM `androidId`
+and `securityToken`, and the corresponding FCM/Expo push token must be registered with Facepunch. Do not paste a token
+captured for another bot into this project and never publish a registration URL containing `token=`. The upstream CLI
+performs the complete device registration locally.
 
 Copy only these values from the generated file into Discord `/credentials add`:
 

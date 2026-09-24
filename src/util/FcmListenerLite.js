@@ -29,6 +29,7 @@ const FcmAlarmRouter = require('./fcmAlarmRouter.js');
 const FcmListenerLifecycle = require('./fcmListenerLifecycle.js');
 const InstanceUtils = require('../util/instanceUtils.js');
 const Map = require('../util/map.js');
+const PluginManager = require('../plugins/pluginManager.js');
 const Scrape = require('../util/scrape.js');
 
 module.exports = async (client, guild, steamId) => {
@@ -71,6 +72,7 @@ module.exports = async (client, guild, steamId) => {
     receiver.on('ON_DATA_RECEIVED', async (data) => {
         EventDebugLogger.logFcmPayload(client, identity, data);
         FcmListenerLifecycle.markNotification(receiver, client, identity, data);
+        void PluginManager.onFcmNotification({ client, guild, steamId, data, source: identity.source });
         if (await FcmAlarmRouter.handle(client, guild, steamId, data, { source: 'FCM LITE' })) return;
 
         const appData = FcmAlarmRouter.normalizeAppData(data.appData);

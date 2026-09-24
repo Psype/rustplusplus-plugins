@@ -60,14 +60,19 @@ Test('FCM lifecycle accepts object appData and only announces delivery proof onc
     const state = FcmListenerLifecycle.attach(receiver, client, identity);
 
     FcmListenerLifecycle.markNotification(receiver, client, identity, {
-        appData: { channelId: 'PAIRING' }
+        appData: { channelId: 'PAIRING', body: { type: 'server' } }
+    });
+    FcmListenerLifecycle.markNotification(receiver, client, identity, {
+        appData: { channelId: 'pairing', body: { type: 'entity' } }
     });
     FcmListenerLifecycle.markNotification(receiver, client, identity, {
         appData: { channelId: 'alarm' }
     });
 
-    Assert.equal(state.notificationCount, 2);
+    Assert.equal(state.notificationCount, 3);
     Assert.equal(state.lastChannelId, 'alarm');
+    Assert.equal(state.serverPairingCount, 1);
+    Assert.ok(state.lastServerPairingAt);
     Assert.equal(state.alarmCount, 1);
     Assert.equal(logs.filter(entry => String(entry[1]).includes('push delivery verified')).length, 1);
 });

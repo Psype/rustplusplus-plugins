@@ -46,7 +46,7 @@
 - **player/players** - `!player [name]` or `!players` - Get Battlemetrics information about players.
 - **pop** - `!pop` - Get population of the server.
 - **prox** - `!prox` - Display teammates that are nearby.
-- **alarmstatus** - `!alarmstatus` - Show FCM/MCS transport, Facepunch push-delivery proof, raw FCM capture state, active-server account match, in-game alarm output state, and the five latest alarms received by this process.
+- **alarmstatus** - `!alarmstatus` - Show alarm transport/history and, until pairing is proven, watch 120 seconds for a matching active-server Pair notification.
 - **raidtest** - `!raidtest` - Send a critical test alert through the same immediate Rust team-chat path used by FCM raid alarms.
 - **record** - `!record [steamid] [pseudonym]` - Add a pseudonym; player languages are edited directly in the teammate CSV.
 - **recycle** - `!recycle [item] [quantity]` - Display the output of recycling an item.

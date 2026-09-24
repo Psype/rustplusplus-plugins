@@ -143,6 +143,7 @@ Test('alarmstatus distinguishes transport proof and returns five timestamped ala
             rppConnectionState: {
                 status: 'connected', steamId: '76561197975819827',
                 lastNotificationAt: '2026-09-24T10:00:00.000Z', lastChannelId: 'alarm',
+                lastServerPairingAt: '2026-09-24T09:59:00.000Z',
                 lastAlarmAt: '2026-09-24T10:00:00.000Z',
                 recentAlarms: Array.from({ length: 6 }, (_, index) => ({
                     receivedAt: `2026-09-24T0${9 - index}:00:00.000Z`,
@@ -169,7 +170,109 @@ Test('alarmstatus distinguishes transport proof and returns five timestamped ala
     Assert.equal(response.response.length, 6);
     Assert.match(response.response[0], /MCS connected/);
     Assert.match(response.response[0], /push verified/);
+    Assert.match(response.response[0], /pair \d+[smhd]/);
     Assert.match(response.response[0], /account match/);
-    Assert.match(response.response[0], /rawlog (?:on|off)/);
+    Assert.match(response.response[0], /raw (?:on|off)/);
     Assert.match(response.response[1], /Alarm 1: wall destroyed/);
+});
+
+Test('alarmstatus arms a 120-second pairing proof and accepts only the matching server/account', async () => {
+    const fixture = createContext();
+    let timeoutCallback = null;
+    let timeoutCleared = false;
+    const scheduler = {
+        setTimeout: callback => {
+            timeoutCallback = callback;
+            return { unref: () => undefined };
+        },
+        clearTimeout: () => { timeoutCleared = true; }
+    };
+    fixture.context.client.fcmListeners = {
+        guild: { rppConnectionState: { status: 'connected', steamId: '76561197975819827' } }
+    };
+    fixture.context.client.getInstance().serverList['127.0.0.1-28082'].steamId = '76561197975819827';
+    fixture.context.client.getInstance().serverList['127.0.0.1-28082'].alarms = {};
+
+    const response = await RaidAlarm.handleCommand({
+        source: 'inGame',
+        client: fixture.context.client,
+        rustplus: fixture.context.client.rustplusInstances.guild,
+        guildId: 'guild',
+        command: '!alarmstatus',
+        commandLowerCase: '!alarmstatus',
+        prefix: '!',
+        raidAlarmAdapters: { now: () => 1000, scheduler }
+    });
+
+    Assert.match(response.response[0], /pair unseen/);
+    Assert.equal(response.response[1], 'Pair check armed for 120s. Use Pair with Server now.');
+    Assert.equal(typeof timeoutCallback, 'function');
+
+    const mismatched = await RaidAlarm.handleFcmNotification({
+        client: fixture.context.client,
+        guild: { id: 'guild' },
+        steamId: '76561197975819827',
+        source: 'FCM Host',
+        data: { appData: [
+            { key: 'channelId', value: 'pairing' },
+            { key: 'body', value: JSON.stringify({
+                type: 'server', ip: '127.0.0.2', port: 28082, playerId: '76561197975819827'
+            }) }
+        ] }
+    }, { now: () => 2000 });
+    Assert.equal(mismatched, false);
+    Assert.deepEqual(fixture.calls, []);
+
+    const matched = await RaidAlarm.handleFcmNotification({
+        client: fixture.context.client,
+        guild: { id: 'guild' },
+        steamId: '76561197975819827',
+        source: 'FCM Host',
+        data: { appData: [
+            { key: 'channelId', value: 'PAIRING' },
+            { key: 'body', value: JSON.stringify({
+                type: 'server', ip: '127.0.0.1', port: '28082', playerId: '76561197975819827'
+            }) }
+        ] }
+    }, { now: () => 3000 });
+
+    Assert.equal(matched, true);
+    Assert.equal(timeoutCleared, true);
+    Assert.deepEqual(fixture.calls, [{
+        output: 'in-game', text: 'Pairing received: Facepunch push delivery verified.'
+    }]);
+});
+
+Test('pairing proof timeout reports failure without retry', async () => {
+    const fixture = createContext();
+    let timeoutCallback = null;
+    const scheduler = {
+        setTimeout: callback => {
+            timeoutCallback = callback;
+            return { unref: () => undefined };
+        },
+        clearTimeout: () => undefined
+    };
+    fixture.context.client.fcmListeners = {
+        guild: { rppConnectionState: { status: 'connected', steamId: '76561197975819827' } }
+    };
+    fixture.context.client.getInstance().serverList['127.0.0.1-28082'].steamId = '76561197975819827';
+    fixture.context.client.getInstance().serverList['127.0.0.1-28082'].alarms = {};
+
+    await RaidAlarm.handleCommand({
+        source: 'inGame',
+        client: fixture.context.client,
+        rustplus: fixture.context.client.rustplusInstances.guild,
+        guildId: 'guild',
+        command: '!alarmstatus',
+        commandLowerCase: '!alarmstatus',
+        prefix: '!',
+        raidAlarmAdapters: { now: () => 200000, scheduler }
+    });
+    await timeoutCallback();
+
+    Assert.deepEqual(fixture.calls, [{
+        output: 'in-game', text: 'Pairing not received within 120s; renew the FCM registration.'
+    }]);
+    Assert.equal(fixture.logs.filter(log => String(log[1]).includes('timed out after 120s')).length, 1);
 });
