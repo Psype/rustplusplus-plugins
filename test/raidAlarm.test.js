@@ -135,3 +135,41 @@ Test('raidtest uses the same critical in-game route', async () => {
     Assert.equal(response.response, null);
     Assert.deepEqual(fixture.calls, [{ output: 'in-game', text: '[RAID TEST] Base under attack' }]);
 });
+
+Test('alarmstatus distinguishes transport proof and returns five timestamped alarms', async () => {
+    const fixture = createContext();
+    fixture.context.client.fcmListeners = {
+        guild: {
+            rppConnectionState: {
+                status: 'connected', steamId: '76561197975819827',
+                lastNotificationAt: '2026-09-24T10:00:00.000Z', lastChannelId: 'alarm',
+                lastAlarmAt: '2026-09-24T10:00:00.000Z',
+                recentAlarms: Array.from({ length: 6 }, (_, index) => ({
+                    receivedAt: `2026-09-24T0${9 - index}:00:00.000Z`,
+                    title: `Alarm ${index + 1}`,
+                    message: 'wall destroyed'
+                }))
+            }
+        }
+    };
+    fixture.context.client.getInstance().serverList['127.0.0.1-28082'].steamId = '76561197975819827';
+    fixture.context.client.getInstance().serverList['127.0.0.1-28082'].alarms = {};
+
+    const response = await RaidAlarm.handleCommand({
+        source: 'inGame',
+        client: fixture.context.client,
+        rustplus: fixture.context.client.rustplusInstances.guild,
+        guildId: 'guild',
+        command: '!alarmstatus',
+        commandLowerCase: '!alarmstatus',
+        prefix: '!'
+    });
+
+    Assert.equal(response.handled, true);
+    Assert.equal(response.response.length, 6);
+    Assert.match(response.response[0], /MCS connected/);
+    Assert.match(response.response[0], /push verified/);
+    Assert.match(response.response[0], /account match/);
+    Assert.match(response.response[0], /rawlog (?:on|off)/);
+    Assert.match(response.response[1], /Alarm 1: wall destroyed/);
+});

@@ -314,6 +314,7 @@
     "createGroupCap": "СОЗДАТЬ ГРУППУ ПЕРЕКЛЮЧАТЕЛЕЙ",
     "createTrackerCap": "СОЗДАТЬ ТРЕКЕР",
     "credentialsAddedSuccessfully": "Учетные данные FCM для steamId: {steamId}, были успешно добавлены!",
+    "credentialsUpdatedSuccessfully": "Учетные данные FCM для steamId: {steamId} успешно обновлены!",
     "credentialsAlreadyRegistered": "Учетные данные FCM для SteamId: {steamId} уже зарегистрированы!",
     "credentialsCannotStartLiteAlreadyHoster": "Невозможно запустить FCM Listener Lite для steamId: {steamId}, так как он уже лидер!",
     "credentialsDoNotExist": "Учетные данные FCM для SteamID: {steamId} не существует.",

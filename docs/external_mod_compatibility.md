@@ -46,9 +46,15 @@ with the source SteamID, server endpoint, type, title, and message; malformed bo
 listener.
 
 `!raidtest` validates only the outbound Rust+ team-chat boundary; it cannot prove that Google FCM is delivering the
-server notification. FCM lifecycle logs must also show `MCS login accepted; notification listener ready.`. Every
-received envelope logs its channel and key names before routing, so an upstream channel/shape change is visible even
-when it is not recognized as an alarm.
+server notification. FCM lifecycle logs separate `MCS login accepted; transport ready` from the first actual
+`Facepunch push delivery verified`. Every received envelope logs its channel and key names before routing, so an
+upstream channel/shape change is visible even when it is not recognized as an alarm.
+
+`!alarmstatus` exposes those two states separately, reports whether the listener account matches the active server
+pairing and whether in-game alarm output is enabled/muted, then lists up to five alarms received since the current
+process started. Pair the active server once while the listener is connected to generate a deterministic inbound
+`pairing` notification. If transport connects but that notification never arrives, renew the Facepunch device
+registration instead of changing the alarm parser.
 
 The published source contract and the bot adapter are verified by deterministic tests. Runtime compilation of the C#
 plugin against the September 2026 Rust/Oxide assemblies is not verified in this repository because those assemblies

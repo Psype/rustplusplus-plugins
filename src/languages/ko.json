@@ -314,6 +314,7 @@
     "createGroupCap": "스위치 그룹 만들기",
     "createTrackerCap": "추적기 만들기",
     "credentialsAddedSuccessfully": "{steamId}에 대한 FCM 자격 증명이 추가되었습니다.",
+    "credentialsUpdatedSuccessfully": "{steamId}의 FCM 자격 증명이 성공적으로 갱신되었습니다.",
     "credentialsAlreadyRegistered": "steamId에 대한 FCM 자격 증명: {steamId}가 이미 등록되었습니다.",
     "credentialsCannotStartLiteAlreadyHoster": "steamId에 대한 FCM 자격 증명을 시작할 수 없습니다: {steamId} 이미 등록됨.",
     "credentialsDoNotExist": "steamId에 대한 FCM 자격 증명: {steamId}가 없습니다.",

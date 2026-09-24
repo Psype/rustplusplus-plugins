@@ -10,6 +10,7 @@ const LoggingSettings = require('./loggingSettings.js');
 
 const LOG_DIR = Path.join(process.cwd(), 'logs');
 const EVENT_LOG_PATH = Path.join(LOG_DIR, 'rustplusplus-events.log');
+const FCM_RAW_LOG_PATH = Path.join(LOG_DIR, 'rustplusplus-fcm-raw.jsonl');
 const MARKER_HISTORY_PATH = Path.join(LOG_DIR, 'rustplus-markers-history.log');
 const RAW_SOCKET_LOG_PATH = Path.join(LOG_DIR, 'rustplusplus-raw-socket.txt');
 
@@ -17,14 +18,17 @@ function stringify(value) {
     return JSON.stringify(value, (_key, val) => typeof val === 'bigint' ? val.toString() : val);
 }
 
-function ensureLogDir() {
-    Fs.mkdirSync(LOG_DIR, { recursive: true });
+function ensureLogDir(path = LOG_DIR, filesystem = Fs) {
+    filesystem.mkdirSync(path, { recursive: true });
 }
 
-function appendJsonLine(path, data) {
-    if (!LoggingSettings.isEnabled()) return;
-    ensureLogDir();
-    Fs.appendFileSync(path, `${stringify(data)}\n`);
+function appendJsonLine(path, data, dependencies = {}) {
+    const isEnabled = dependencies.isEnabled || LoggingSettings.isEnabled;
+    if (!isEnabled()) return false;
+    const filesystem = dependencies.filesystem || Fs;
+    ensureLogDir(Path.dirname(path), filesystem);
+    filesystem.appendFileSync(path, `${stringify(data)}\n`, 'utf8');
+    return true;
 }
 
 function getRawDataBuffer(data) {
@@ -54,6 +58,7 @@ function getBase(rustplus, source) {
 
 module.exports = {
     EVENT_LOG_PATH: EVENT_LOG_PATH,
+    FCM_RAW_LOG_PATH: FCM_RAW_LOG_PATH,
     MARKER_HISTORY_PATH: MARKER_HISTORY_PATH,
     RAW_SOCKET_LOG_PATH: RAW_SOCKET_LOG_PATH,
 
@@ -67,7 +72,7 @@ module.exports = {
                 appendRawSocketText(rustplus, 'inbound', data);
             }
             catch (e) {
-                rustplus.log('DEBUG', `Could not append raw inbound websocket data: ${e}`, 'warning');
+                rustplus.log('DEBUG', `Could not append raw inbound websocket data: ${e}`, 'warn');
             }
         });
 
@@ -77,7 +82,7 @@ module.exports = {
                 appendRawSocketText(rustplus, 'outbound', data);
             }
             catch (e) {
-                rustplus.log('DEBUG', `Could not append raw outbound websocket data: ${e}`, 'warning');
+                rustplus.log('DEBUG', `Could not append raw outbound websocket data: ${e}`, 'warn');
             }
             return originalSend(data, ...args);
         };
@@ -91,7 +96,24 @@ module.exports = {
             });
         }
         catch (e) {
-            rustplus.log('DEBUG', `Could not append Rust+ debug event: ${e}`, 'warning');
+            rustplus.log('DEBUG', `Could not append Rust+ debug event: ${e}`, 'warn');
+        }
+    },
+
+    logFcmPayload: function (client, identity, payload, dependencies = {}) {
+        try {
+            const now = dependencies.now || (() => new Date());
+            return appendJsonLine(dependencies.path || FCM_RAW_LOG_PATH, {
+                timestamp: now().toISOString(),
+                source: identity.source,
+                guildId: String(identity.guildId),
+                steamId: String(identity.steamId),
+                payload: payload
+            }, dependencies);
+        }
+        catch (e) {
+            client.log('DEBUG', `Could not append raw FCM notification: ${e}`, 'warn');
+            return false;
         }
     },
 
@@ -109,7 +131,7 @@ module.exports = {
             });
         }
         catch (e) {
-            rustplus.log('DEBUG', `Could not append Rust+ marker debug event: ${e}`, 'warning');
+            rustplus.log('DEBUG', `Could not append Rust+ marker debug event: ${e}`, 'warn');
         }
     }
 };

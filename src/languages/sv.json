@@ -314,6 +314,7 @@
     "createGroupCap": "SKAPA GRUPP",
     "createTrackerCap": "SKAPA SPÅRARE",
     "credentialsAddedSuccessfully": "FCM-uppgifter för steamId: {steamId} har lagts till framgångsrikt!",
+    "credentialsUpdatedSuccessfully": "FCM-uppgifter för steamId: {steamId} har förnyats!",
     "credentialsAlreadyRegistered": "FCM-uppgifter för steamId: {steamId} är redan registrerade!",
     "credentialsCannotStartLiteAlreadyHoster": "Kan inte starta FCM-lyssnare för steamId: {steamId}. Är redan värd.",
     "credentialsDoNotExist": "FCM-uppgifter för steamId: {steamId} finns inte.",

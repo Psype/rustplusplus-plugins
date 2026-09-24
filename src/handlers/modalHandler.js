@@ -24,6 +24,7 @@ const Battlemetrics = require('../structures/Battlemetrics');
 const Constants = require('../util/constants.js');
 const DiscordMessages = require('../discordTools/discordMessages.js');
 const Keywords = require('../util/keywords.js');
+const PluginManager = require('../plugins/pluginManager.js');
 const Scrape = require('../util/scrape.js');
 
 module.exports = async (client, interaction) => {
@@ -43,6 +44,10 @@ module.exports = async (client, interaction) => {
     }
 
     if (interaction.customId.startsWith('CustomTimersEdit')) {
+        if (!PluginManager.isDiscordOptionEnabled('customTimers')) {
+            await interaction.deferUpdate();
+            return;
+        }
         const ids = JSON.parse(interaction.customId.replace('CustomTimersEdit', ''));
         const server = instance.serverList[ids.serverId];
         const cargoShipEgressTime = parseInt(interaction.fields.getTextInputValue('CargoShipEgressTime'));

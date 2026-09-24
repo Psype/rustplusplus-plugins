@@ -107,8 +107,35 @@ sudo journalctl -u rustplusplus --since "2026-09-01" -o short-iso --no-pager \
 After deployment, a healthy startup must contain:
 
 ```text
-MCS login accepted; notification listener ready.
+MCS login accepted; transport ready. Facepunch push delivery is not verified until the first notification is received.
 ```
 
 A real raid notification must then show `notification received: channel="alarm"`, `alarm received`, and
 `raid-alarm.in-game: delivered`. `!raidtest` validates only the outbound team-chat half.
+
+## 2026-09-24 production-log follow-up
+
+The supplied 2026-09-23/24 journal shows repeated accepted MCS logins and successful reconnects, but no
+`notification received` entry on any channel. This proves the Google transport can authenticate; it does not prove
+that Facepunch still targets the bot's Expo/FCM device registration. Current `rustplus.js` and the maintained
+RustPlusApi implementation still use `channelId=alarm` and the same GCM/FCM/Expo/Facepunch registration chain. No
+evidence of a new alarm payload or transport was found.
+
+The runtime now records separate health evidence:
+
+- `MCS login accepted; transport ready` means Google accepted the GCM identity;
+- `Facepunch push delivery verified` appears only after an actual Rust+ notification reaches this process;
+- `alarm received` proves the canonical alarm channel reached the router;
+- `raid-alarm.in-game: delivered` proves Rust accepted the resulting team-chat message.
+
+`!alarmstatus` exposes the same states, active-server account matching, output/mute settings, and up to five alarms
+received since the process started. Re-pairing the active server while the listener is connected is the deterministic
+inbound test. If no pairing notification arrives, renew the device registration through the current `rustplus.js`
+`fcm-register` flow and replace the same SteamID64 through `/credentials add`.
+
+When file logging is enabled with `!logs on`, every decoded MCS data notification is also captured before lifecycle
+tracking, channel parsing, body parsing, deduplication or plugin routing in `logs/rustplusplus-fcm-raw.jsonl`. Each
+LF-terminated JSON line contains the UTC receipt time, listener source, guild ID, SteamID64 and the untouched decoded
+FCM envelope. This is the canonical capture for discovering a changed alarm channel/body contract. `!alarmstatus`
+reports this as `rawlog on|off`. The file can include team text, server addresses, Steam IDs and pairing tokens and
+must be treated as private diagnostic material.

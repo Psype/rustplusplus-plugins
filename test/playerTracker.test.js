@@ -26,6 +26,7 @@ function createHarness(t, players = {}) {
         trackers: {}
     };
     const logs = [];
+    const identityHistory = [];
     const battlemetrics = {
         lastUpdateSuccessful: true,
         streamerMode: false,
@@ -49,7 +50,17 @@ function createHarness(t, players = {}) {
         dataDirectory,
         token: 'token',
         now: () => new Date(FIXED_NOW),
-        warBanditsProvider: null
+        warBanditsProvider: null,
+        identityHistory: {
+            recordIdentity: (scope, identity) => {
+                const previous = identityHistory.at(-1);
+                if (previous && previous.scope.serverId === scope.serverId &&
+                    previous.identity.steamId === identity.steamId &&
+                    previous.identity.battlemetricsPlayerId === identity.battlemetricsPlayerId &&
+                    previous.identity.name === identity.name) return;
+                identityHistory.push({ scope, identity });
+            }
+        }
     };
 
     return {
@@ -58,6 +69,7 @@ function createHarness(t, players = {}) {
         dependencies,
         getInstance: () => instance,
         getSave: () => JSON.parse(Fs.readFileSync(Path.join(dataDirectory, 'guild-42.json'), 'utf8')),
+        identityHistory,
         logs,
         rustplus
     };
@@ -540,6 +552,10 @@ Test('poll sync, tracklist and untrack preserve last seen without deleting the n
     Assert.equal(harness.getSave().players[0].status, 'offline');
     Assert.equal(harness.getSave().players[0].lastSeenAt, '2026-09-09T11:50:00.000Z');
     Assert.equal(harness.getInstance().trackers[7].players[0].name, 'Nirks Renamed');
+    Assert.deepEqual(harness.identityHistory.map(entry => entry.identity.name), ['Nirks', 'Nirks Renamed']);
+    Assert.equal(harness.identityHistory.every(entry => entry.identity.steamId === '76561198154738095'), true);
+    Assert.equal(harness.identityHistory.every(entry => entry.identity.battlemetricsPlayerId === '1001'), true);
+    Assert.equal(harness.identityHistory.every(entry => entry.scope.serverId === '127.0.0.1-28082'), true);
 
     const removed = await PlayerTracker.handleCommand(command(harness, '!untrack 1001'));
     Assert.match(removed.response, /^Stopped tracking: Nirks Renamed/);

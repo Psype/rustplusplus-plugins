@@ -314,6 +314,7 @@
     "createGroupCap": "GRUP OLUŞTUR",
     "createTrackerCap": "TAKİPÇİ OLUŞTUR",
     "credentialsAddedSuccessfully": "FCM Bilgileri bu Steam64ID için {steamId} başarıyla kaydedildi!",
+    "credentialsUpdatedSuccessfully": "{steamId} Steam64ID için FCM bilgileri başarıyla yenilendi!",
     "credentialsAlreadyRegistered": "FCM Bilgileri bu Steam64ID için {steamId} zaten kayıtlı!",
     "credentialsCannotStartLiteAlreadyHoster": "FCM takipçisi başlatılamıyor. {steamId} Zaten yayıncı.",
     "credentialsDoNotExist": "FCM Bilgileri bu Steam64ID için: {steamId} bulunamıyor.",

@@ -30,10 +30,46 @@ Test('FCM lifecycle exposes connected and reconnecting states', async () => {
     await FcmListenerLifecycle.connect(receiver, client, identity);
     receiver.emit('connect');
     Assert.equal(state.status, 'connected');
+    FcmListenerLifecycle.markNotification(receiver, client, identity, {
+        appData: [
+            { key: 'channelId', value: 'alarm' },
+            { key: 'title', value: 'Getting raided!' },
+            { key: 'message', value: 'wall destroyed at H14' }
+        ]
+    });
+    Assert.equal(state.notificationCount, 1);
+    Assert.equal(state.alarmCount, 1);
+    Assert.equal(state.lastChannelId, 'alarm');
+    Assert.ok(state.lastNotificationAt);
+    Assert.ok(state.lastAlarmAt);
+    Assert.deepEqual(state.recentAlarms.map(alarm => [alarm.title, alarm.message]), [
+        ['Getting raided!', 'wall destroyed at H14']
+    ]);
     receiver.emit('disconnect');
     Assert.equal(state.status, 'reconnecting');
     Assert.ok(logs.some(entry => String(entry[1]).includes('MCS login accepted')));
+    Assert.ok(logs.some(entry => String(entry[1]).includes('Facepunch push delivery verified')));
     Assert.ok(logs.some(entry => String(entry[1]).includes('receiver reconnect scheduled')));
+});
+
+Test('FCM lifecycle accepts object appData and only announces delivery proof once', () => {
+    const logs = [];
+    const receiver = new Receiver(async () => undefined);
+    const client = { log: (...args) => logs.push(args) };
+    const identity = { source: 'FCM Host', guildId: 'guild', steamId: 'steam' };
+    const state = FcmListenerLifecycle.attach(receiver, client, identity);
+
+    FcmListenerLifecycle.markNotification(receiver, client, identity, {
+        appData: { channelId: 'PAIRING' }
+    });
+    FcmListenerLifecycle.markNotification(receiver, client, identity, {
+        appData: { channelId: 'alarm' }
+    });
+
+    Assert.equal(state.notificationCount, 2);
+    Assert.equal(state.lastChannelId, 'alarm');
+    Assert.equal(state.alarmCount, 1);
+    Assert.equal(logs.filter(entry => String(entry[1]).includes('push delivery verified')).length, 1);
 });
 
 Test('FCM initial connection failure is visible and destroys the dead receiver', async () => {

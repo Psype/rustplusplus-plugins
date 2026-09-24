@@ -24,7 +24,7 @@ const PluginManager = require('../plugins/pluginManager.js');
 module.exports = async function (rustplus, client, message, translationDependencies = {}) {
     const originalRelay = Promise.resolve()
         .then(() => DiscordMessages.sendTeamChatMessage(rustplus.guildId, message))
-        .catch(error => rustplus.log('AUTOTRANSLATE', `Discord source relay: ${error}`, 'warning'));
+        .catch(error => rustplus.log('AUTOTRANSLATE', `Discord source relay: ${error}`, 'warn'));
 
     const translation = await PluginManager.translateTeamMessage({
         rustplus, client, message, translationDependencies
@@ -36,7 +36,7 @@ module.exports = async function (rustplus, client, message, translationDependenc
         await Promise.resolve().then(() => DiscordMessages.sendTeamChatMessage(rustplus.guildId, {
             ...message,
             message: translatedMessage
-        })).catch(error => rustplus.log('AUTOTRANSLATE', `Discord translation relay: ${error}`, 'warning'));
+        })).catch(error => rustplus.log('AUTOTRANSLATE', `Discord translation relay: ${error}`, 'warn'));
         return;
     }
 

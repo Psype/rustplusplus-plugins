@@ -7,11 +7,89 @@
 */
 
 const Path = require('path');
+const LoggingSettings = require('../../util/loggingSettings.js');
 
 const DEFAULT_TITLE = 'You\'re getting raided!';
 const RAID_TITLE = /^(?:you(?:'|\u2019)?re|you\s+are)?\s*getting\s+raided!?\s*$/i;
 const DEDUPLICATION_MS = 5000;
 const recentAlerts = new Map();
+
+function formatAge(timestamp, now = Date.now()) {
+    const parsed = Date.parse(timestamp);
+    if (!Number.isFinite(parsed)) return 'unknown';
+    const seconds = Math.max(0, Math.floor((now - parsed) / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 48) return `${hours}h`;
+    return `${Math.floor(hours / 24)}d`;
+}
+
+function getReadiness(client, guildId, rustplus, now = Date.now()) {
+    const instance = client.getInstance(guildId);
+    const listener = client.fcmListeners && client.fcmListeners[guildId];
+    const state = listener && listener.rppConnectionState;
+    const server = instance && instance.serverList && rustplus && instance.serverList[rustplus.serverId];
+    const account = !state || !server || server.steamId === undefined ? 'unknown' :
+        (String(server.steamId) === String(state.steamId) ? 'match' : 'mismatch');
+    const inGame = instance?.generalSettings?.smartAlarmNotifyInGame === true ? 'on' : 'off';
+    const muted = instance?.generalSettings?.muteInGameBotMessages === true ||
+        rustplus?.generalSettings?.muteInGameBotMessages === true;
+    const alarmCount = server && server.alarms && typeof server.alarms === 'object' ?
+        Object.keys(server.alarms).length : 0;
+
+    return Object.freeze({
+        mcs: state?.status || 'missing',
+        push: state?.lastNotificationAt ? 'verified' : 'unverified',
+        lastChannelId: state?.lastChannelId || null,
+        alarm: state?.lastAlarmAt ? formatAge(state.lastAlarmAt, now) : 'unseen',
+        account,
+        inGame,
+        mute: muted ? 'on' : 'off',
+        rawLog: LoggingSettings.isEnabled() ? 'on' : 'off',
+        pairedVanillaAlarms: alarmCount,
+        recentAlarms: Object.freeze([...(state?.recentAlarms || [])].slice(0, 5))
+    });
+}
+
+function readinessSignature(readiness) {
+    return [readiness.mcs, readiness.push, readiness.lastChannelId || '-', readiness.alarm === 'unseen' ?
+        'unseen' : 'seen', readiness.account, readiness.inGame, readiness.mute, readiness.rawLog,
+    readiness.pairedVanillaAlarms].join('|');
+}
+
+function formatReadiness(readiness, compact = false) {
+    if (compact) {
+        return `Alarm: MCS ${readiness.mcs} | push ${readiness.push} | alarm ${readiness.alarm} | ` +
+            `account ${readiness.account} | output ${readiness.inGame} | mute ${readiness.mute} | ` +
+            `rawlog ${readiness.rawLog}.`;
+    }
+    return `mcs=${readiness.mcs}; push=${readiness.push}` +
+        `${readiness.lastChannelId ? ` (last-channel=${readiness.lastChannelId})` : ''}; ` +
+        `alarm=${readiness.alarm}; account=${readiness.account}; in-game=${readiness.inGame}; ` +
+        `mute=${readiness.mute}; rawlog=${readiness.rawLog}; ` +
+        `paired-vanilla-alarms=${readiness.pairedVanillaAlarms}.`;
+}
+
+function formatAlarmHistory(readiness, now = Date.now()) {
+    if (readiness.recentAlarms.length === 0) return Object.freeze(['Last alarms: none since this process started.']);
+    return Object.freeze(readiness.recentAlarms.map((alarm, index) => {
+        const text = [alarm.title, alarm.message].filter(Boolean).join(': ') || 'Alarm notification';
+        const compactText = text.length > 86 ? `${text.slice(0, 83)}...` : text;
+        return `${index + 1}) ${formatAge(alarm.receivedAt, now)} ago | ${compactText}`;
+    }));
+}
+
+function logReadiness({ rustplus, client }) {
+    const readiness = getReadiness(client, rustplus.guildId, rustplus);
+    const signature = readinessSignature(readiness);
+    if (rustplus.raidAlarmReadinessSignature === signature) return;
+    rustplus.raidAlarmReadinessSignature = signature;
+    client.log('PLUGIN', `GuildID: ${rustplus.guildId}, raid-alarm.ready: ${formatReadiness(readiness)}` +
+        (readiness.push === 'unverified' ?
+            ' Re-pair the active server once to verify Facepunch push delivery.' : ''));
+}
 
 function isRaidTitle(title) {
     return typeof title === 'string' && RAID_TITLE.test(title);
@@ -136,8 +214,18 @@ async function sendInGameAlert(rustplus, text) {
 }
 
 async function handleCommand(context) {
-    const expected = `${context.prefix}raidtest`.toLowerCase();
-    if (context.commandLowerCase !== expected) return Object.freeze({ handled: false });
+    const alarmStatus = `${context.prefix}alarmstatus`.toLowerCase();
+    if (context.commandLowerCase === alarmStatus) {
+        const readiness = getReadiness(context.client, context.guildId, context.rustplus);
+        return Object.freeze({
+            handled: true,
+            response: Object.freeze([formatReadiness(readiness, true), ...formatAlarmHistory(readiness)]),
+            logType: 'AlarmStatus'
+        });
+    }
+
+    const raidTest = `${context.prefix}raidtest`.toLowerCase();
+    if (context.commandLowerCase !== raidTest) return Object.freeze({ handled: false });
 
     const instance = context.client.getInstance(context.guildId);
     const rustplus = context.client.rustplusInstances[context.guildId];
@@ -219,9 +307,13 @@ async function handleFcmAlarm(context, adapters = {}) {
 
 module.exports = Object.freeze({
     DEFAULT_TITLE,
+    formatAlarmHistory,
+    formatReadiness,
+    getReadiness,
     getText,
     handleCommand,
     handleFcmAlarm,
     isRaidTitle,
+    logReadiness,
     matches
 });

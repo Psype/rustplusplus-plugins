@@ -314,6 +314,7 @@
     "createGroupCap": "创建组",
     "createTrackerCap": "创建追踪器",
     "credentialsAddedSuccessfully": "已成功为 steamId：{steamId} 添加 FCM 凭据！",
+    "credentialsUpdatedSuccessfully": "已成功续订 steamId：{steamId} 的 FCM 凭据！",
     "credentialsAlreadyRegistered": "steamId：{steamId} 的 FCM 凭据已注册！",
     "credentialsCannotStartLiteAlreadyHoster": "无法为 steamId：{steamId} 启动 FCM Listener Lite。已经是主机。",
     "credentialsDoNotExist": "steamId：{steamId} 的 FCM 凭据不存在。",

@@ -23,10 +23,27 @@ const Axios = require('axios');
 const Constants = require('../util/constants.js');
 const Utils = require('../util/utils.js');
 
+const REQUEST_TIMEOUT_MS = 5000;
+const PROFILE_CACHE_MS = 60 * 60 * 1000;
+const profileNameCache = new Map();
+const warningCache = new Map();
+
+function logWarningOnce(client, key, message) {
+    const now = Date.now();
+    const previous = warningCache.get(key) || 0;
+    if (now - previous < PROFILE_CACHE_MS) return;
+    warningCache.set(key, now);
+    client.log(client.intlGet(null, 'warningCap'), message, 'warn');
+}
+
 module.exports = {
     scrape: async function (url) {
         try {
-            return await Axios.get(url);
+            return await Axios.get(url, {
+                timeout: REQUEST_TIMEOUT_MS,
+                maxContentLength: 512 * 1024,
+                headers: { 'User-Agent': 'rustplusplus/1.22 (+Steam profile metadata)' }
+            });
         }
         catch (e) {
             return {};
@@ -34,39 +51,36 @@ module.exports = {
     },
 
     scrapeSteamProfilePicture: async function (client, steamId) {
-        const response = await module.exports.scrape(`${Constants.STEAM_PROFILES_URL}${steamId}`);
-
-        if (response.status !== 200) {
-            client.log(client.intlGet(null, 'errorCap'), client.intlGet(null, 'failedToScrapeProfilePicture', {
-                link: `${Constants.STEAM_PROFILES_URL}${steamId}`
-            }), 'error');
-            return null;
-        }
-
-        let png = response.data.match(/<img src="(.*_full.jpg)(.*?(?="))/);
-        if (png) {
-            return png[1];
-        }
-
-        return null;
+        if (!/^\d{17}$/.test(String(steamId))) return null;
+        return `${Constants.RUSTPLUS_AVATAR_URL}${steamId}`;
     },
 
     scrapeSteamProfileName: async function (client, steamId) {
-        const response = await module.exports.scrape(`${Constants.STEAM_PROFILES_URL}${steamId}`);
+        const id = String(steamId);
+        if (!/^\d{17}$/.test(id)) return null;
+        const cached = profileNameCache.get(id);
+        if (cached && Date.now() - cached.cachedAt < PROFILE_CACHE_MS) return cached.name;
+
+        const link = `${Constants.STEAM_PROFILES_URL}${id}?xml=1`;
+        const response = await module.exports.scrape(link);
 
         if (response.status !== 200) {
-            client.log(client.intlGet(null, 'errorCap'), client.intlGet(null, 'failedToScrapeProfileName', {
-                link: `${Constants.STEAM_PROFILES_URL}${steamId}`
-            }), 'error');
+            logWarningOnce(client, `name:${id}`, client.intlGet(null, 'failedToScrapeProfileName', { link }));
+            profileNameCache.set(id, Object.freeze({ name: null, cachedAt: Date.now() }));
             return null;
         }
 
-        let regex = new RegExp(`class="actual_persona_name">(.+?)</span>`, 'gm');
-        let data = regex.exec(response.data);
-        if (data) {
-            return Utils.decodeHtml(data[1]);
+        const xml = typeof response.data === 'string' ? response.data : String(response.data || '');
+        const match = /<steamID><!\[CDATA\[([\s\S]*?)\]\]><\/steamID>/i.exec(xml) ||
+            /<steamID>([\s\S]*?)<\/steamID>/i.exec(xml);
+        if (match && match[1].trim() !== '') {
+            const name = Utils.decodeHtml(match[1].trim());
+            profileNameCache.set(id, Object.freeze({ name, cachedAt: Date.now() }));
+            return name;
         }
 
+        logWarningOnce(client, `name:${id}`, client.intlGet(null, 'failedToScrapeProfileName', { link }));
+        profileNameCache.set(id, Object.freeze({ name: null, cachedAt: Date.now() }));
         return null;
     },
 }

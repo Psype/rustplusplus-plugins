@@ -27,6 +27,7 @@ const DiscordButtons = require('./discordButtons.js');
 const DiscordEmbeds = require('./discordEmbeds.js');
 const DiscordSelectMenus = require('./discordSelectMenus.js');
 const DiscordTools = require('./discordTools.js');
+const PluginManager = require('../plugins/pluginManager.js');
 const Scrape = require('../util/scrape.js');
 
 module.exports = {
@@ -440,6 +441,7 @@ module.exports = {
     },
 
     sendUpdateEventInformationMessage: async function (rustplus) {
+        if (!PluginManager.isDiscordOptionEnabled('eventInformation')) return;
         const instance = Client.client.getInstance(rustplus.guildId);
 
         const content = {

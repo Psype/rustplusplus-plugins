@@ -114,8 +114,8 @@ Subcommand | Options | Description | Required
 &nbsp; | `gcm_android_id` | GCM Android ID. | `True`
 &nbsp; | `gcm_security_token` | GCM Security Token. | `True`
 &nbsp; | `steam_id` | Steam ID. | `True`
-&nbsp; | `issued_date` | Issued date of the credentials. | `True`
-&nbsp; | `expire_date` | Expire date of the credentials. | `True`
+&nbsp; | `issued_date` | Optional legacy credential registration date. | `False`
+&nbsp; | `expire_date` | Optional legacy Rust+ auth-token expiry date. | `False`
 &nbsp; | `hoster` | Should be hoster. | `False`
 `remove` | &nbsp; | Remove Credentials. | &nbsp;
 &nbsp; | `steam_id` | Steam ID. | `False`
@@ -369,6 +369,7 @@ Command | Description
 [**player/players**](commands.md#playerplayers) | Get the names and playtime of the currently online players on the server (Based on Battlemetrics).
 [**pop**](commands.md#pop) | Get the current population of the server including queue size and max population.
 [**prox**](commands.md#prox) | Get the distance to the three closest teammates.
+[**alarmstatus**](commands.md#alarmstatus) | Show incoming alarm health and the five latest alarms received.
 [**raidtest**](commands.md#raidtest) | Send a critical test alert through the production Rust team-chat raid path.
 [**recycle**](commands.md#recycle-ingame) | Display the output of recycling an item.
 [**research**](commands.md#research-ingame) | Display the cost to research an item.
@@ -510,7 +511,7 @@ Subcommand | Description | Required
 
 ## **logs**
 
-> **Show, enable, or disable bot file/debug logging.** This command works from in-game team chat and from the Discord command chat with the configured prefix. Console output continues, but file writes under `logs/` stop while disabled, including normal log files, raw Rust+ WebSocket text, event payload logs, marker history, and marker snapshots. The toggle is stored in `config/logging-settings.json`.
+> **Show, enable, or disable bot file/debug logging.** This command works from in-game team chat and from the Discord command chat with the configured prefix. Console output continues, but file writes under `logs/` stop while disabled, including normal log files, raw Rust+ WebSocket text, decoded Rust+ events, raw decoded FCM notification envelopes, marker history, and marker snapshots. FCM envelopes are written before alarm normalization to `logs/rustplusplus-fcm-raw.jsonl`, one LF-terminated JSON object per notification. The toggle is stored in `config/logging-settings.json`. This diagnostic file can contain team messages, Steam IDs, server addresses and pairing tokens; keep it private and remove unrelated lines before sharing it.
 <br>Command: `!logs` - Show the current logging status.
 <br>Command: `!logs off` - Disable file/debug logging.
 <br>Command: `!logs on` - Enable file/debug logging.
@@ -594,6 +595,16 @@ Subcommand | Description | Required
 > **Get the distance to the three closest teammates.** To get the three closest teammates run `!prox`. To get the distance to a team member run `!prox <name or part of name>`.
 
 ![In-Game Command prox Image](images/ingame_commands/prox_ingame.png)
+
+
+## **alarmstatus**
+
+> **Inspect the incoming raid-notification route.** Reports the Google MCS connection, whether a Facepunch push has
+> actually reached this bot process, whether an alarm has been observed since startup, whether the listener account
+> matches the active server pairing, whether raw FCM capture is enabled, whether in-game output is enabled or muted, and the five latest alarms with their
+> relative receipt times. `push unverified` is not treated
+> as connected: pair the active server once in Rust to produce a deterministic incoming notification.
+<br>Command: `!alarmstatus`
 
 
 ## **raidtest**

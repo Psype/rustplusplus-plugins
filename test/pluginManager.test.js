@@ -108,6 +108,28 @@ Test('map-marker commands are disabled before stale handlers can run', async () 
     Assert.equal(PluginManager.isSlashCommandEnabled('map'), true);
 });
 
+Test('Discord hides every option backed only by removed map-marker data', () => {
+    const notificationTemplate = require('../src/templates/notificationSettingsTemplate.json');
+    const disabledNotifications = PluginManager.getDisabledMapMarkerNotificationSettingNames();
+    const disabledOptions = PluginManager.getDisabledMapMarkerDiscordOptionNames();
+
+    Assert.deepEqual([...disabledNotifications].sort(), Object.keys(notificationTemplate).sort());
+    Assert.deepEqual(disabledOptions, [
+        'customTimers', 'eventInformation', 'itemAvailableInVendingMachineNotifyInGame'
+    ]);
+    Assert.equal(Object.isFrozen(disabledNotifications), true);
+    Assert.equal(Object.isFrozen(disabledOptions), true);
+    for (const settingName of disabledNotifications) {
+        Assert.equal(PluginManager.isNotificationSettingEnabled(settingName), false, settingName);
+    }
+    for (const optionName of disabledOptions) {
+        Assert.equal(PluginManager.isDiscordOptionEnabled(optionName), false, optionName);
+    }
+    Assert.equal(PluginManager.isNotificationSettingEnabled('raidAlarmSetting'), true);
+    Assert.equal(PluginManager.isDiscordOptionEnabled('smartAlarmNotifyInGame'), true);
+    Assert.equal(PluginManager.getDiscordCapabilityUiVersion(), 1);
+});
+
 Test('unknown commands fall through without side effects', async () => {
     const client = createClient();
     const rustplus = createRustplus();
@@ -135,7 +157,8 @@ Test('canonical documentation covers every static in-game command', () => {
     for (const syntaxKey of PluginManager.getDisabledMapMarkerSyntaxKeys()) runtimeKeys.delete(syntaxKey);
     const runtimeNames = new Set([...runtimeKeys].map(key => language[key]));
     for (const name of [
-        'help', 'raidtest', 'track', 'trackhistory', 'trackinfo', 'tracklist', 'trackrelated', 'tracks', 'untrack'
+        'alarmstatus', 'help', 'raidtest', 'track', 'trackhistory', 'trackinfo', 'tracklist', 'trackrelated', 'tracks',
+        'untrack'
     ]) runtimeNames.add(name);
 
     Assert.deepEqual([...CommandCatalog.getCommandNames()].sort(), [...runtimeNames].sort());

@@ -6,6 +6,7 @@ This repo now writes multiple debug files that can be used to discover what Rust
 
 - `logs/rustplusplus-raw-socket.txt` — best-effort UTF-8 text directly from raw inbound/outbound WebSocket frames. Use this for simple `grep` across data before RustPlusPlus decodes it.
 - `logs/rustplusplus-events.log` — newline-delimited JSON for decoded Rust+ message events and polled map-marker payloads.
+- `logs/rustplusplus-fcm-raw.jsonl` — LF JSONL containing every decoded FCM/MCS notification before routing, including alarm payloads. This can contain pairing tokens and must remain private.
 - `logs/rustplus-markers-history.log` — newline-delimited JSON containing marker snapshots over time.
 - `logs/rustplus-markers.json` — latest marker snapshot only, useful for quick inspection.
 

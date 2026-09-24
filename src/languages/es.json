@@ -314,6 +314,7 @@
     "createGroupCap": "CREAR GRUPO",
     "createTrackerCap": "CREAR RASTREADOR",
     "credentialsAddedSuccessfully": "¡Las Credenciales FCM fueron añadidas con éxito para SteamId: {steamId}!",
+    "credentialsUpdatedSuccessfully": "¡Las credenciales FCM se renovaron correctamente para steamId: {steamId}!",
     "credentialsAlreadyRegistered": "¡Las Credenciales FCM para steamId: {steamId} ya están registradas!",
     "credentialsCannotStartLiteAlreadyHoster": "No se puede iniciar FCM Listener Lite para steamId: {steamId}. Ya hay un anfitrión.",
     "credentialsDoNotExist": "Credenciales FCM para steamId: {steamId} no existe.",

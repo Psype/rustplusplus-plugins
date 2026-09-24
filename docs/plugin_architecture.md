@@ -7,15 +7,22 @@ that boundary and must not import individual feature plugins.
 
 - `deepSea`: detects and reports Deep Sea from Rust+ marker polling.
 - `hiddenVendors`: persists vendors that disappear from map marker polling.
+- `mapMarkerCapabilities`: is the fail-closed source of truth for features whose public Rust+ map-marker input was
+  removed. It filters in-game/help commands and every Discord projection: slash commands, notification cards,
+  vending-item options, and Cargo/Oil Rig timers. A versioned one-time refresh removes obsolete published controls;
+  stale component interactions cannot mutate retained settings.
 - `autoTranslate`: translates eligible relayed team-chat messages.
 - `raidAlarm`: relays the generic Rust+ `SmartAlarm` notification channel into team chat. FCM is only the bot-side
   transport; vanilla Smart Alarms, haggbart's uMod plugin, and unpublished server integrations are producers of the
   same native Rust notification channel. No specific mod, title, or vanilla entity is required. The transport remains
   outside the plugin in `src/util/reliableFcmReceiver.js`, which exposes the stable `ON_DATA_RECEIVED` boundary only
   after an accepted MCS login.
-- `teammateLanguageDatabase`: records teammate names and detected languages.
+- `teammateLanguageDatabase`: stores the shared append-only player identity history in
+  `steamid,battlemetrics_id,date,name,language` CSV form. It accepts teammate observations and proven SteamID64
+  identities from the tracker; tracker-only language cells may be empty, while existing languages are preserved.
 - `playerTracker`: resolves current-server BattleMetrics players, owns the `Enemies` native tracker, and persists a
-  redacted status/last-seen projection plus bounded Premium summaries without adding another poller.
+  redacted status/last-seen projection plus bounded Premium summaries without adding another poller. Successful
+  SteamID64/BattleMetrics/name observations are also appended to the shared identity history.
 - `battlemetrics`: detached read-only API provider for player search, optional SteamID enrichment, server-player
   summaries, session history, and co-play. It uses bounded caching/cooldowns and never decides tracker transitions.
 - `warBandits`: detached, on-demand identity/activity provider used only during `!track`; it caches the server

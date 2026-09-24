@@ -307,7 +307,7 @@ class RustPlus extends RustPlusLib {
             await callback();
         }
         catch (error) {
-            this.log('EVENT', `${output}: ${error}`, 'warning');
+            this.log('EVENT', `${output}: ${error}`, 'warn');
         }
     }
 

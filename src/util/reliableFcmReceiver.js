@@ -275,7 +275,6 @@ class ReliableFcmReceiver extends EventEmitter {
         this._clearTimer('_loginTimer', 'clearTimeout');
         this._ready = true;
         this._retryCount = 0;
-        this._persistentIds = [];
         this._startHeartbeat();
         this._resetInactivityTimer();
 

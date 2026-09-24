@@ -23,6 +23,7 @@ const Discord = require('discord.js');
 const Constants = require('../util/constants.js');
 const Client = require('../../index.ts');
 const Config = require('../../config');
+const PluginManager = require('../plugins/pluginManager.js');
 
 const SUCCESS = Discord.ButtonStyle.Success;
 const DANGER = Discord.ButtonStyle.Danger;
@@ -91,11 +92,14 @@ module.exports = {
             label: Client.client.intlGet(guildId, 'deleteUnreachableDevicesCap'),
             style: PRIMARY
         });
-        const customTimersButton = module.exports.getButton({
-            customId: `CustomTimersEdit${identifier}`,
-            label: Client.client.intlGet(guildId, 'customTimersCap'),
-            style: PRIMARY
-        });
+        const serverToolButtons = [];
+        if (PluginManager.isDiscordOptionEnabled('customTimers')) {
+            serverToolButtons.push(module.exports.getButton({
+                customId: `CustomTimersEdit${identifier}`,
+                label: Client.client.intlGet(guildId, 'customTimersCap'),
+                style: PRIMARY
+            }));
+        }
         const trackerButton = module.exports.getButton({
             customId: `CreateTracker${identifier}`,
             label: Client.client.intlGet(guildId, 'createTrackerCap'),
@@ -128,12 +132,14 @@ module.exports = {
         });
 
         if (Config.battlemetrics.token !== '' && server.battlemetricsId !== null) {
+            serverToolButtons.push(trackerButton);
+            serverToolButtons.push(groupButton);
             return [
                 new Discord.ActionRowBuilder().addComponents(
                     connectionButton, linkButton, battlemetricsButton, editButton, deleteButton
                 ),
                 new Discord.ActionRowBuilder().addComponents(
-                    customTimersButton, trackerButton, groupButton
+                    ...serverToolButtons
                 ),
                 new Discord.ActionRowBuilder().addComponents(
                     deleteUnreachableDevicesButton
@@ -141,12 +147,13 @@ module.exports = {
             ];
         }
         else {
+            serverToolButtons.push(groupButton);
             return [
                 new Discord.ActionRowBuilder().addComponents(
                     connectionButton, linkButton, editButton, deleteButton
                 ),
                 new Discord.ActionRowBuilder().addComponents(
-                    customTimersButton, groupButton
+                    ...serverToolButtons
                 ),
                 new Discord.ActionRowBuilder().addComponents(
                     deleteUnreachableDevicesButton

@@ -22,6 +22,30 @@ const DISABLED_COMMANDS = Object.freeze([
 ]);
 
 const DISABLED_SLASH_COMMANDS = Object.freeze(['market']);
+const DISABLED_NOTIFICATION_SETTINGS = Object.freeze([
+    'cargoShipDetectedSetting',
+    'cargoShipLeftSetting',
+    'cargoShipEgressSetting',
+    'cargoShipDockingAtHarborSetting',
+    'patrolHelicopterDetectedSetting',
+    'patrolHelicopterLeftSetting',
+    'patrolHelicopterDestroyedSetting',
+    'lockedCrateOilRigUnlockedSetting',
+    'heavyScientistCalledSetting',
+    'chinook47DetectedSetting',
+    'travelingVendorDetectedSetting',
+    'travelingVendorHaltedSetting',
+    'travelingVendorLeftSetting',
+    'vendingMachineDetectedSetting',
+    'deepseaDetectedSetting',
+    'deepseaLeftSetting'
+]);
+const DISABLED_DISCORD_OPTIONS = Object.freeze([
+    'customTimers',
+    'eventInformation',
+    'itemAvailableInVendingMachineNotifyInGame'
+]);
+const DISCORD_CAPABILITY_UI_VERSION = 1;
 
 function commandMatches(context, definition) {
     const syntaxes = new Set([definition.fallback]);
@@ -69,9 +93,22 @@ function isSlashCommandEnabled(commandName) {
     return !DISABLED_SLASH_COMMANDS.includes(`${commandName}`.toLowerCase());
 }
 
+function isNotificationSettingEnabled(settingName) {
+    return !DISABLED_NOTIFICATION_SETTINGS.includes(`${settingName}`);
+}
+
+function isDiscordOptionEnabled(optionName) {
+    return !DISABLED_DISCORD_OPTIONS.includes(`${optionName}`);
+}
+
 module.exports = Object.freeze({
     getDisabledCommandNames: () => Object.freeze(DISABLED_COMMANDS.map(command => command.fallback)),
+    getDisabledDiscordOptionNames: () => DISABLED_DISCORD_OPTIONS,
+    getDisabledNotificationSettingNames: () => DISABLED_NOTIFICATION_SETTINGS,
     getDisabledSyntaxKeys: () => Object.freeze(DISABLED_COMMANDS.map(command => command.syntaxKey)),
+    getDiscordCapabilityUiVersion: () => DISCORD_CAPABILITY_UI_VERSION,
     handleCommand,
+    isDiscordOptionEnabled,
+    isNotificationSettingEnabled,
     isSlashCommandEnabled
 });

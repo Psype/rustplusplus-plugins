@@ -285,6 +285,8 @@ class DiscordBot extends Discord.Client {
     async setupGuild(guild) {
         const instance = this.getInstance(guild.id);
         const firstTime = instance.firstTime;
+        const capabilityUiVersion = PluginManager.getDiscordCapabilityUiVersion();
+        const refreshCapabilityUi = instance.discordCapabilityUiVersion !== capabilityUiVersion;
 
         await require('../discordTools/RegisterSlashCommands')(this, guild);
 
@@ -302,7 +304,25 @@ class DiscordBot extends Discord.Client {
 
         await this.startFcmListenersForGuild(guild);
 
-        await require('../discordTools/SetupSettingsMenu')(this, guild);
+        await require('../discordTools/SetupSettingsMenu')(this, guild, refreshCapabilityUi);
+
+        if (refreshCapabilityUi) {
+            const DiscordMessages = require('../discordTools/discordMessages.js');
+            const capabilityInstance = this.getInstance(guild.id);
+            if (!PluginManager.isDiscordOptionEnabled('eventInformation') &&
+                capabilityInstance.informationMessageId.event !== null) {
+                await DiscordTools.deleteMessageById(guild.id, capabilityInstance.channelId.information,
+                    capabilityInstance.informationMessageId.event);
+                capabilityInstance.informationMessageId.event = null;
+                this.setInstance(guild.id, capabilityInstance);
+            }
+            for (const serverId of Object.keys(this.getInstance(guild.id).serverList)) {
+                await DiscordMessages.sendServerMessage(guild.id, serverId);
+            }
+            const refreshedInstance = this.getInstance(guild.id);
+            refreshedInstance.discordCapabilityUiVersion = capabilityUiVersion;
+            this.setInstance(guild.id, refreshedInstance);
+        }
 
         if (firstTime) await PermissionHandler.resetPermissionsAllChannels(this, guild);
 

@@ -28,6 +28,7 @@ const DiscordButtons = require('../discordTools/discordButtons.js');
 const DiscordEmbeds = require('../discordTools/discordEmbeds.js');
 const DiscordMessages = require('../discordTools/discordMessages.js');
 const DiscordTools = require('../discordTools/discordTools.js');
+const EventDebugLogger = require('./eventDebugLogger.js');
 const FcmAlarmRouter = require('./fcmAlarmRouter.js');
 const FcmListenerLifecycle = require('./fcmListenerLifecycle.js');
 const InstanceUtils = require('../util/instanceUtils.js');
@@ -73,6 +74,8 @@ module.exports = async (client, guild) => {
     const identity = { source: 'FCM Host', guildId: guild.id, steamId: hoster };
     FcmListenerLifecycle.attach(receiver, client, identity);
     receiver.on('ON_DATA_RECEIVED', async (data) => {
+        EventDebugLogger.logFcmPayload(client, identity, data);
+        FcmListenerLifecycle.markNotification(receiver, client, identity, data);
         if (await FcmAlarmRouter.handle(client, guild, hoster, data)) return;
 
         const appData = FcmAlarmRouter.normalizeAppData(data.appData);

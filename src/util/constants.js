@@ -22,6 +22,7 @@ module.exports = {
     DEFAULT_SERVER_URL: 'https://rust.facepunch.com',
     DEFAULT_SERVER_IMG: 'https://files.facepunch.com/lewis/1b2411b1/og-image.jpg',
     STEAM_PROFILES_URL: 'https://steamcommunity.com/profiles/',
+    RUSTPLUS_AVATAR_URL: 'https://companion-rust.facepunch.com/api/avatar/',
     BATTLEMETRICS_PROFILE_URL: 'https://www.battlemetrics.com/players/',
     BATTLEMETRICS_SERVER_URL: 'https://www.battlemetrics.com/servers/rust/',
     AFK_TIME_SECONDS: 5 * 60, /* 5 min */

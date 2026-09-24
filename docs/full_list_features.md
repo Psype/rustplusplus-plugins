@@ -46,6 +46,7 @@
 - **player/players** - `!player [name]` or `!players` - Get Battlemetrics information about players.
 - **pop** - `!pop` - Get population of the server.
 - **prox** - `!prox` - Display teammates that are nearby.
+- **alarmstatus** - `!alarmstatus` - Show FCM/MCS transport, Facepunch push-delivery proof, raw FCM capture state, active-server account match, in-game alarm output state, and the five latest alarms received by this process.
 - **raidtest** - `!raidtest` - Send a critical test alert through the same immediate Rust team-chat path used by FCM raid alarms.
 - **record** - `!record [steamid] [pseudonym]` - Add a pseudonym; player languages are edited directly in the teammate CSV.
 - **recycle** - `!recycle [item] [quantity]` - Display the output of recycling an item.
@@ -95,8 +96,10 @@
 Since Facepunch's 2026-08-06 Power Trip update, the public Rust+ stream no longer supplies the event and
 vending-machine markers needed for Cargo Ship, Patrol Helicopter, Chinook, Oil Rig, Deep Sea, travelling vendor,
 market, or hidden-vendor state. Their commands are disabled and omitted from the active command catalog so the bot
-cannot present stale history as current information. Historical handlers remain isolated for a future authoritative
-signal. See [the payload audit](rustplus_payload_audit_2026-09-10.md) for captured evidence.
+cannot present stale history as current information. Discord also hides the corresponding slash command, live-event
+panel, notification cards, vending-item option, and Cargo/Oil Rig timers. Historical handlers and saved preferences
+remain isolated for a future authoritative signal. See
+[the payload audit](rustplus_payload_audit_2026-09-10.md) for captured evidence.
 
 ## Teammate Information
 > Get information about teammates such as Online/Offline/AFK/Alive/Dead/Location/Paired/Leader.

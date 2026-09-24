@@ -27,6 +27,7 @@ const DiscordButtons = require('./discordButtons.js');
 const DiscordEmbeds = require('./discordEmbeds.js');
 const DiscordSelectMenus = require('./discordSelectMenus.js');
 const DiscordTools = require('./discordTools.js');
+const PluginManager = require('../plugins/pluginManager.js');
 
 module.exports = async (client, guild, forced = false) => {
     const instance = client.getInstance(guild.id);
@@ -234,17 +235,19 @@ async function setupGeneralSettings(client, guildId, channel) {
             Path.join(__dirname, '..', 'resources/images/settings_logo.png'))]
     });
 
-    await client.messageSend(channel, {
-        embeds: [DiscordEmbeds.getEmbed({
-            color: Constants.COLOR_SETTINGS,
-            title: client.intlGet(guildId, 'itemAvailableNotifyInGameSetting'),
-            thumbnail: `attachment://settings_logo.png`
-        })],
-        components: [DiscordButtons.getItemAvailableNotifyInGameButton(guildId,
-            instance.generalSettings.itemAvailableInVendingMachineNotifyInGame)],
-        files: [new Discord.AttachmentBuilder(
-            Path.join(__dirname, '..', 'resources/images/settings_logo.png'))]
-    });
+    if (PluginManager.isDiscordOptionEnabled('itemAvailableInVendingMachineNotifyInGame')) {
+        await client.messageSend(channel, {
+            embeds: [DiscordEmbeds.getEmbed({
+                color: Constants.COLOR_SETTINGS,
+                title: client.intlGet(guildId, 'itemAvailableNotifyInGameSetting'),
+                thumbnail: `attachment://settings_logo.png`
+            })],
+            components: [DiscordButtons.getItemAvailableNotifyInGameButton(guildId,
+                instance.generalSettings.itemAvailableInVendingMachineNotifyInGame)],
+            files: [new Discord.AttachmentBuilder(
+                Path.join(__dirname, '..', 'resources/images/settings_logo.png'))]
+        });
+    }
 
     if (Config.battlemetrics.token !== '') {
         await client.messageSend(channel, {
@@ -274,6 +277,10 @@ async function setupGeneralSettings(client, guildId, channel) {
 
 async function setupNotificationSettings(client, guildId, channel) {
     const instance = client.getInstance(guildId);
+    const visibleSettings = Object.keys(instance.notificationSettings)
+        .filter(setting => PluginManager.isNotificationSettingEnabled(setting));
+
+    if (visibleSettings.length === 0) return;
 
     await client.messageSend(channel, {
         files: [new Discord.AttachmentBuilder(
@@ -281,7 +288,7 @@ async function setupNotificationSettings(client, guildId, channel) {
                 `resources/images/settings/notification_settings_logo_${instance.generalSettings.language}.png`))]
     });
 
-    for (const setting in instance.notificationSettings) {
+    for (const setting of visibleSettings) {
         await client.messageSend(channel, {
             embeds: [DiscordEmbeds.getEmbed({
                 color: Constants.COLOR_SETTINGS,

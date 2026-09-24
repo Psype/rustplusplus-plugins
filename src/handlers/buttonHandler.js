@@ -26,6 +26,7 @@ const DiscordTools = require('../discordTools/discordTools.js');
 const SmartSwitchGroupHandler = require('./smartSwitchGroupHandler.js');
 const DiscordButtons = require('../discordTools/discordButtons.js');
 const DiscordModals = require('../discordTools/discordModals.js');
+const PluginManager = require('../plugins/pluginManager.js');
 
 module.exports = async (client, interaction) => {
     const instance = client.getInstance(interaction.guildId);
@@ -41,6 +42,23 @@ module.exports = async (client, interaction) => {
             id: `${verifyId}`,
             user: `${interaction.user.username} (${interaction.user.id})`
         }));
+        return;
+    }
+
+    const notificationPrefixes = ['DiscordNotification', 'InGameNotification', 'VoiceNotification'];
+    const notificationPrefix = notificationPrefixes.find(prefix => interaction.customId.startsWith(prefix));
+    if (notificationPrefix) {
+        const ids = JSON.parse(interaction.customId.replace(notificationPrefix, ''));
+        if (!PluginManager.isNotificationSettingEnabled(ids.setting)) {
+            await interaction.deferUpdate();
+            await interaction.message.delete();
+            return;
+        }
+    }
+    if (interaction.customId === 'ItemAvailableNotifyInGame' &&
+        !PluginManager.isDiscordOptionEnabled('itemAvailableInVendingMachineNotifyInGame')) {
+        await interaction.deferUpdate();
+        await interaction.message.delete();
         return;
     }
 
@@ -520,6 +538,11 @@ module.exports = async (client, interaction) => {
 
         if (!server) {
             await interaction.message.delete();
+            return;
+        }
+
+        if (!PluginManager.isDiscordOptionEnabled('customTimers')) {
+            await DiscordMessages.sendServerMessage(guildId, ids.serverId, null, interaction);
             return;
         }
 

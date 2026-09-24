@@ -17,8 +17,11 @@ Test('native tracker logs and delivers exact online/offline messages despite Dis
     const guildId = 'test-player-tracker-delivery';
     const serverId = '127.0.0.1-28082';
     const savePath = Path.join(__dirname, '..', 'data', 'player-trackers', `${guildId}-42.json`);
+    const identityPath = Path.join(__dirname, '..', 'data', 'teammate-language-database',
+        `${guildId}-127_0_0_1-28082.csv`);
     t.after(() => {
         if (Fs.existsSync(savePath)) Fs.unlinkSync(savePath);
+        if (Fs.existsSync(identityPath)) Fs.unlinkSync(identityPath);
     });
 
     let instance = {
@@ -116,6 +119,9 @@ Test('native tracker logs and delivers exact online/offline messages despite Dis
         'Tracked player Nirks just disconnected.'
     ]);
     Assert.equal(JSON.parse(Fs.readFileSync(savePath, 'utf8')).players[0].status, 'offline');
+    const identityLines = Fs.readFileSync(identityPath, 'utf8').trimEnd().split('\n');
+    Assert.equal(identityLines[0], 'steamid,battlemetrics_id,date,name,language');
+    Assert.match(identityLines[1], /^76561198154738095,1001,.*Z,Nirks,$/);
     Assert.equal(instance.trackers[7].players[0].playerId, '1001');
     Assert.deepEqual(logs[0], ['TRACKER', 'Tracked player Nirks is now online.', 'info']);
     Assert.deepEqual(logs[3], ['TRACKER', 'Tracked player Nirks just disconnected.', 'info']);

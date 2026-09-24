@@ -442,6 +442,31 @@ function getPlayerRecord(previous, playerId) {
     return previous && previous.players.find(player => `${player.battlemetricsPlayerId}` === `${playerId}`);
 }
 
+function recordSnapshotIdentities(context, scope, snapshot, dependencies) {
+    const history = dependencies.identityHistory;
+    if (!history || typeof history.recordIdentity !== 'function') return;
+
+    const identityScope = Object.freeze({
+        guildId: `${context.guildId}`,
+        serverId: scope.serverId
+    });
+    for (const player of snapshot.players) {
+        if (!player.steamId) continue;
+        try {
+            history.recordIdentity(identityScope, Object.freeze({
+                steamId: player.steamId,
+                battlemetricsPlayerId: player.battlemetricsPlayerId,
+                name: player.name,
+                observedAt: snapshot.updatedAt
+            }));
+        }
+        catch (error) {
+            logWarning(context,
+                `Identity history write failed for SteamID ${player.steamId}: ${error.message || error}.`);
+        }
+    }
+}
+
 function buildSnapshot(context, scope, trackerId, tracker, previous, seeds, dependencies) {
     const now = (dependencies.now || (() => new Date()))().toISOString();
     const battlemetrics = context.client.battlemetricsInstances &&
@@ -551,6 +576,7 @@ function commitTracker(context, scope, trackerId, tracker, previous, seeds, depe
         else if (Fs.existsSync(path)) Fs.unlinkSync(path);
         throw error;
     }
+    recordSnapshotIdentities(context, scope, snapshot, dependencies);
     return snapshot;
 }
 
@@ -786,6 +812,7 @@ async function persistBattlemetricsSection(context, originalScope, playerId, sec
             players
         });
         writeSnapshot(path, next);
+        recordSnapshotIdentities(context, scope, next, dependencies);
     });
 }
 
@@ -1067,6 +1094,7 @@ async function trackList(context, query, dependencies) {
         const snapshot = buildSnapshot(context, freshScope, entry.trackerId, entry.tracker,
             previous, null, dependencies);
         writeSnapshot(path, snapshot);
+        recordSnapshotIdentities(context, freshScope, snapshot, dependencies);
         return handled(formatTrackList(snapshot, dependencies, normalizedQuery === 'all'));
     });
 }
@@ -1186,6 +1214,7 @@ async function onBattlemetricsUpdated(context) {
                     }
                 });
             }
+            recordSnapshotIdentities(context, scope, snapshot, dependencies);
         });
     }
 }

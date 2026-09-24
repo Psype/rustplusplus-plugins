@@ -98,7 +98,7 @@ function dumpMapMarkers(rustplus, mapMarkers) {
         Fs.writeFileSync('logs/rustplus-markers.json', JSON.stringify(dump, null, 2));
     }
     catch (e) {
-        rustplus.log('DEBUG', `Could not dump map markers: ${e}`, 'warning');
+        rustplus.log('DEBUG', `Could not dump map markers: ${e}`, 'warn');
     }
 }
 

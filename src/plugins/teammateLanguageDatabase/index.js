@@ -1,8 +1,8 @@
 /*
-    Independent teammate language CSV database plugin.
+    Independent player identity and teammate-language CSV database plugin.
 
-    Silently records observed teammate Steam IDs, nicknames, observation dates,
-    and a non-overwriting two-character language/country hint.
+    Silently records observed player Steam IDs, BattleMetrics IDs, nicknames,
+    observation dates, and a non-overwriting two-character language hint.
 */
 
 const Fs = require('fs');
@@ -10,7 +10,8 @@ const Path = require('path');
 const LanguageDetector = require('../../util/languageDetector.js');
 
 const DATA_DIR = Path.join(__dirname, '..', '..', '..', 'data', 'teammate-language-database');
-const CSV_HEADER = ['steamid', 'date', 'name', 'language'];
+const CSV_HEADER = ['steamid', 'battlemetrics_id', 'date', 'name', 'language'];
+const LEGACY_CSV_HEADER = ['steamid', 'date', 'name', 'language'];
 const UNKNOWN_LANGUAGE = 'XX';
 const LANGUAGE_SEPARATOR = ';';
 
@@ -39,6 +40,17 @@ function recordManual(rustplus, steamId, name) {
     return recordPlayer(rustplus, {
         steamId: steamId,
         name: name
+    });
+}
+
+function recordIdentity(rustplus, identity) {
+    if (!identity || typeof identity !== 'object') return;
+    return recordPlayer(rustplus, {
+        steamId: identity.steamId,
+        name: identity.name,
+        observedAt: identity.observedAt,
+        battlemetricsId: identity.battlemetricsPlayerId,
+        allowBlankLanguage: true
     });
 }
 
@@ -89,20 +101,32 @@ function recordPlayer(rustplus, player) {
     const existingLanguages = getLanguagesForSteamId(rows, steamId);
     const candidateLanguages = normalizeLanguages(player.language);
     const languages = existingLanguages.length === 0 ? candidateLanguages : existingLanguages;
-    const language = serializeLanguages(languages);
+    const language = languages.length > 0 ? languages.join(LANGUAGE_SEPARATOR) :
+        (player.allowBlankLanguage ? '' : UNKNOWN_LANGUAGE);
+    const candidateBattlemetricsId = validateBattlemetricsId(player.battlemetricsId);
+    const existingBattlemetricsId = getBattlemetricsIdForSteamId(rows, steamId);
+    const battlemetricsId = candidateBattlemetricsId || existingBattlemetricsId || '';
     const lastRow = getLastRowForSteamId(rows, steamId);
 
-    if (lastRow && lastRow.name === name) {
-        if (lastRow.language === UNKNOWN_LANGUAGE && language !== UNKNOWN_LANGUAGE) {
+    if (lastRow && lastRow.name === name &&
+        (!candidateBattlemetricsId || lastRow.battlemetrics_id === battlemetricsId)) {
+        let changed = false;
+        if (normalizeLanguages(lastRow.language).length === 0 && languages.length > 0) {
             lastRow.language = language;
-            writeRows(csvPath, rows);
+            changed = true;
         }
+        if (!lastRow.battlemetrics_id && battlemetricsId) {
+            lastRow.battlemetrics_id = battlemetricsId;
+            changed = true;
+        }
+        if (changed) writeRows(csvPath, rows);
         return lastRow;
     }
 
     rows.push({
         steamid: steamId,
-        date: new Date().toISOString(),
+        battlemetrics_id: battlemetricsId,
+        date: normalizeObservedAt(player.observedAt),
         name: name,
         language: language
     });
@@ -126,13 +150,22 @@ function readRows(csvPath) {
     const content = Fs.readFileSync(csvPath, 'utf8').trim();
     if (!content) return [];
 
-    return content.split(/\r?\n/).slice(1).filter(Boolean).map(line => {
+    const lines = content.split(/\r?\n/);
+    const header = parseCsvLine(lines[0]).map(value => value.trim().toLowerCase());
+    const currentSchema = header.join(',') === CSV_HEADER.join(',');
+    const legacySchema = header.join(',') === LEGACY_CSV_HEADER.join(',');
+    if (!currentSchema && !legacySchema) {
+        throw new Error(`Unsupported player identity CSV header: ${lines[0]}`);
+    }
+
+    return lines.slice(1).filter(Boolean).map(line => {
         const values = parseCsvLine(line);
         return {
             steamid: values[0] || '',
-            date: values[1] || '',
-            name: values[2] || '',
-            language: serializeLanguages(normalizeLanguages(values[3]))
+            battlemetrics_id: currentSchema ? normalizeStoredBattlemetricsId(values[1]) : '',
+            date: values[currentSchema ? 2 : 1] || '',
+            name: values[currentSchema ? 3 : 2] || '',
+            language: normalizeStoredLanguage(values[currentSchema ? 4 : 3])
         };
     });
 }
@@ -140,6 +173,7 @@ function readRows(csvPath) {
 function writeRows(csvPath, rows) {
     const lines = [CSV_HEADER.join(',')].concat(rows.map(row => [
         row.steamid,
+        row.battlemetrics_id || '',
         row.date,
         row.name,
         row.language
@@ -150,6 +184,13 @@ function writeRows(csvPath, rows) {
 function getLanguagesForSteamId(rows, steamId) {
     const row = getLatestRowForSteamId(rows, steamId);
     return row ? normalizeLanguages(row.language) : Object.freeze([]);
+}
+
+function getBattlemetricsIdForSteamId(rows, steamId) {
+    const rowsWithBattlemetricsId = rows.filter(row =>
+        row.steamid === steamId && row.battlemetrics_id);
+    const row = getLatestRowForSteamId(rowsWithBattlemetricsId, steamId);
+    return row ? row.battlemetrics_id : null;
 }
 
 function getLatestRowForSteamId(rows, steamId) {
@@ -190,6 +231,29 @@ function normalizeName(name) {
     if (name === undefined || name === null) return null;
     const value = name.toString().trim();
     return value || null;
+}
+
+function normalizeObservedAt(value) {
+    if (value === undefined || value === null) return new Date().toISOString();
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) throw new TypeError('Identity observation date is invalid.');
+    return date.toISOString();
+}
+
+function validateBattlemetricsId(value) {
+    if (value === undefined || value === null || `${value}`.trim() === '') return null;
+    const normalized = `${value}`.trim();
+    if (!/^\d+$/.test(normalized)) throw new TypeError('BattleMetrics player ID must contain digits only.');
+    return normalized;
+}
+
+function normalizeStoredBattlemetricsId(value) {
+    return validateBattlemetricsId(value) || '';
+}
+
+function normalizeStoredLanguage(value) {
+    if (value === undefined || value === null || `${value}`.trim() === '') return '';
+    return serializeLanguages(normalizeLanguages(value));
 }
 
 function normalizeLanguage(language) {
@@ -250,6 +314,7 @@ module.exports = {
     recordTeamInfo,
     recordTeamMessage,
     recordManual,
+    recordIdentity,
     getKnownPseudonyms,
     getKnownLanguage,
     getKnownLanguages

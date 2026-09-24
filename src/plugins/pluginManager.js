@@ -26,14 +26,17 @@ function getWarBanditsProvider(context) {
     return WarBandits;
 }
 
-function withWarBanditsProvider(context) {
+function withPlayerTrackerDependencies(context) {
     const dependencies = context.playerTrackerDependencies || {};
-    if (Object.prototype.hasOwnProperty.call(dependencies, 'warBanditsProvider')) return context;
+    const hasWarBandits = Object.prototype.hasOwnProperty.call(dependencies, 'warBanditsProvider');
+    const hasIdentityHistory = Object.prototype.hasOwnProperty.call(dependencies, 'identityHistory');
+    if (hasWarBandits && hasIdentityHistory) return context;
     return Object.freeze({
         ...context,
         playerTrackerDependencies: Object.freeze({
             ...dependencies,
-            warBanditsProvider: getWarBanditsProvider(context)
+            warBanditsProvider: hasWarBandits ? dependencies.warBanditsProvider : getWarBanditsProvider(context),
+            identityHistory: hasIdentityHistory ? dependencies.identityHistory : TeammateLanguageDatabase
         })
     });
 }
@@ -52,11 +55,13 @@ const plugins = Object.freeze([
     Object.freeze({ name: 'warbandits' }),
     Object.freeze({
         name: 'player-tracker',
-        handleCommand: context => PlayerTracker.handleCommand(withWarBanditsProvider(context)),
-        onBattlemetricsUpdated: context => PlayerTracker.onBattlemetricsUpdated(context)
+        handleCommand: context => PlayerTracker.handleCommand(withPlayerTrackerDependencies(context)),
+        onBattlemetricsUpdated: context => PlayerTracker.onBattlemetricsUpdated(
+            withPlayerTrackerDependencies(context))
     }),
     Object.freeze({
         name: 'raid-alarm',
+        install: context => RaidAlarm.logReadiness(context),
         handleCommand: context => RaidAlarm.handleCommand(context),
         onFcmAlarm: context => RaidAlarm.handleFcmAlarm(context, context.raidAlarmAdapters || {})
     }),
@@ -172,7 +177,11 @@ module.exports = Object.freeze({
     beforeMapMarkersUpdate: context => runHook('beforeMapMarkersUpdate', context),
     getPluginNames: () => Object.freeze(plugins.map(plugin => plugin.name)),
     getDisabledMapMarkerCommandNames: () => MapMarkerCapabilities.getDisabledCommandNames(),
+    getDisabledMapMarkerDiscordOptionNames: () => MapMarkerCapabilities.getDisabledDiscordOptionNames(),
+    getDisabledMapMarkerNotificationSettingNames: () =>
+        MapMarkerCapabilities.getDisabledNotificationSettingNames(),
     getDisabledMapMarkerSyntaxKeys: () => MapMarkerCapabilities.getDisabledSyntaxKeys(),
+    getDiscordCapabilityUiVersion: () => MapMarkerCapabilities.getDiscordCapabilityUiVersion(),
     getDeepSeaStatus: (rustplus, isInfoChannel = false) => runSyncExtension(
         { name: 'deep-sea' }, 'formatCommand', { rustplus }, null,
         () => DeepSea.formatCommand(rustplus, isInfoChannel)),
@@ -184,6 +193,9 @@ module.exports = Object.freeze({
         }),
     handleCommand,
     handleFcmAlarm: context => runFirstHandled('onFcmAlarm', context),
+    isDiscordOptionEnabled: optionName => MapMarkerCapabilities.isDiscordOptionEnabled(optionName),
+    isNotificationSettingEnabled: settingName =>
+        MapMarkerCapabilities.isNotificationSettingEnabled(settingName),
     isSlashCommandEnabled: commandName => MapMarkerCapabilities.isSlashCommandEnabled(commandName),
     install: context => runHook('install', context),
     onBattlemetricsUpdated: context => runHook('onBattlemetricsUpdated', context),

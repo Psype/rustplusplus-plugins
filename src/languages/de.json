@@ -314,6 +314,7 @@
     "createGroupCap": "ERSTELLE GRUPPE",
     "createTrackerCap": "ERSTELLE TRACKER",
     "credentialsAddedSuccessfully": "FCM-Anmeldedaten wurden erfolgreich für steamId: {steamId} hinzugefügt!",
+    "credentialsUpdatedSuccessfully": "FCM-Anmeldedaten für steamId: {steamId} wurden erfolgreich erneuert!",
     "credentialsAlreadyRegistered": "FCM-Anmeldedaten für steamId: {steamId} sind bereits registriert!",
     "credentialsCannotStartLiteAlreadyHoster": "FCM-Listener Lite für steamId: {steamId} kann nicht gestartet werden. Ist bereits Hoster.",
     "credentialsDoNotExist": "FCM-Anmeldedaten für steamId: {steamId} sind nicht vorhanden.",

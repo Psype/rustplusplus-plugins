@@ -52,3 +52,61 @@ Test('automatic observations preserve the languages from the latest row', async 
     const rows = Fs.readFileSync(csvPath, 'utf8').trim().split('\n').slice(1);
     Assert.equal(rows.at(-1).endsWith(',fr'), true);
 });
+
+Test('tracker identities migrate the CSV and log BattleMetrics/name changes without erasing languages', () => {
+    writeRows([
+        '76561198000000003,2026-09-20T10:00:00.000Z,First Name,fr;en'
+    ]);
+
+    Database.recordIdentity(rustplus, {
+        steamId: '76561198000000003',
+        battlemetricsPlayerId: '1001',
+        name: 'First Name',
+        observedAt: '2026-09-21T10:00:00.000Z'
+    });
+    Database.recordIdentity(rustplus, {
+        steamId: '76561198000000003',
+        battlemetricsPlayerId: '1001',
+        name: 'First Name',
+        observedAt: '2026-09-21T11:00:00.000Z'
+    });
+    Database.recordIdentity(rustplus, {
+        steamId: '76561198000000003',
+        battlemetricsPlayerId: '1001',
+        name: 'Renamed Player',
+        observedAt: '2026-09-22T10:00:00.000Z'
+    });
+    Database.recordIdentity(rustplus, {
+        steamId: '76561198000000003',
+        battlemetricsPlayerId: '1001',
+        name: 'First Name',
+        observedAt: '2026-09-23T10:00:00.000Z'
+    });
+
+    const lines = Fs.readFileSync(csvPath, 'utf8').trim().split('\n');
+    Assert.equal(lines[0], 'steamid,battlemetrics_id,date,name,language');
+    const rows = lines.slice(1);
+    Assert.equal(rows.length, 4, 'an unchanged consecutive identity must not duplicate a row');
+    Assert.equal(rows[1],
+        '76561198000000003,1001,2026-09-21T10:00:00.000Z,First Name,fr;en');
+    Assert.equal(rows[2],
+        '76561198000000003,1001,2026-09-22T10:00:00.000Z,Renamed Player,fr;en');
+    Assert.equal(rows[3],
+        '76561198000000003,1001,2026-09-23T10:00:00.000Z,First Name,fr;en');
+    Assert.deepEqual(Database.getKnownLanguages(rustplus, '76561198000000003'), ['fr', 'en']);
+});
+
+Test('tracker-only identities may keep an empty language column', () => {
+    Database.recordIdentity(rustplus, {
+        steamId: '76561198000000004',
+        battlemetricsPlayerId: '1002',
+        name: 'Tracked Enemy',
+        observedAt: '2026-09-24T10:00:00.000Z'
+    });
+
+    const lines = Fs.readFileSync(csvPath, 'utf8').trimEnd().split('\n');
+    Assert.equal(lines[0], 'steamid,battlemetrics_id,date,name,language');
+    Assert.equal(lines[1],
+        '76561198000000004,1002,2026-09-24T10:00:00.000Z,Tracked Enemy,');
+    Assert.deepEqual(Database.getKnownLanguages(rustplus, '76561198000000004'), []);
+});
