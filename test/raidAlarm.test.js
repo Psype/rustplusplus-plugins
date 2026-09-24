@@ -4,7 +4,7 @@ const Test = require('node:test');
 const RaidAlarm = require('../src/plugins/raidAlarm');
 
 function createContext({ notifyInGame = true, title = RaidAlarm.DEFAULT_TITLE,
-    message = 'wall.external.high.stone destroyed at H14' } = {}) {
+    message = 'Armored Door destroyed at B15' } = {}) {
     const calls = [];
     const logs = [];
     const serverId = '127.0.0.1-28082';
@@ -23,7 +23,9 @@ function createContext({ notifyInGame = true, title = RaidAlarm.DEFAULT_TITLE,
         getInstance: () => instance,
         intlGet: (_guildId, key, variables = {}) => {
             if (key === 'baseIsUnderAttack') return 'Base under attack';
-            if (key === 'raidAlarmDestroyedAt') return `${variables.item} @ ${variables.location}`;
+            if (key === 'raidAlarmDestroyedAt') {
+                return `${variables.item} destroyed at ${variables.location}.`;
+            }
             if (key === 'infoCap') return 'INFO';
             return key;
         },
@@ -57,7 +59,9 @@ Test('generic SmartAlarm notification queues in-game before an isolated Discord 
 
     Assert.equal(handled, true);
     Assert.deepEqual(fixture.calls.map(call => call.output), ['in-game', 'discord']);
-    Assert.equal(fixture.calls[0].text, 'Base under attack: wall.external.high.stone @ H14');
+    Assert.equal(fixture.calls[0].text,
+        ':exclamation: :poggers: GETTING RAIDED: Armored Door destroyed at B15  ' +
+        ':oldmanlaugh: :exclamation:');
     const failureLog = fixture.logs.find(log => String(log[1]).includes('raid-alarm.discord'));
     Assert.ok(failureLog);
     Assert.equal(failureLog[2], 'warn');
@@ -241,6 +245,40 @@ Test('alarmstatus arms a 120-second pairing proof and accepts only the matching 
     Assert.deepEqual(fixture.calls, [{
         output: 'in-game', text: 'Pairing received: Facepunch push delivery verified.'
     }]);
+});
+
+Test('alarmstatus does not arm a pairing watcher for an operational saved server pairing', async () => {
+    const fixture = createContext();
+    let timerStarted = false;
+    fixture.context.client.fcmListeners = {
+        guild: { rppConnectionState: { status: 'connected', steamId: '76561197975819827' } }
+    };
+    const server = fixture.context.client.getInstance().serverList['127.0.0.1-28082'];
+    server.steamId = '76561197975819827';
+    server.playerToken = -123456;
+    server.alarms = {};
+    fixture.context.client.rustplusInstances.guild.isOperational = true;
+
+    const response = await RaidAlarm.handleCommand({
+        source: 'inGame',
+        client: fixture.context.client,
+        rustplus: fixture.context.client.rustplusInstances.guild,
+        guildId: 'guild',
+        command: '!alarmstatus',
+        commandLowerCase: '!alarmstatus',
+        prefix: '!',
+        raidAlarmAdapters: {
+            scheduler: {
+                setTimeout: () => { timerStarted = true; },
+                clearTimeout: () => undefined
+            }
+        }
+    });
+
+    Assert.match(response.response[0], /pair active/);
+    Assert.equal(response.response.length, 2);
+    Assert.equal(response.response[1], 'Last alarms: none since this process started.');
+    Assert.equal(timerStarted, false);
 });
 
 Test('pairing proof timeout reports failure without retry', async () => {

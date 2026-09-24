@@ -13,6 +13,8 @@ const DEFAULT_TITLE = 'You\'re getting raided!';
 const RAID_TITLE = /^(?:you(?:'|\u2019)?re|you\s+are)?\s*getting\s+raided!?\s*$/i;
 const DEDUPLICATION_MS = 5000;
 const PAIR_WATCH_MS = 120000;
+const RAID_IN_GAME_PREFIX = ':exclamation: :poggers: GETTING RAIDED';
+const RAID_IN_GAME_SUFFIX = ':oldmanlaugh: :exclamation:';
 const recentAlerts = new Map();
 const pairWatches = new Map();
 
@@ -40,6 +42,9 @@ function getReadiness(client, guildId, rustplus, now = Date.now()) {
         rustplus?.generalSettings?.muteInGameBotMessages === true;
     const alarmCount = server && server.alarms && typeof server.alarms === 'object' ?
         Object.keys(server.alarms).length : 0;
+    const hasPlayerToken = server && ['string', 'number'].includes(typeof server.playerToken) &&
+        String(server.playerToken).trim() !== '';
+    const serverPairing = rustplus?.isOperational === true && hasPlayerToken ? 'active' : 'inactive';
 
     return Object.freeze({
         mcs: state?.status || 'missing',
@@ -48,6 +53,7 @@ function getReadiness(client, guildId, rustplus, now = Date.now()) {
         pairing: state?.lastServerPairingAt ? formatAge(state.lastServerPairingAt, now) : 'unseen',
         alarm: state?.lastAlarmAt ? formatAge(state.lastAlarmAt, now) : 'unseen',
         account,
+        serverPairing,
         inGame,
         mute: muted ? 'on' : 'off',
         rawLog: LoggingSettings.isEnabled() ? 'on' : 'off',
@@ -59,19 +65,22 @@ function getReadiness(client, guildId, rustplus, now = Date.now()) {
 function readinessSignature(readiness) {
     return [readiness.mcs, readiness.push, readiness.lastChannelId || '-', readiness.alarm === 'unseen' ?
         'unseen' : 'seen', readiness.pairing === 'unseen' ? 'unseen' : 'seen', readiness.account,
-    readiness.inGame, readiness.mute, readiness.rawLog,
+    readiness.serverPairing, readiness.inGame, readiness.mute, readiness.rawLog,
     readiness.pairedVanillaAlarms].join('|');
 }
 
 function formatReadiness(readiness, compact = false) {
     if (compact) {
-        return `Alarm MCS ${readiness.mcs} | push ${readiness.push} | pair ${readiness.pairing} | ` +
+        const pairing = readiness.pairing === 'unseen' && readiness.serverPairing === 'active' ?
+            'active' : readiness.pairing;
+        return `Alarm MCS ${readiness.mcs} | push ${readiness.push} | pair ${pairing} | ` +
             `alarm ${readiness.alarm} | account ${readiness.account} | out ${readiness.inGame} | ` +
             `mute ${readiness.mute} | raw ${readiness.rawLog}`;
     }
     return `mcs=${readiness.mcs}; push=${readiness.push}` +
         `${readiness.lastChannelId ? ` (last-channel=${readiness.lastChannelId})` : ''}; ` +
-        `pair=${readiness.pairing}; alarm=${readiness.alarm}; account=${readiness.account}; ` +
+        `pair=${readiness.pairing}; alarm=${readiness.alarm}; server-pairing=${readiness.serverPairing}; ` +
+        `account=${readiness.account}; ` +
         `in-game=${readiness.inGame}; ` +
         `mute=${readiness.mute}; rawlog=${readiness.rawLog}; ` +
         `paired-vanilla-alarms=${readiness.pairedVanillaAlarms}.`;
@@ -196,6 +205,13 @@ function getServerId(body) {
 
 function formatAlert(alertText) {
     return [alertText.title, alertText.message].filter(value => value !== '').join(': ');
+}
+
+function formatInGameAlert(title, alertText) {
+    if (!isRaidTitle(title)) return formatAlert(alertText);
+    const detail = alertText.message.replace(/\.$/, '');
+    return detail === '' ? `${RAID_IN_GAME_PREFIX}  ${RAID_IN_GAME_SUFFIX}` :
+        `${RAID_IN_GAME_PREFIX}: ${detail}  ${RAID_IN_GAME_SUFFIX}`;
 }
 
 function getDeduplicationKey(guildId, serverId, alertText) {
@@ -329,7 +345,7 @@ async function handleCommand(context) {
     if (context.commandLowerCase === alarmStatus) {
         const readiness = getReadiness(context.client, context.guildId, context.rustplus);
         const response = [formatReadiness(readiness, true)];
-        if (readiness.pairing === 'unseen') {
+        if (readiness.pairing === 'unseen' && readiness.serverPairing !== 'active') {
             response.push(armPairWatch(context, readiness, context.raidAlarmAdapters || {}));
         }
         response.push(...formatAlarmHistory(readiness));
@@ -405,7 +421,7 @@ async function handleFcmAlarm(context, adapters = {}) {
             logInGameRoute(context.client, guildId, `skipped; ${blockReason}.`, 'warn');
         }
         else if (await deliver(context.client, guildId, 'in-game', () =>
-            sendInGameAlert(rustplus, formatAlert(alertText)))) {
+            sendInGameAlert(rustplus, formatInGameAlert(context.title, alertText)))) {
             logInGameRoute(context.client, guildId, `delivered for ${serverId}.`);
         }
         else {

@@ -249,7 +249,10 @@ Test('MCS alarm data reaches the acknowledged Rust team-chat boundary end to end
     });
     await waitFor(() => sent.length === 1);
 
-    Assert.deepEqual(sent, ['[BOT] Base under attack: Stone Wall destroyed at H14']);
+    Assert.deepEqual(sent, [
+        '[BOT] :exclamation: :poggers: GETTING RAIDED: Stone Wall destroyed at H14  ' +
+        ':oldmanlaugh: :exclamation:'
+    ]);
     receiver.destroy();
 });
 
