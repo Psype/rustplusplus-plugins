@@ -143,6 +143,7 @@ Test('Discord image boundary validates origin, signature, size and decoded dimen
     Assert.equal(result.width, 1260);
     Assert.equal(result.imageBase64, png.toString('base64'));
     Assert.equal(Object.isFrozen(result), true);
+    Assert.equal(ImageAttachment.validateMetadata({ ...attachment, contentType: null }).contentType, 'image/png');
 
     Assert.throws(() => ImageAttachment.validateMetadata({
         ...attachment, url: 'https://example.invalid/f7.png'
@@ -151,6 +152,34 @@ Test('Discord image boundary validates origin, signature, size and decoded dimen
         fetchImpl: async () => ({ ...fakeResponse, arrayBuffer: async () => Buffer.from('not png') }),
         JimpImpl: { read: async () => ({ bitmap: { width: 1, height: 1 } }) }
     }), /length does not match|signature/);
+});
+
+Test('Discord image boundary accepts a structurally valid bounded WebP', async () => {
+    const webp = Buffer.alloc(30);
+    webp.write('RIFF', 0, 'ascii');
+    webp.writeUInt32LE(22, 4);
+    webp.write('WEBP', 8, 'ascii');
+    webp.write('VP8X', 12, 'ascii');
+    webp.writeUIntLE(1279, 24, 3);
+    webp.writeUIntLE(719, 27, 3);
+    const attachment = {
+        url: 'https://cdn.discordapp.com/attachments/1/2/cinfo.webp',
+        contentType: 'image/webp',
+        size: webp.length
+    };
+    const result = await ImageAttachment.downloadImage(attachment, {
+        fetchImpl: async () => ({
+            ok: true,
+            status: 200,
+            headers: { get: () => `${webp.length}` },
+            body: null,
+            arrayBuffer: async () => webp
+        }),
+        JimpImpl: { read: async () => { throw new Error('WebP must use bounded header parsing.'); } }
+    });
+    Assert.equal(result.mime, 'image/webp');
+    Assert.equal(result.width, 1280);
+    Assert.equal(result.height, 720);
 });
 
 Test('Tesseract TSV parser returns only validated word boxes', () => {

@@ -8,7 +8,7 @@ function imageSubcommand(name, description) {
     return (/** @type {Builder.SlashCommandSubcommandBuilder} */ subcommand) =>
         subcommand.setName(name).setDescription(description)
         .addAttachmentOption((/** @type {Builder.SlashCommandAttachmentOption} */ option) => option.setName('image')
-            .setDescription('Original PNG or JPEG screenshot.').setRequired(true));
+            .setDescription('Original PNG, JPEG, or WebP screenshot.').setRequired(true));
 }
 
 module.exports = Object.freeze({

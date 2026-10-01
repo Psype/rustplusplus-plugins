@@ -87,6 +87,8 @@ Test('Discord import previews first, binds confirmation to requester, then commi
     const events = await store.readAll();
     Assert.equal(events.length, 4);
     Assert.equal(events.filter(event => event.kind === 'clan_snapshot').length, 1);
+    Assert.equal(events.find(event => event.kind === 'clan_snapshot').payload.members
+        .every(member => member.role === 'unknown'), true);
 
     Assert.equal(await ImportWorkflow.handleButton({ client: value.client, interaction: confirmation }), true);
     Assert.match(value.updates.at(-1).content, /expired or already handled/);

@@ -508,7 +508,8 @@ bornent ce risque sans inventer de correspondance.
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale finale après ajout du multi-image/multi-panneau : `npm test` passe 149/149 et `tsc --noEmit` passe. Une
+QA locale finale après ajout du multi-image/multi-panneau et du WebP Discord : `npm test` passe 150/150 et
+`tsc --noEmit` passe. Une
 exécution antérieure avait reproduit le timeout FCM historique sous charge, puis son fichier était repassé 5/5
 isolément. Le sélecteur Windows, un webhook Discord réel et l'OCR de PNG originaux restent à valider interactivement ;
 les tests n'envoient rien sur le réseau.

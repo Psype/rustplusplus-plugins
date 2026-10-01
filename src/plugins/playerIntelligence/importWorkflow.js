@@ -142,6 +142,12 @@ async function parseAttachment(client, kindHint, attachment, reference, attachme
                     { ...dependencies.cinfoOptions, roleHints: roleHints[index] }) : block.parsed }));
         }
         catch (error) {
+            blocks = blocks.map(block => ({ ...block,
+                parsed: block.parsed.complete ? parseCinfoWords(block.words, {
+                    ...dependencies.cinfoOptions,
+                    roleHints: block.parsed.members.map((/** @type {any} */ member) =>
+                        ({ name: member.name, role: 'unknown' }))
+                }) : block.parsed }));
             if (typeof client.log === 'function') {
                 client.log('PLAYER_INTELLIGENCE', `Optional role-color read failed: ${sanitizeError(error)}`, 'warn');
             }

@@ -19,7 +19,7 @@ The bot invokes `tesseract` locally and never downloads a model at runtime. If t
 `RPP_TESSERACT_PATH` to its absolute path before starting the bot.
 
 The private `intel-imports` channel is created automatically when the guild is set up again or the bot restarts. A
-manual message may contain 1 to 10 PNG/JPEG images. The bot detects F7 versus `/cinfo` from OCR anchors; an optional
+manual message may contain 1 to 10 PNG/JPEG/WebP images. The bot detects F7 versus `/cinfo` from OCR anchors; an optional
 leading `cinfo` or `f7` acts as a strict hint for every attached image. One image may contain several vertically
 stacked `/cinfo` panels: repeated `ClanTag` anchors are split and validated independently, without fixed coordinates.
 

@@ -159,7 +159,7 @@ Options | Description | Required
 
 ## **/intelimport**
 
-> **Import player intelligence from an original PNG or JPEG screenshot.** Use `/intelimport cinfo image:<file>` for a
+> **Import player intelligence from an original PNG, JPEG, or WebP screenshot.** Use `/intelimport cinfo image:<file>` for a
 > WarBandits `/cinfo` panel or `/intelimport f7 image:<file>` for Rust's F7 recent-player list. The command works only
 > in the configured private commands channel. It validates the Discord CDN origin, type, signature, byte size and
 > decoded pixel count, runs one serialized local Tesseract process, then displays an ephemeral preview. Only the
@@ -180,8 +180,8 @@ ignored. All paths use the same validation, five-minute server/wipe binding and 
 
 Subcommand | Options | Description | Required
 ---------- | ------- | ----------- | --------
-`cinfo` | `image` | Original `/cinfo` PNG or JPEG. | `True`
-`f7` | `image` | Original F7 PNG or JPEG. | `True`
+`cinfo` | `image` | Original `/cinfo` PNG, JPEG, or WebP. | `True`
+`f7` | `image` | Original F7 PNG, JPEG, or WebP. | `True`
 
 
 ## **/item**
