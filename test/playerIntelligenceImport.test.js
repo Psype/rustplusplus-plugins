@@ -111,6 +111,46 @@ Test('Discord import previews first, binds confirmation to requester, then commi
     Assert.equal((await store.readAll()).length, 4);
 });
 
+Test('dated cinfo import binds the observation to its prior scheduled wipe', async t => {
+    const value = createHarness(t);
+    const command = {
+        ...value.command,
+        options: {
+            getSubcommand: () => 'cinfo',
+            getAttachment: () => ({ id: 'image' }),
+            getString: name => name === 'captured_at' ? '2026-09-29 21:15' : null
+        }
+    };
+    await ImportWorkflow.beginImport(value.client, command);
+    Assert.match(value.edits[0].content,
+        /Historical capture: 2026-09-29T21:15:00\.000Z \| wipe: 2026-09-29T14:00:00\.000Z/);
+    const customId = value.edits[0].components[0].components[0].data.custom_id;
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { customId, guildId: 'guild', channelId: 'commands', user: { id: 'requester' } }
+    }), true);
+    const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
+    const events = await store.readAll();
+    Assert.equal(events.length, 4);
+    Assert.equal(events.every(event => event.observedAt === '2026-09-29T21:15:00.000Z'), true);
+    Assert.equal(events.every(event => event.scope.wipeId === 'wipe:2026-09-29T14:00:00.000Z'), true);
+});
+
+Test('dated cinfo rejects a capture earlier than its clan creation time', async t => {
+    const value = createHarness(t);
+    await ImportWorkflow.beginImport(value.client, {
+        ...value.command,
+        options: {
+            getSubcommand: () => 'cinfo',
+            getAttachment: () => ({ id: 'image' }),
+            getString: () => '2026-09-29 14:30'
+        }
+    });
+    Assert.match(value.edits[0].content, /Established time must fall between the selected wipe start and capture time/);
+    const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
+    Assert.equal((await store.readAll()).length, 0);
+});
+
 Test('OCR compares one text-mask pass with raw semantics and feeds persistent aliases as user words', async t => {
     const value = createHarness(t);
     const calls = [];
@@ -481,6 +521,11 @@ Test('manual roster correction is validated, previewed, and learned only after c
         }
     }), true);
     Assert.match(modal.data.custom_id, /^PIImportEditModal:/u);
+    let modalDeferred = false;
+    value.client.playerIntelligenceImportDependencies.identityCandidates = async () => {
+        Assert.equal(modalDeferred, true);
+        return [];
+    };
     const corrected = [
         'Sumdumsit', 'Tingtong', 'GingerMinx', 'GrimReaper', 'n444shj',
         'spirit_monger19', 'Egon', 'JawJax'
@@ -490,10 +535,12 @@ Test('manual roster correction is validated, previewed, and learned only after c
         interaction: {
             customId: modal.data.custom_id,
             guildId: 'guild', channelId: 'commands', user: { id: 'requester' },
+            deferUpdate: async () => { modalDeferred = true; },
             fields: { getTextInputValue: () => corrected.join('\n') }
         }
     }), true);
-    const correctedPreview = value.updates.at(-1);
+    Assert.equal(modalDeferred, true);
+    const correctedPreview = value.edits.at(-1);
     Assert.match(correctedPreview.content, /8\/8 names read/);
     Assert.match(correctedPreview.content, /Corrected roster:.*n444shj, spirit_monger19/u);
     const libraryFile = Path.join(value.directory, 'guild', '42', 'visual-alias-library.json');
@@ -602,13 +649,15 @@ Test('short-name collision resolves only after bounded SteamID corroboration', a
 Test('dedicated import channel accepts only an approved helper webhook and still requires confirmation', async t => {
     const value = createHarness(t);
     const message = {
-        guildId: 'guild', channelId: 'intel-imports', id: 'message-1', content: 'cinfo',
+        guildId: 'guild', channelId: 'intel-imports', id: 'message-1', content: 'cinfo 2026-09-29 21:15',
         webhookId: '12345678901234567', author: { id: 'webhook', bot: true },
         attachments: new Map([['image', { id: 'image' }]]),
         reply: async payload => value.replies.push(payload)
     };
     Assert.equal(await ImportWorkflow.handleMessage({ client: value.client, message }), true);
     Assert.equal(value.replies.length, 1);
+    Assert.match(value.replies[0].content,
+        /Historical capture: 2026-09-29T21:15:00\.000Z \| wipe: 2026-09-29T14:00:00\.000Z/);
     Assert.match(value.replies[0].content, /OCR \/cinfo/);
     const customId = value.replies[0].components[0].components[0].data.custom_id;
     const confirmation = {
@@ -617,7 +666,10 @@ Test('dedicated import channel accepts only an approved helper webhook and still
     Assert.equal(await ImportWorkflow.handleButton({ client: value.client, interaction: confirmation }), true);
     Assert.match(value.updates.at(-1).content, /Import committed/);
     const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
-    Assert.equal((await store.readAll()).filter(event => event.kind === 'clan_snapshot').length, 1);
+    const snapshots = (await store.readAll()).filter(event => event.kind === 'clan_snapshot');
+    Assert.equal(snapshots.length, 1);
+    Assert.equal(snapshots[0].observedAt, '2026-09-29T21:15:00.000Z');
+    Assert.equal(snapshots[0].scope.wipeId, 'wipe:2026-09-29T14:00:00.000Z');
 
     let downloaded = false;
     value.client.playerIntelligenceImportDependencies.downloadImage = async () => {

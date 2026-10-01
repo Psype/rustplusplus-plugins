@@ -108,6 +108,11 @@ function previewItems(items) {
     return `${items.length > 1 ? `Detected ${items.length} import blocks.\n` : ''}${sections.join('\n\n')}`;
 }
 
+/** @param {readonly {parsed:any}[]} items @param {string|null} timingText */
+function timedPreview(items, timingText) {
+    return `${timingText ? `${timingText}\n` : ''}${previewItems(items)}`;
+}
+
 /** @param {readonly any[]} events */
 function previousImportText(events) {
     const snapshot = events.find(event => event.kind === 'clan_snapshot');
@@ -521,9 +526,9 @@ async function corroborateCandidateAliases(context, items, client, dependencies)
 /**
  * @param {any} client @param {any} source
  * @param {readonly {kindHint:'cinfo'|'f7'|null,attachment:any}[]} requests
- * @param {string|null} requesterUserId @param {string} reference
+ * @param {string|null} requesterUserId @param {string} reference @param {string|null} captureTime
  */
-async function prepareImports(client, source, requests, requesterUserId, reference) {
+async function prepareImports(client, source, requests, requesterUserId, reference, captureTime = null) {
     if (!Array.isArray(requests) || requests.length < 1 || requests.length > 10) {
         throw new Error('Attach between 1 and 10 PNG/JPEG/WebP images.');
     }
@@ -632,15 +637,8 @@ async function prepareImports(client, source, requests, requesterUserId, referen
     }
     if (corroborated.length > 0) items = resolveItems(Object.freeze([...candidates, ...corroborated]));
     if (items.length < 1 || items.length > 20) throw new Error('Detected import block count must be between 1 and 20.');
-    const preview = previewItems(items);
-    if (Array.from(preview).length > 1900) {
-        return Object.freeze({
-            content: `Detected ${items.length} import blocks, but the confirmation preview is too long. ` +
-                'Split the upload into smaller batches. Nothing was committed.',
-            components: [], allowedMentions: { parse: [] }
-        });
-    }
     if (items.some(item => item.parsed.kind === 'f7' ? !item.parsed.complete : !item.parsed.importable)) {
+        const preview = previewItems(items);
         return Object.freeze({
             content: `${preview}\nNothing was committed.`, components: [],
             allowedMentions: { parse: [] }
@@ -653,6 +651,24 @@ async function prepareImports(client, source, requests, requesterUserId, referen
             components: []
         });
     }
+    if (captureTime !== null && items.some(item => item.parsed.kind !== 'cinfo')) {
+        throw new Error('Historical capture time is supported only for cinfo imports.');
+    }
+    const importScope = captureTime === null ? scope : await Runtime.resolveHistoricalScope(context, captureTime);
+    if (captureTime !== null && items.some(item => item.parsed.establishedAtUtc < importScope.wipeStart ||
+        item.parsed.establishedAtUtc > importScope.observedAt)) {
+        throw new Error('Clan Established time must fall between the selected wipe start and capture time.');
+    }
+    const timingText = captureTime === null ? null :
+        `Historical capture: ${importScope.observedAt} | wipe: ${importScope.wipeStart}`;
+    const preview = timedPreview(items, timingText);
+    if (Array.from(preview).length > 1900) {
+        return Object.freeze({
+            content: `Detected ${items.length} import blocks, but the confirmation preview is too long. ` +
+                'Split the upload into smaller batches. Nothing was committed.',
+            components: [], allowedMentions: { parse: [] }
+        });
+    }
     const token = Crypto.randomBytes(12).toString('hex');
     const createdAt = Date.now();
     pending.set(token, Object.freeze({
@@ -660,7 +676,12 @@ async function prepareImports(client, source, requests, requesterUserId, referen
         channelId: `${source.channelId}`,
         userId: requesterUserId,
         serverKey: scope.serverKey,
-        wipeId: scope.wipeId,
+        activeWipeId: scope.wipeId,
+        wipeId: importScope.wipeId,
+        wipeStart: importScope.wipeStart,
+        observedAt: captureTime === null ? null : importScope.observedAt,
+        historical: captureTime !== null,
+        timingText,
         visualFile,
         items: Object.freeze(items),
         createdAt,
@@ -684,9 +705,11 @@ async function beginImport(client, interaction) {
     }
     const kind = interaction.options.getSubcommand();
     const attachment = interaction.options.getAttachment('image', true);
+    const captureTime = kind === 'cinfo' && typeof interaction.options.getString === 'function' ?
+        interaction.options.getString('captured_at', false) : null;
     try {
         const payload = await prepareImports(client, interaction, [{ kindHint: kind, attachment }],
-            `${interaction.user.id}`, `discord-interaction:${interaction.id}`);
+            `${interaction.user.id}`, `discord-interaction:${interaction.id}`, captureTime);
         await client.interactionEditReply(interaction, payload);
     }
     catch (error) {
@@ -715,7 +738,8 @@ async function handleMessage({ client, message }) {
             allowedMentions: { parse: [] } });
         return true;
     }
-    const kindMatch = `${message.content || ''}`.trim().match(/^(cinfo|f7)(?:\s|$)/i);
+    const content = `${message.content || ''}`.trim();
+    const kindMatch = content.match(/^(cinfo|f7)(?:\s|$)/i);
     const attachments = message.attachments && typeof message.attachments.values === 'function' ?
         [...message.attachments.values()] : [];
     if (attachments.length < 1 || attachments.length > 10) {
@@ -726,10 +750,17 @@ async function handleMessage({ client, message }) {
         return true;
     }
     const kindHint = kindMatch ? /** @type {'cinfo'|'f7'} */ (kindMatch[1].toLowerCase()) : null;
+    const hintLength = kindMatch ? kindMatch[0].length : 0;
+    const captureTime = kindHint === 'cinfo' ? content.slice(hintLength).trim() || null : null;
+    if (kindHint === 'f7' && content.slice(hintLength).trim()) {
+        await message.reply({ content: 'Historical capture time is supported only for cinfo imports. Nothing was committed.',
+            components: [], allowedMentions: { parse: [] } });
+        return true;
+    }
     try {
         const payload = await prepareImports(client, message,
             attachments.map(attachment => ({ kindHint, attachment })),
-            webhookId ? null : `${message.author.id}`, `discord-message:${message.id}`);
+            webhookId ? null : `${message.author.id}`, `discord-message:${message.id}`, captureTime);
         await message.reply(payload);
     }
     catch (error) {
@@ -753,6 +784,12 @@ async function respondButton(client, interaction, content) {
     await client.interactionUpdate(interaction, {
         content, embeds: [], components: [], allowedMentions: { parse: [] }
     });
+}
+
+/** @param {any} scope @param {any} item */
+function pendingScopeMatches(scope, item) {
+    return Boolean(scope && scope.serverKey === item.serverKey &&
+        (item.historical === true || scope.wipeId === item.activeWipeId));
 }
 
 /** @param {any} context @param {readonly any[]} parsedItems @param {any} client */
@@ -905,7 +942,7 @@ async function handleButton({ client, interaction }) {
     if (!await client.validatePermissions(interaction)) return true;
     const context = contextFor(client, interaction);
     const scope = Runtime.getScope(context);
-    if (!scope || scope.serverKey !== item.serverKey || scope.wipeId !== item.wipeId) {
+    if (!pendingScopeMatches(scope, item)) {
         pending.delete(token);
         await respondButton(client, interaction, 'Active server or wipe changed. Nothing was committed.');
         return true;
@@ -914,7 +951,12 @@ async function handleButton({ client, interaction }) {
     try {
         const imports = item.items.map((/** @type {any} */ entry) => ({
             parsed: entry.parsed,
-            metadata: { sha256: entry.sha256, reference: entry.reference }
+            metadata: {
+                sha256: entry.sha256,
+                reference: entry.reference,
+                ...(item.observedAt ? { observedAt: item.observedAt, wipeId: item.wipeId,
+                    wipeStart: item.wipeStart } : {})
+            }
         }));
         result = await Runtime.commitParsedImports(context, imports, {
             onDuplicate: replace ? 'replace' : keep ? 'skip' : 'prompt',
@@ -1019,33 +1061,49 @@ async function handleModal({ client, interaction }) {
     }
     const context = contextFor(client, interaction);
     const scope = Runtime.getScope(context);
-    if (!scope || scope.serverKey !== item.serverKey || scope.wipeId !== item.wipeId) {
+    if (!pendingScopeMatches(scope, item)) {
         pending.delete(token);
         await client.interactionReply(interaction, {
             content: 'Active server or wipe changed. Nothing was committed.', ephemeral: true
         });
         return true;
     }
+    let names;
     try {
-        const names = parseCorrectedRoster(
+        names = parseCorrectedRoster(
             interaction.fields.getTextInputValue(EDIT_ROSTER_FIELD), target.parsed.declaredCount);
-        const corrected = await resolveCorrectedItem(context, item, index, names, client);
-        const items = Object.freeze(item.items.map((/** @type {any} */ entry, /** @type {number} */ itemIndex) =>
-            itemIndex === index ? corrected : entry));
-        const preview = item.duplicatePrompt ? replacementPreview(items, item.duplicatePrompt) : previewItems(items);
-        if (Array.from(preview).length > 1900) {
-            throw new Error('Corrected preview exceeds the Discord limit; split the upload into smaller batches.');
-        }
-        pending.set(token, Object.freeze({ ...item, items }));
-        await client.interactionUpdate(interaction, {
-            content: preview, components: actionRows(token, items, item.duplicatePrompt ? 'replace' : 'confirm'),
-            embeds: [], allowedMentions: { parse: [] }
-        });
     }
     catch (error) {
         await client.interactionReply(interaction, {
             content: `Roster correction rejected safely: ${sanitizeError(error)} Preview unchanged.`,
             ephemeral: true
+        });
+        return true;
+    }
+    await interaction.deferUpdate();
+    try {
+        const corrected = await resolveCorrectedItem(context, item, index, names, client);
+        const items = Object.freeze(item.items.map((/** @type {any} */ entry, /** @type {number} */ itemIndex) =>
+            itemIndex === index ? corrected : entry));
+        const preview = item.duplicatePrompt ? replacementPreview(items, item.duplicatePrompt) :
+            timedPreview(items, item.timingText || null);
+        if (Array.from(preview).length > 1900) {
+            throw new Error('Corrected preview exceeds the Discord limit; split the upload into smaller batches.');
+        }
+        pending.set(token, Object.freeze({ ...item, items }));
+        await client.interactionEditReply(interaction, {
+            content: preview, components: actionRows(token, items, item.duplicatePrompt ? 'replace' : 'confirm'),
+            embeds: [], allowedMentions: { parse: [] }
+        });
+    }
+    catch (error) {
+        const preview = item.duplicatePrompt ? replacementPreview(item.items, item.duplicatePrompt) :
+            timedPreview(item.items, item.timingText || null);
+        await client.interactionEditReply(interaction, {
+            content: `${preview}\nRoster correction rejected safely: ${sanitizeError(error)} Preview unchanged.`
+                .slice(0, 1900),
+            components: actionRows(token, item.items, item.duplicatePrompt ? 'replace' : 'confirm'),
+            embeds: [], allowedMentions: { parse: [] }
         });
     }
     return true;

@@ -45,6 +45,95 @@ function nowIso(dependencies = {}) {
     return iso;
 }
 
+/** @param {unknown} value */
+function parseCaptureTime(value) {
+    if (typeof value !== 'string') throw new TypeError('Capture time must be a string.');
+    const clean = value.trim();
+    const local = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/u.exec(clean);
+    if (local) {
+        const [year, month, day, hour, minute] = local.slice(1, 6).map(Number);
+        const second = local[6] === undefined ? 0 : Number(local[6]);
+        const normalized = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+        if (normalized.getUTCFullYear() !== year || normalized.getUTCMonth() !== month - 1 ||
+            normalized.getUTCDate() !== day || normalized.getUTCHours() !== hour ||
+            normalized.getUTCMinutes() !== minute || normalized.getUTCSeconds() !== second) {
+            throw new Error('Capture time is not a valid calendar date.');
+        }
+        return normalized.toISOString();
+    }
+    const explicit = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-](\d{2}):(\d{2}))$/u
+        .exec(clean);
+    if (!explicit) {
+        throw new Error('Use YYYY-MM-DD HH:mm (GMT) or an ISO timestamp with an explicit offset.');
+    }
+    const [year, month, day, hour, minute, second = 0] = explicit.slice(1, 7).map(value => Number(value || 0));
+    const wall = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    const offsetHour = explicit[9] === undefined ? 0 : Number(explicit[9]);
+    const offsetMinute = explicit[10] === undefined ? 0 : Number(explicit[10]);
+    if (wall.getUTCFullYear() !== year || wall.getUTCMonth() !== month - 1 || wall.getUTCDate() !== day ||
+        wall.getUTCHours() !== hour || wall.getUTCMinutes() !== minute || wall.getUTCSeconds() !== second ||
+        offsetHour > 23 || offsetMinute > 59) throw new Error('Capture time is not a valid calendar date.');
+    const iso = canonicalIso(clean);
+    if (!iso) throw new Error('Capture time is invalid.');
+    return iso;
+}
+
+/** @param {string} observedAt */
+function regularWipeStart(observedAt) {
+    const capture = new Date(observedAt);
+    for (let daysBack = 0; daysBack < 7; daysBack += 1) {
+        const calendar = new Date(Date.UTC(capture.getUTCFullYear(), capture.getUTCMonth(),
+            capture.getUTCDate() - daysBack));
+        const weekday = calendar.getUTCDay();
+        if (weekday !== 2 && weekday !== 5) continue;
+        const boundary = new Date(Date.UTC(calendar.getUTCFullYear(), calendar.getUTCMonth(),
+            calendar.getUTCDate(), 14, 0, 0)).toISOString();
+        if (boundary <= observedAt) return boundary;
+    }
+    throw new Error('Unable to derive the regular WarBandits wipe boundary.');
+}
+
+/** @param {number} year @param {number} month */
+function forcedWipeForMonth(year, month) {
+    for (let day = 1; day <= 7; day += 1) {
+        if (new Date(Date.UTC(year, month - 1, day)).getUTCDay() !== 4) continue;
+        return new Date(Date.UTC(year, month - 1, day, 19, 0, 0)).toISOString();
+    }
+    throw new Error('Unable to derive the monthly Rust forced-wipe boundary.');
+}
+
+/** @param {string} observedAt */
+function monthlyForcedWipeStart(observedAt) {
+    const capture = new Date(observedAt);
+    const current = forcedWipeForMonth(capture.getUTCFullYear(), capture.getUTCMonth() + 1);
+    if (current <= observedAt) return current;
+    const previousMonth = new Date(Date.UTC(capture.getUTCFullYear(), capture.getUTCMonth() - 1, 1));
+    return forcedWipeForMonth(previousMonth.getUTCFullYear(), previousMonth.getUTCMonth() + 1);
+}
+
+/** @param {any} context @param {unknown} captureTime */
+async function resolveHistoricalScope(context, captureTime) {
+    const active = getScope(context);
+    if (!active || !active.wipeId) throw new Error('Current server or wipe is unavailable.');
+    const observedAt = parseCaptureTime(captureTime);
+    const recordedAt = nowIso(getDependencies(context));
+    if (observedAt > recordedAt) throw new Error('Capture time cannot be in the future.');
+    const events = await getStore(context, active).readAll();
+    const candidates = [regularWipeStart(observedAt), monthlyForcedWipeStart(observedAt), active.wipeStart,
+        ...events.filter((/** @type {any} */ event) => event.kind === 'wipe_snapshot' &&
+            event.scope.serverKey === active.serverKey).map((/** @type {any} */ event) => event.payload.startsAt)]
+        .map(canonicalIso).filter((/** @type {any} */ value) => value && value <= observedAt);
+    const wipeStart = candidates.sort().at(-1);
+    if (!wipeStart) throw new Error('No wipe boundary exists for the capture time.');
+    return Object.freeze({
+        ...active,
+        wipeStart,
+        wipeId: `wipe:${wipeStart}`,
+        observedAt,
+        historical: active.wipeId !== `wipe:${wipeStart}` || observedAt !== recordedAt
+    });
+}
+
 /** @param {any} context @returns {any} */
 function getScope(context) {
     const instance = context.client.getInstance(context.guildId);
@@ -589,6 +678,36 @@ function validateParsedImport(parsed, metadata, scope) {
     }
 }
 
+/** @param {any} activeScope @param {any} metadata @param {readonly any[]} previousEvents */
+function scopeForImport(activeScope, metadata, previousEvents) {
+    const observedAt = canonicalIso(metadata && metadata.observedAt);
+    const wipeStart = canonicalIso(metadata && metadata.wipeStart);
+    const wipeId = metadata && metadata.wipeId;
+    if (!observedAt && !wipeStart && !wipeId) return activeScope;
+    if (!observedAt || !wipeStart || wipeId !== `wipe:${wipeStart}` || observedAt < wipeStart) {
+        throw new Error('Historical import time or wipe boundary is inconsistent.');
+    }
+    const expected = [regularWipeStart(observedAt), monthlyForcedWipeStart(observedAt), activeScope.wipeStart,
+        ...previousEvents.filter(event => event.kind === 'wipe_snapshot' &&
+            event.scope.serverKey === activeScope.serverKey).map(event => event.payload.startsAt)]
+        .map(canonicalIso).filter(value => value && value <= observedAt).sort().at(-1);
+    if (wipeStart !== expected) throw new Error('Historical import does not target the applicable wipe boundary.');
+    return Object.freeze({ ...activeScope, wipeStart, wipeId });
+}
+
+/** @param {any} activeScope @param {readonly any[]} events */
+function scopeForReplacement(activeScope, events) {
+    const wipeIds = [...new Set(events.map(event => event.scope && event.scope.wipeId))];
+    if (wipeIds.length !== 1 || typeof wipeIds[0] !== 'string' || !wipeIds[0].startsWith('wipe:')) {
+        throw new Error('Previous import has an inconsistent wipe scope.');
+    }
+    const wipeStart = canonicalIso(wipeIds[0].slice(5));
+    if (!wipeStart || wipeIds[0] !== `wipe:${wipeStart}`) {
+        throw new Error('Previous import wipe scope is invalid.');
+    }
+    return Object.freeze({ ...activeScope, wipeStart, wipeId: wipeIds[0] });
+}
+
 /** @param {any} context @param {any} scope @param {any} parsed @param {any} metadata @param {string} recordedAt
  * @param {string|null} revision */
 function importEvents(context, scope, parsed, metadata, recordedAt, revision = null) {
@@ -756,8 +875,11 @@ async function commitParsedImports(context, imports, options = {}) {
             }
             const revision = replacementRevision(previousEvents, recordedAt, item.parsed);
             const replacementMetadata = { ...item.metadata, observedAt: previousEvents[0].observedAt };
-            events.push(...importEvents(context, scope, item.parsed, replacementMetadata, recordedAt, revision));
-            events.push(supersessionEvent(context, scope, replacementMetadata, recordedAt, revision, previousEvents));
+            const replacementScope = scopeForReplacement(scope, previousEvents);
+            events.push(...importEvents(context, replacementScope, item.parsed, replacementMetadata, recordedAt,
+                revision));
+            events.push(supersessionEvent(context, replacementScope, replacementMetadata, recordedAt, revision,
+                previousEvents));
             replaced += 1;
             committedHashes.push(hash);
             continue;
@@ -765,7 +887,8 @@ async function commitParsedImports(context, imports, options = {}) {
         hashes.add(hash);
         imported += 1;
         committedHashes.push(hash);
-        events.push(...importEvents(context, scope, item.parsed, item.metadata, recordedAt));
+        events.push(...importEvents(context, scopeForImport(scope, item.metadata, previous), item.parsed, item.metadata,
+            recordedAt));
     }
     const results = events.length > 0 ? await store.appendMany(events) : [];
     return Object.freeze({
@@ -834,6 +957,10 @@ module.exports = Object.freeze({
     linkedClanSteamCandidates,
     onBattlemetricsUpdated,
     parseCommand,
+    parseCaptureTime,
+    monthlyForcedWipeStart,
     recordWarBanditsIdentity,
+    regularWipeStart,
+    resolveHistoricalScope,
     resolveQuery
 });

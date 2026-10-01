@@ -5,10 +5,15 @@ const ImportWorkflow = require('../plugins/playerIntelligence/importWorkflow.js'
 
 /** @param {string} name @param {string} description */
 function imageSubcommand(name, description) {
-    return (/** @type {Builder.SlashCommandSubcommandBuilder} */ subcommand) =>
-        subcommand.setName(name).setDescription(description)
-        .addAttachmentOption((/** @type {Builder.SlashCommandAttachmentOption} */ option) => option.setName('image')
-            .setDescription('Original PNG, JPEG, or WebP screenshot.').setRequired(true));
+    return (/** @type {Builder.SlashCommandSubcommandBuilder} */ subcommand) => {
+        const value = subcommand.setName(name).setDescription(description)
+            .addAttachmentOption((/** @type {Builder.SlashCommandAttachmentOption} */ option) => option.setName('image')
+                .setDescription('Original PNG, JPEG, or WebP screenshot.').setRequired(true));
+        return name === 'cinfo' ? value.addStringOption(
+            (/** @type {Builder.SlashCommandStringOption} */ option) => option.setName('captured_at')
+                .setDescription('Optional: YYYY-MM-DD HH:mm GMT, for an older screenshot.')
+                .setRequired(false)) : value;
+    };
 }
 
 module.exports = Object.freeze({

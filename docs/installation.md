@@ -57,6 +57,12 @@ identity proof and cannot train a visual/glyph sample without an independently s
 If the first pass loses the `Members` or `Established` label, the bot separately rereads the relative count/date row
 with a numeric alphabet. A polluted multi-word tag is likewise reread from only the value area. All recovered fields
 pass the same strict validators; no absolute screen position is assumed.
+For an old `/cinfo`, use `/intelimport cinfo image:<file> captured_at:"YYYY-MM-DD HH:mm"`; the short form is GMT.
+A full ISO timestamp must include its UTC offset. In `intel-imports`, use the caption
+`cinfo YYYY-MM-DD HH:mm` for all attached cinfo images. Omitting the date keeps the current-wipe/current-time behavior.
+The confirmation preview displays the resolved UTC time and wipe. Rust's monthly forced wipe is derived as the first
+Thursday at 19:00 GMT, alongside the regular Tuesday/Friday 14:00 GMT cadence and any server
+wipe boundary already observed by the bot. A forced wipe does not move the following regular server wipe.
 
 ## Editable in-game raid alert
 

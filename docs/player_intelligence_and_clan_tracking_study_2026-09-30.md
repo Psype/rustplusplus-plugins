@@ -545,10 +545,34 @@ message Discord après confirmation. Pour un lot ancien, exiger le temps ou le w
 rattacher silencieusement une vieille image au wipe courant. À la confirmation, figer `wipeId`, `observedAt`, la
 précision temporelle et le hash de preuve.
 
+Toutes les captures `/cinfo` déposées sont supposées provenir du serveur actuellement configuré ; aucun sélecteur de
+serveur n'est nécessaire. Elles peuvent appartenir au wipe courant ou à un wipe antérieur. Le champ `Established`
+représente exclusivement la création de cette instance du clan : il peut corroborer le wipe candidat, puisqu'un clan
+est créé à l'intérieur de ce wipe, mais ne constitue jamais l'heure du constat du roster et ne remplace pas
+`observedAt`.
+
+L'heure `Established` affichée par WarBandits, les dates de capture et les frontières de wipe sont interprétées
+directement en GMT/UTC. Par exemple, le 29 septembre 2026, le wipe régulier est à 14:00 GMT : `Established: 14:58`
+signifie donc une création du clan 58 minutes après le wipe. Aucune conversion en heure française n'est appliquée.
+
+Depuis la version 1.22.10, le backfill est effectif avec `captured_at` sur `/intelimport cinfo`, ou avec la légende
+`cinfo YYYY-MM-DD HH:mm` dans `intel-imports`. La forme courte est interprétée en GMT ; un ISO explicite
+doit porter son offset. Le serveur reste le serveur actif. Le moteur choisit la dernière frontière mardi/vendredi
+14:00 GMT, le forced wipe Rust du premier jeudi mensuel à 19:00 GMT, ou une frontière serveur déjà observée,
+affiche le temps UTC et le wipe dans
+l'aperçu, puis les fige dans les événements. Une date future, une date GMT invalide, ou un `Established`
+extérieur à l'intervalle création-du-wipe→capture est rejeté. Sans date, le comportement temps/wipe courants demeure.
+
 ## Wipes, clans et associations de joueurs
 
 - Le wipe est une entité explicite liée au serveur. Utiliser en priorité l'ID WarBandits et ses dates, corroborés par
   BattleMetrics/A2S/Rust+. Une modification de date est une nouvelle observation, pas une réécriture silencieuse.
+- Uniquement sur le serveur actuellement configuré **WarBandits EU 5x NoBPs**, les wipes réguliers ont lieu chaque
+  mardi et vendredi à 14:00 GMT. Cette cadence ne doit jamais être généralisée à un autre serveur
+  WarBandits. Le forced wipe mensuel Rust du premier jeudi à 19:00 GMT constitue une frontière
+  supplémentaire, sans modifier ni décaler le mardi/vendredi suivant. Pour un backfill daté sur ce serveur, rattacher
+  la capture à la dernière frontière applicable parmi la cadence régulière, ce forced wipe mensuel et les frontières
+  serveur effectivement observées. Tous les calculs restent en GMT, sans conversion d'heure française.
 - Une instance de clan utilise un ID interne et la clé candidate
   `{serverKey, wipeId, tagExact, establishedAt?}`. Un même tag recréé pendant le wipe avec un autre `Established` est
   une nouvelle instance. Avec `clanId` natif, le conserver sans supposer sa persistance après wipe.

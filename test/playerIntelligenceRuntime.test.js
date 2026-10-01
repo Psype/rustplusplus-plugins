@@ -59,6 +59,28 @@ function harness(t) {
     };
 }
 
+Test('historical capture and Tuesday/Friday 14:00 wipe boundaries use GMT', () => {
+    Assert.equal(Runtime.parseCaptureTime('2026-09-29 21:15'), '2026-09-29T21:15:00.000Z');
+    Assert.equal(Runtime.regularWipeStart('2026-09-29T21:15:00.000Z'), '2026-09-29T14:00:00.000Z');
+    Assert.equal(Runtime.regularWipeStart('2026-10-02T13:59:59.000Z'), '2026-09-29T14:00:00.000Z');
+    Assert.equal(Runtime.regularWipeStart('2026-10-02T14:00:00.000Z'), '2026-10-02T14:00:00.000Z');
+    Assert.equal(Runtime.monthlyForcedWipeStart('2026-10-01T18:59:59.000Z'), '2026-09-03T19:00:00.000Z');
+    Assert.equal(Runtime.monthlyForcedWipeStart('2026-10-01T19:00:00.000Z'), '2026-10-01T19:00:00.000Z');
+    Assert.equal(Runtime.parseCaptureTime('2026-03-29 02:30'), '2026-03-29T02:30:00.000Z');
+    Assert.throws(() => Runtime.parseCaptureTime('2026-02-30T12:00:00+01:00'), /valid calendar/);
+});
+
+Test('an observed forced wipe overrides the regular boundary without shifting later schedules', async t => {
+    const value = harness(t);
+    value.battlemetrics.server_rust_last_wipe = '2026-09-30T18:00:00.000Z';
+    await Runtime.onBattlemetricsUpdated(value.context({ firstTime: true }));
+    value.battlemetrics.server_rust_last_wipe = '2026-10-02T14:00:00.000Z';
+    const historical = await Runtime.resolveHistoricalScope(value.context(), '2026-10-01 10:00');
+    Assert.equal(historical.wipeStart, '2026-09-30T18:00:00.000Z');
+    Assert.equal(historical.wipeId, 'wipe:2026-09-30T18:00:00.000Z');
+    Assert.equal(Runtime.regularWipeStart('2026-10-02T14:00:00.000Z'), '2026-10-02T14:00:00.000Z');
+});
+
 Test('existing teammate identity rows are fused read-only without modifying their source', async t => {
     const value = harness(t);
     const rows = Object.freeze([Object.freeze({
