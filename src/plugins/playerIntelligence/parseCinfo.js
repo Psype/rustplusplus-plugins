@@ -60,6 +60,21 @@ function buildRoleMap(roleHints) {
     return roles;
 }
 
+/** @param {any} parsed @param {unknown} roleHints */
+function applyRoleHints(parsed, roleHints) {
+    if (!parsed || parsed.kind !== 'cinfo' || !Array.isArray(parsed.members)) {
+        throw new TypeError('Parsed cinfo observation is required.');
+    }
+    const roleMap = buildRoleMap(roleHints);
+    return Object.freeze({
+        ...parsed,
+        members: freezeArray(parsed.members.map((/** @type {any} */ member) => ({
+            ...member,
+            role: roleMap.get(normalized(member.name)) || member.role || 'member'
+        })))
+    });
+}
+
 /** @param {unknown} inputWords @returns {readonly (readonly import('./ocrLayout.js').OcrWord[])[]} */
 function splitCinfoWordBlocks(inputWords) {
     const words = Layout.normalizeWords(inputWords);
@@ -140,4 +155,10 @@ function parseCinfoWords(inputWords, options = {}) {
     });
 }
 
-module.exports = Object.freeze({ parseCinfoWords, parseEstablished, splitCinfoWordBlocks, splitMembers });
+module.exports = Object.freeze({
+    applyRoleHints,
+    parseCinfoWords,
+    parseEstablished,
+    splitCinfoWordBlocks,
+    splitMembers
+});

@@ -180,6 +180,9 @@ Options | Description | Required
 > later evidence resolves them automatically. A complete SteamID with a hidden name is retained without an alias. Set
 > `RPP_TESSERACT_PATH` when the executable is not available as `tesseract`; production Linux therefore
 > needs the local `tesseract-ocr` package and English model, with no runtime model download.
+> A complete `/cinfo` roster also receives one bounded OCR pass over temporary member rows split relatively at commas
+> and the final standalone `and`. It can correct which pseudo owns decorative punctuation, but it is rejected if it
+> changes any member's letters/numbers or the declared roster count.
 
 The bot also creates a private `intel-imports` channel. A message may contain 1–10 images and needs no caption: F7 and
 `/cinfo` are detected from semantic OCR anchors. Starting the message with `cinfo` or `f7` remains an optional strict

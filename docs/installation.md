@@ -34,7 +34,7 @@ Unicode; unresolved members are stored as pending slots rather than invented or 
 Resolved `/cinfo` name shapes and unambiguous F7 name/SteamID rows are stored independently from the code in
 `data/player-intelligence/<guild>/<battlemetricsServerId>/visual-alias-library.json`. The file is bounded, validated,
 written atomically, ignored by Git and survives bot restarts/upgrades as long as the `data/player-intelligence`
-directory is preserved. Schema 2 contains normalized binary word signatures, identity references, and a bounded
+directory is preserved. Schema 3 contains normalized binary word signatures, identity references, and a bounded
 glyph↔Unicode-grapheme journal; it never stores screenshot pixels. The glyph journal learns only from exact `/cinfo`
 spellings already resolved to a stable identity and only when foreground runs form an unambiguous segmentation.
 Connected/touching writing is skipped. Exact whole-word repeats may corroborate an existing identity; glyph and
@@ -45,6 +45,9 @@ The private `intel-imports` channel is created automatically when the guild is s
 manual message may contain 1 to 10 PNG/JPEG/WebP images. The bot detects F7 versus `/cinfo` from OCR anchors; an optional
 leading `cinfo` or `f7` acts as a strict hint for every attached image. One image may contain several vertically
 stacked `/cinfo` panels: repeated `ClanTag` anchors are split and validated independently, without fixed coordinates.
+For a complete roster, comma and final standalone `and` separators isolate one temporary image row per member before
+one additional bounded OCR pass. The result may correct punctuation ownership but is discarded if it changes the
+letters/numbers at any roster index or no longer matches the declared member count.
 
 ## Editable in-game raid alert
 

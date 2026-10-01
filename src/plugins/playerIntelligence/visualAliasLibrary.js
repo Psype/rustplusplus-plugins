@@ -399,7 +399,8 @@ function featureSimilarity(left, right) {
     return Number((shape * 0.9 + aspect * 0.1).toFixed(6));
 }
 
-/** @param {string} imageBase64 @param {readonly {words:unknown,parsed:any}[]} blocks
+/** @param {string} imageBase64
+ * @param {readonly {words:unknown,parsed:any,memberBoxes?:readonly (readonly any[])[]}[]} blocks
  * @param {{JimpImpl?:any}} [options] */
 async function extractVisualSamples(imageBase64, blocks, options = {}) {
     const JimpImpl = options.JimpImpl || Jimp;
@@ -415,7 +416,9 @@ async function extractVisualSamples(imageBase64, blocks, options = {}) {
         if (cinfo && (!block.parsed.complete || entries.length !== block.parsed.declaredCount)) {
             return Object.freeze([]);
         }
-        const assignments = cinfo ? CinfoRoles.findMemberBoxAssignments(words,
+        const suppliedAssignments = cinfo && Array.isArray(block.memberBoxes) &&
+            block.memberBoxes.length === entries.length ? block.memberBoxes : null;
+        const assignments = cinfo ? suppliedAssignments || CinfoRoles.findMemberBoxAssignments(words,
             entries.map((/** @type {any} */ entry) => entry.name)) : Object.freeze([]);
         if (cinfo && assignments.length !== entries.length) return Object.freeze([]);
         return Object.freeze(entries.map((/** @type {any} */ entry, /** @type {number} */ index) => {
@@ -428,7 +431,8 @@ async function extractVisualSamples(imageBase64, blocks, options = {}) {
                 observedText: name,
                 boundaryProof: true,
                 feature,
-                glyphs: glyphFeaturesFromBoxes(image, boxes, name, JimpImpl)
+                glyphs: suppliedAssignments ? Object.freeze([]) :
+                    glyphFeaturesFromBoxes(image, boxes, name, JimpImpl)
             }) : null;
         }).filter(Boolean));
     }));

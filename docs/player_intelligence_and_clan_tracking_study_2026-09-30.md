@@ -208,6 +208,17 @@ s'il conserve tag/compteur et améliore la structure. Une date encore invalide r
 alphabet `0123456789/: `, puis passe le même validateur calendaire strict. Une panne de ce raffinement optionnel est
 un avertissement et ne peut pas annuler une transaction serveur déjà valide.
 
+Depuis la version 1.22.6, un roster complet reçoit aussi une lecture visuelle isolée par membre. Les virgules et le
+`and` final reconnus dans la ligne servent de séparateurs relatifs ; les fragments d'un pseudo coupé sur deux lignes
+sont recollés horizontalement, puis chaque membre occupe sa propre ligne d'une feuille temporaire noir-sur-blanc
+agrandie 4x et plafonnée à 8 Mi pixels avant allocation. Une seule exécution PSM 6 traite cette feuille par panneau,
+au lieu d'un processus par pseudo. Le résultat
+n'est accepté que si le nombre de lignes et leur unicité correspondent au compteur et si, à chaque index, les lettres
+et chiffres Unicode normalisés restent identiques. Cette passe peut donc rattacher les décorations `』` au crop de
+`Marley` plutôt qu'à `Swizzy`, mais elle refuse un échange de noms ou une lettre inventée. Si les séparateurs ne
+produisent pas exactement le compteur attendu, le roster précédent est conservé. Aucune coordonnée écran fixe ni
+pixel de cette feuille temporaire n'est persisté.
+
 Les membres `/cinfo` déjà résolus et les lignes F7 nom/SteamID non ambiguës enrichissent enfin une mémoire visuelle
 persistante par serveur sous
 `data/player-intelligence/<guild>/<battlemetricsServerId>/visual-alias-library.json`. Elle stocke au plus 2 000
@@ -237,6 +248,11 @@ cette preuve de frontière sont ignorés. Ils se reconstruisent sur les imports 
 les alias exacts après normalisation de casse : suppression des décorations, similarité floue et corroboration externe
 restent provisoires tant que les frontières ne sont pas complètes.
 
+La partition visuelle prouvée par la version 1.22.6 devient également la source des boîtes de vote de rôle et des
+signatures de mot entier. Elle évite que la couleur bleue de `』 Marley 』` soit lue sur `Swizzy`. Les fragments recollés
+ne permettent toutefois pas une correspondance sûre glyphe-par-graphème : ils ne nourrissent donc jamais le journal de
+glyphes. L'échec ou le timeout de cette passe optionnelle ne bloque ni la prévisualisation ni le commit canonique.
+
 Le benchmark synthétique dédié de la version 1.22.3 rappelle la cible parmi 2 000 alias, 104 variantes de glyphes et
 une séquence de huit graphèmes en 20,797 ms de médiane. Le benchmark global 200 joueurs ne régresse pas entre les
 mesures immédiatement avant/après (chargement initial 41,702→39,357 ms, poll silencieux 0,044→0,030 ms, dix
@@ -246,9 +262,9 @@ Le contrat `clan_snapshot` accepte désormais, sans casser les événements sche
 des slots `unresolvedMembers`. Une structure tag/compteur/date valide peut donc être confirmée malgré un roster
 incomplet. Les slots ne créent ni alias exact, ni relation `Played with`; chaque reconstruction de la projection les
 réévalue contre les nouvelles observations, y compris les noms F7 liés à un SteamID mais marqués non fidèles à la
-casse. La confirmation Discord reste un clic transactionnel et non une transcription. Le recadrage sémantique par
-champ, les lectures numériques indépendantes et le moteur multilingue local restent à implémenter et à mesurer sur des
-PNG originaux.
+casse. La confirmation Discord reste un clic transactionnel et non une transcription. Les lectures isolées du
+tag/compteur, les lectures numériques indépendantes restantes et le moteur multilingue local restent à implémenter et
+à mesurer sur des PNG originaux.
 
 Les exemples F7 réels ajoutés le 1er octobre combinent décorations autour d'un nom latin, lettres volontairement
 espacées, `İ` turc, caractères cyrilliques, coréens et chaînes visuellement ambiguës mélangeant potentiellement
@@ -665,9 +681,10 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
    idempotent par bloc. Le batch est validé entièrement avant son unique append durable ; les webhooks non autorisés
    sont ignorés. Les snapshots partiels, le résolveur Unicode un-à-un, la réévaluation automatique et la corroboration
    WarBandits/Steam plafonnée à trois requêtes candidates par lot, le masque couleur agrandi, les user-words et la
-   mémoire visuelle persistante sont également implémentés.
+   mémoire visuelle persistante sont également implémentés. Les rosters complets sont désormais redécoupés relativement
+   aux virgules/`and`, avec une ligne image isolée par membre et une seule lecture bornée par panneau.
 3. **À calibrer et étendre** : corpus de PNG originaux, précision champ par champ et seuils couleur/OCR sur Linux,
-   lectures isolées du roster/tag/compteur, modèle synthétique multi-fontes et moteur de scène multilingue ; les tests
+   lectures isolées du tag/compteur, modèle synthétique multi-fontes et moteur de scène multilingue ; les tests
    déterministes utilisent actuellement les textes et boîtes correspondant aux exemples fournis.
 4. **À ajouter si utile** : import legacy en lecture seule, Rust+ own-clan, vue d'historique détaillée et outil audité
    de liaison/révocation ; aucune de ces étapes ne doit modifier les bases existantes.
@@ -679,12 +696,12 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale finale après clarification de l'aperçu OCR/liaison :
-`npm.cmd test` passe 187/187,
+QA locale finale après isolation visuelle du roster :
+`npm.cmd test` passe 190/190,
 dont le typage strict `tsc --noEmit`. Une
-exécution antérieure avait reproduit le timeout FCM historique sous charge, puis son fichier était repassé 5/5
-isolément. Le sélecteur Windows, un webhook Discord réel et l'OCR de PNG originaux restent à valider interactivement ;
-les tests n'envoient rien sur le réseau.
+couverture déterministe reproduit la mauvaise attribution `』Marley』`/`Swizzy`, vérifie le découpage relatif aux
+virgules et refuse un échange de lettres entre deux lignes. Le sélecteur Windows, un webhook Discord réel et l'OCR de
+PNG originaux restent à valider interactivement ; les tests n'envoient rien sur le réseau.
 
 Scénario reproductible `npm run benchmark:player-intelligence` : roster initial de 200 joueurs, 60 polls silencieux,
 puis 10 déconnexions. Le premier profilage lisait/reprojetait le journal à chaque poll silencieux : `25,397 ms/poll`.

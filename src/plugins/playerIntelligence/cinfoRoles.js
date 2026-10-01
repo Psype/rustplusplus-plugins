@@ -121,7 +121,9 @@ function colorVotes(image, boxes, JimpImpl) {
     return 'unknown';
 }
 
-/** @param {any} image @param {readonly {words:unknown,parsed:any}[]} blocks @param {any} JimpImpl */
+/** @param {any} image
+ * @param {readonly {words:unknown,parsed:any,memberBoxes?:readonly (readonly any[])[]}[]} blocks
+ * @param {any} JimpImpl */
 function inferFromImage(image, blocks, JimpImpl) {
     return Object.freeze(blocks.map(block => {
         if (!block.parsed || block.parsed.kind !== 'cinfo' || !Array.isArray(block.parsed.members)) {
@@ -129,7 +131,10 @@ function inferFromImage(image, blocks, JimpImpl) {
         }
         const candidates = rosterWords(block.words);
         const names = block.parsed.members.map((/** @type {any} */ member) => member.name);
-        const assignments = block.parsed.complete ? findMemberBoxAssignments(candidates, names) : [];
+        const suppliedAssignments = Array.isArray(block.memberBoxes) &&
+            block.memberBoxes.length === names.length ? block.memberBoxes : null;
+        const assignments = suppliedAssignments || (block.parsed.complete ?
+            findMemberBoxAssignments(candidates, names) : []);
         return Object.freeze(block.parsed.members.map((/** @type {any} */ member,
             /** @type {number} */ index) => Object.freeze({
             name: member.name,
@@ -138,7 +143,8 @@ function inferFromImage(image, blocks, JimpImpl) {
     }));
 }
 
-/** @param {string} imageBase64 @param {readonly {words:unknown,parsed:any}[]} blocks
+/** @param {string} imageBase64
+ * @param {readonly {words:unknown,parsed:any,memberBoxes?:readonly (readonly any[])[]}[]} blocks
  * @param {{JimpImpl?:any}} dependencies */
 async function inferCinfoRoleHintsBatch(imageBase64, blocks, dependencies = {}) {
     const JimpImpl = dependencies.JimpImpl || Jimp;

@@ -5,6 +5,9 @@ const Layout = require('./ocrLayout.js');
 const OcrImagePreprocess = require('./ocrImagePreprocess.js');
 const { parseCinfoWords, parseEstablished, splitCinfoWordBlocks } = require('./parseCinfo.js');
 
+const MAX_ISOLATED_ROSTER_MEMBERS = 32;
+const MAX_ISOLATED_SHEET_PIXELS = 8 * 1024 * 1024;
+
 /** @param {{parsed:any}} block */
 function blockQuality(block) {
     const parsed = block.parsed;
@@ -77,6 +80,151 @@ function samePanel(original, candidate) {
         originalCount === candidateCount;
 }
 
+/** @param {unknown} value */
+function alphanumericName(value) {
+    return Layout.cleanText(value).normalize('NFKC').toLocaleLowerCase('en')
+        .replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+/** @param {any} image @param {any} block */
+function rosterMemberFragments(image, block) {
+    const count = block.parsed && block.parsed.declaredCount;
+    if (!block.parsed || !block.parsed.complete || !Number.isSafeInteger(count) || count < 1 ||
+        count > MAX_ISOLATED_ROSTER_MEMBERS) return null;
+    const lines = Layout.groupLines(block.words);
+    const start = lines.findIndex(line => /clan\s+members\s*:/iu.test(line.text));
+    const end = lines.findIndex(line => /established\s*:/iu.test(line.text));
+    if (start === -1 || end <= start) return null;
+    const rosterLines = lines.slice(start, end);
+    const members = [];
+    /** @type {{x:number,y:number,width:number,height:number}[]} */
+    let current = [];
+    for (let lineIndex = 0; lineIndex < rosterLines.length; lineIndex += 1) {
+        const line = rosterLines[lineIndex];
+        const words = [...line.words].sort((left, right) => left.x - right.x);
+        let cursor = line.x;
+        if (lineIndex === 0) {
+            const anchorIndex = words.findIndex(word => /^members:?$/iu.test(word.text));
+            if (anchorIndex === -1) return null;
+            cursor = words[anchorIndex].x + words[anchorIndex].width;
+        }
+        const separators = [];
+        for (const word of words) {
+            if (word.x + word.width <= cursor) continue;
+            const commaCount = ([...word.text].filter(character => character === ',')).length;
+            if (commaCount > 1) return null;
+            if (commaCount === 1) {
+                const units = Array.from(word.text);
+                const commaIndex = units.indexOf(',');
+                const boundary = commaIndex === units.length - 1 ? word.x + word.width :
+                    word.x + word.width * (commaIndex + 0.5) / units.length;
+                separators.push({ kind: 'comma', left: boundary, right: boundary });
+            }
+            else if (/^and$/iu.test(word.text)) {
+                separators.push({ kind: 'and', left: word.x, right: word.x + word.width });
+            }
+        }
+        separators.sort((left, right) => left.left - right.left);
+        const lineRight = Math.min(image.bitmap.width,
+            Math.ceil(Math.max(...words.map(word => word.x + word.width))));
+        const top = Math.max(0, Math.floor(line.y));
+        const bottom = Math.min(image.bitmap.height, Math.ceil(line.y + line.height));
+        const append = (/** @type {number} */ right) => {
+            const left = Math.max(0, Math.floor(cursor));
+            const boundedRight = Math.min(image.bitmap.width, Math.ceil(right));
+            if (boundedRight - left >= 2 && bottom > top) {
+                current.push(Object.freeze({ x: left, y: top, width: boundedRight - left,
+                    height: bottom - top }));
+            }
+        };
+        for (const separator of separators) {
+            if (separator.left <= cursor) continue;
+            append(separator.left);
+            if (current.length === 0) return null;
+            members.push(Object.freeze(current));
+            current = [];
+            cursor = separator.right;
+        }
+        append(lineRight);
+    }
+    if (current.length > 0) members.push(Object.freeze(current));
+    return members.length === count ? Object.freeze(members) : null;
+}
+
+/** @param {any} image @param {readonly (readonly any[])[]} fragments @param {any} JimpImpl */
+async function createIsolatedRosterSheet(image, fragments, JimpImpl) {
+    const typicalHeight = Math.max(1, Math.ceil(Layout.median(fragments.flat()
+        .map(fragment => fragment.height))));
+    const horizontalGap = Math.max(2, Math.ceil(typicalHeight * 0.5));
+    const padding = Math.max(2, Math.ceil(typicalHeight * 0.5));
+    const rowHeight = typicalHeight + padding * 2;
+    const contentWidths = fragments.map(member => member.reduce((sum, fragment) =>
+        sum + fragment.width, 0) + Math.max(0, member.length - 1) * horizontalGap);
+    const width = Math.max(...contentWidths) + padding * 2;
+    const height = rowHeight * fragments.length;
+    const scale = 4;
+    if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) ||
+        width * scale * height * scale > MAX_ISOLATED_SHEET_PIXELS) {
+        throw new Error('Isolated roster sheet exceeds the pixel limit.');
+    }
+    const sheet = await new Promise((resolve, reject) => {
+        new JimpImpl(width, height, 0xffffffff, (/** @type {any} */ error, /** @type {any} */ value) =>
+            error ? reject(error) : resolve(value));
+    });
+    for (let memberIndex = 0; memberIndex < fragments.length; memberIndex += 1) {
+        let targetX = padding;
+        const targetY = memberIndex * rowHeight + padding;
+        for (const fragment of fragments[memberIndex]) {
+            for (let y = 0; y < fragment.height; y += 1) {
+                for (let x = 0; x < fragment.width; x += 1) {
+                    const sourceX = fragment.x + x;
+                    const sourceY = fragment.y + y;
+                    const { r, g, b, a } = JimpImpl.intToRGBA(image.getPixelColor(sourceX, sourceY));
+                    if (OcrImagePreprocess.isRustUiTextPixel(r, g, b, a)) {
+                        sheet.setPixelColor(0x000000ff, targetX + x, targetY + y);
+                    }
+                }
+            }
+            targetX += fragment.width + horizontalGap;
+        }
+    }
+    sheet.resize(width * scale, height * scale, JimpImpl.RESIZE_NEAREST_NEIGHBOR);
+    const buffer = await sheet.getBufferAsync(JimpImpl.MIME_PNG || Jimp.MIME_PNG);
+    return Object.freeze({ imageBase64: buffer.toString('base64'), scale });
+}
+
+/** @param {unknown} value */
+function cleanIsolatedMember(value) {
+    return Layout.cleanText(value).replace(/^\s*,+\s*|\s*,+\s*$/gu, '');
+}
+
+/** @param {any} image @param {any} block @param {Function} recognize @param {any} ocrOptions
+ * @param {any} dependencies @param {any} JimpImpl */
+async function refineRosterMembers(image, block, recognize, ocrOptions, dependencies, JimpImpl) {
+    const fragments = rosterMemberFragments(image, block);
+    if (!fragments) return block;
+    const sheet = await createIsolatedRosterSheet(image, fragments, JimpImpl);
+    const timeoutMs = Number.isFinite(Number(dependencies.rosterOcrTimeoutMs)) ?
+        Math.min(30000, Math.max(1000, Number(dependencies.rosterOcrTimeoutMs))) :
+        Math.min(30000, Number(ocrOptions.timeoutMs) || 30000);
+    const words = await recognize(sheet.imageBase64, { ...ocrOptions, psm: 6, timeoutMs });
+    const names = Layout.groupLines(words).map(line => cleanIsolatedMember(line.text));
+    if (names.length !== block.parsed.members.length || names.some(name => !name || name.length > 128) ||
+        new Set(names.map(name => name.normalize('NFKC').toLocaleLowerCase('en'))).size !== names.length) return block;
+    const sameBaseNames = names.every((name, index) => alphanumericName(name) ===
+        alphanumericName(block.parsed.members[index].name));
+    if (!sameBaseNames) return block;
+    const members = Object.freeze(names.map((name, index) => Object.freeze({
+        ...block.parsed.members[index],
+        name
+    })));
+    return Object.freeze({
+        ...block,
+        memberBoxes: fragments,
+        parsed: Object.freeze({ ...block.parsed, members })
+    });
+}
+
 /** @param {any} image @param {any} block @param {Function} recognize @param {any} ocrOptions
  * @param {any} dependencies @param {any} JimpImpl */
 async function refineEstablished(image, block, recognize, ocrOptions, dependencies, JimpImpl) {
@@ -121,8 +269,8 @@ async function refineEstablished(image, block, recognize, ocrOptions, dependenci
 }
 
 /**
- * Runs one deterministic OCR pass per incomplete semantic panel. It is a distinct,
- * bounded input, not a retry of the full screenshot.
+ * Runs bounded semantic OCR inputs for incomplete panels, dates and complete roster rows.
+ * Each input is derived from one semantic field; none is a retry of the full screenshot.
  * @param {string} imageBase64 @param {readonly any[]} blocks @param {Function} recognize
  * @param {any} ocrOptions @param {any} dependencies
  */
@@ -135,46 +283,54 @@ async function refineCinfoPanels(imageBase64, blocks, recognize, ocrOptions, dep
     const preprocess = dependencies.preprocessPanelImage || OcrImagePreprocess.createTextMask;
     const refined = [];
     let failed = 0;
+    let rosterSkipped = 0;
     const reasons = [];
+    const rosterReasons = [];
     for (const block of blocks) {
-        if (block.parsed.complete && block.parsed.establishedAtUtc) {
-            refined.push(block);
-            continue;
-        }
-        const bounds = panelBounds(image, block);
-        if (!bounds) {
-            refined.push(block);
-            failed += 1;
-            reasons.push('semantic panel bounds unavailable');
-            continue;
-        }
         try {
-            const crop = image.clone().crop(bounds.left, bounds.top, bounds.width, bounds.height);
-            const cropBuffer = await crop.getBufferAsync(JimpImpl.MIME_PNG || Jimp.MIME_PNG);
-            const processed = await preprocess(cropBuffer.toString('base64'), {
-                JimpImpl,
-                scale: 3,
-                minForegroundRatio: 0.001,
-                maxForegroundRatio: 0.7
-            });
-            const timeoutMs = Number.isFinite(Number(dependencies.panelOcrTimeoutMs)) ?
-                Math.min(30000, Math.max(1000, Number(dependencies.panelOcrTimeoutMs))) :
-                Math.min(30000, Number(ocrOptions.timeoutMs) || 30000);
-            const words = mapCropWords(await recognize(processed.imageBase64, {
-                ...ocrOptions,
-                psm: 6,
-                timeoutMs
-            }), processed.scale, bounds);
-            const candidates = splitCinfoWordBlocks(words).map(candidateWords => Object.freeze({
-                words: candidateWords,
-                parsed: parseCinfoWords(candidateWords, dependencies.cinfoOptions)
-            }));
-            const candidate = candidates.length === 1 ? candidates[0] : null;
             let selected = block;
-            if (candidate && samePanel(block, candidate) && blockQuality(candidate) > blockQuality(block)) {
-                selected = candidate;
+            if (!block.parsed.complete || !block.parsed.establishedAtUtc) {
+                const bounds = panelBounds(image, block);
+                if (!bounds) {
+                    refined.push(block);
+                    failed += 1;
+                    reasons.push('semantic panel bounds unavailable');
+                    continue;
+                }
+                const crop = image.clone().crop(bounds.left, bounds.top, bounds.width, bounds.height);
+                const cropBuffer = await crop.getBufferAsync(JimpImpl.MIME_PNG || Jimp.MIME_PNG);
+                const processed = await preprocess(cropBuffer.toString('base64'), {
+                    JimpImpl,
+                    scale: 3,
+                    minForegroundRatio: 0.001,
+                    maxForegroundRatio: 0.7
+                });
+                const timeoutMs = Number.isFinite(Number(dependencies.panelOcrTimeoutMs)) ?
+                    Math.min(30000, Math.max(1000, Number(dependencies.panelOcrTimeoutMs))) :
+                    Math.min(30000, Number(ocrOptions.timeoutMs) || 30000);
+                const words = mapCropWords(await recognize(processed.imageBase64, {
+                    ...ocrOptions,
+                    psm: 6,
+                    timeoutMs
+                }), processed.scale, bounds);
+                const candidates = splitCinfoWordBlocks(words).map(candidateWords => Object.freeze({
+                    words: candidateWords,
+                    parsed: parseCinfoWords(candidateWords, dependencies.cinfoOptions)
+                }));
+                const candidate = candidates.length === 1 ? candidates[0] : null;
+                if (candidate && samePanel(block, candidate) && blockQuality(candidate) > blockQuality(block)) {
+                    selected = candidate;
+                }
+                selected = await refineEstablished(image, selected, recognize, ocrOptions, dependencies, JimpImpl);
             }
-            selected = await refineEstablished(image, selected, recognize, ocrOptions, dependencies, JimpImpl);
+            try {
+                selected = await refineRosterMembers(image, selected, recognize, ocrOptions, dependencies, JimpImpl);
+            }
+            catch (error) {
+                rosterSkipped += 1;
+                rosterReasons.push(`${error instanceof Error ? error.message : error}`
+                    .replace(/\s+/gu, ' ').slice(0, 160));
+            }
             refined.push(selected);
             if (!selected.parsed.complete || !selected.parsed.establishedAtUtc) {
                 failed += 1;
@@ -189,17 +345,26 @@ async function refineCinfoPanels(imageBase64, blocks, recognize, ocrOptions, dep
     }
     return Object.freeze({
         blocks: Object.freeze(refined),
-        warning: failed > 0 ? `${failed}/${blocks.length} panels remain structurally incomplete; ${
-            [...new Set(reasons)].slice(0, 2).join('; ')}.` : null
+        warning: [
+            failed > 0 ? `${failed}/${blocks.length} panels remain structurally incomplete; ${
+                [...new Set(reasons)].slice(0, 2).join('; ')}.` : null,
+            rosterSkipped > 0 ? `${rosterSkipped}/${blocks.length} isolated roster reads skipped; ${
+                [...new Set(rosterReasons)].slice(0, 2).join('; ')}.` : null
+        ].filter(Boolean).join(' ') || null
     });
 }
 
 module.exports = Object.freeze({
+    MAX_ISOLATED_ROSTER_MEMBERS,
+    MAX_ISOLATED_SHEET_PIXELS,
     blockQuality,
+    createIsolatedRosterSheet,
     establishedBounds,
     mapCropWords,
     panelBounds,
     refineCinfoPanels,
     refineEstablished,
+    refineRosterMembers,
+    rosterMemberFragments,
     samePanel
 });

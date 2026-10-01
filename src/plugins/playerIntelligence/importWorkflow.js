@@ -10,7 +10,7 @@ const CinfoPanelRefinement = require('./cinfoPanelRefinement.js');
 const CinfoRoles = require('./cinfoRoles.js');
 const OcrImagePreprocess = require('./ocrImagePreprocess.js');
 const { detectImportKind } = require('./detectImportKind.js');
-const { parseCinfoWords, splitCinfoWordBlocks } = require('./parseCinfo.js');
+const { applyRoleHints, parseCinfoWords, splitCinfoWordBlocks } = require('./parseCinfo.js');
 const { parseF7Words } = require('./parseF7.js');
 const { resolveCinfo } = require('./resolveCinfo.js');
 const Runtime = require('./runtime.js');
@@ -252,8 +252,7 @@ async function parseAttachment(client, kindHint, attachment, reference, attachme
     const selected = selectRecognizedResult(recognized);
     const { kind } = selected;
     let blocks = selected.blocks;
-    if (kind === 'cinfo' && blocks.some((/** @type {any} */ block) =>
-        !block.parsed.complete || !block.parsed.establishedAtUtc)) {
+    if (kind === 'cinfo') {
         try {
             const refine = dependencies.refineCinfoPanels || CinfoPanelRefinement.refineCinfoPanels;
             const refined = await refine(image.imageBase64, blocks, recognize, ocrOptions, dependencies);
@@ -279,16 +278,14 @@ async function parseAttachment(client, kindHint, attachment, reference, attachme
             const inferBatch = dependencies.inferCinfoRoleHintsBatch || CinfoRoles.inferCinfoRoleHintsBatch;
             const roleHints = await inferBatch(image.imageBase64, blocks, dependencies);
             blocks = blocks.map((/** @type {any} */ block, /** @type {number} */ index) => ({ ...block,
-                parsed: block.parsed.members.length > 0 ? parseCinfoWords(block.words,
-                    { ...dependencies.cinfoOptions, roleHints: roleHints[index] }) : block.parsed }));
+                parsed: block.parsed.members.length > 0 ?
+                    applyRoleHints(block.parsed, roleHints[index]) : block.parsed }));
         }
         catch (error) {
             blocks = blocks.map((/** @type {any} */ block) => ({ ...block,
-                parsed: block.parsed.members.length > 0 ? parseCinfoWords(block.words, {
-                    ...dependencies.cinfoOptions,
-                    roleHints: block.parsed.members.map((/** @type {any} */ member) =>
-                        ({ name: member.name, role: 'unknown' }))
-                }) : block.parsed }));
+                parsed: block.parsed.members.length > 0 ? applyRoleHints(block.parsed,
+                    block.parsed.members.map((/** @type {any} */ member) =>
+                        ({ name: member.name, role: 'unknown' }))) : block.parsed }));
             if (typeof client.log === 'function') {
                 client.log('PLAYER_INTELLIGENCE', `Optional role-color read failed: ${sanitizeError(error)}`, 'warn');
             }

@@ -215,6 +215,83 @@ Test('invalid cinfo dates receive a constrained numeric field read', async () =>
     Assert.equal(result.warning, null);
 });
 
+Test('cinfo roster punctuation is reread in comma-delimited member image rows', async () => {
+    const image = await new Promise((resolve, reject) => new Jimp(440, 150, 0x5d514cff,
+        (error, value) => error ? reject(error) : resolve(value)));
+    const buffer = await image.getBufferAsync(Jimp.MIME_PNG);
+    const positioned = (text, x, y, width = Math.max(8, text.length * 7)) =>
+        ({ text, x, y, width, height: 16, confidence: 95 });
+    const words = [
+        positioned('ClanTag:', 10, 20, 55), positioned('FBM', 70, 20, 28),
+        positioned('Members:', 10, 40, 55), positioned('6', 70, 40, 8),
+        positioned('Clan', 10, 60, 30), positioned('Members:', 45, 60, 60),
+        positioned('Rw,', 115, 60, 25), positioned('Elliott,', 150, 60, 50),
+        positioned('』', 205, 60, 10), positioned('Marley', 220, 60, 45),
+        positioned('』', 270, 60, 10), positioned(',', 285, 60, 8),
+        positioned('Swizzy,', 300, 60, 48), positioned('Jeffrey', 355, 60, 48),
+        positioned('Kirkstein', 10, 80, 55), positioned('The', 70, 80, 25),
+        positioned('3rd', 100, 80, 25), positioned('and', 130, 80, 28),
+        positioned('U', 165, 80, 10), positioned('Got', 180, 80, 24),
+        positioned('Kirkified', 210, 80, 58),
+        positioned('Established:', 10, 100, 80), positioned('09/29/2026', 95, 100, 80),
+        positioned('14:00:08', 180, 100, 58)
+    ];
+    const originalNames = ['Rw', 'Elliott', 'Marley', '』Swizzy 』',
+        'Jeffrey Kirkstein The 3rd', 'U Got Kirkified'];
+    const original = Object.freeze({
+        words: Object.freeze(words),
+        parsed: Object.freeze({
+            kind: 'cinfo', tag: 'FBM', declaredCount: 6, complete: true,
+            establishedAtUtc: '2026-09-29T14:00:08.000Z', errors: Object.freeze([]),
+            members: Object.freeze(originalNames.map(name => Object.freeze({ name, role: 'member' })))
+        })
+    });
+    const refinedNames = ['Rw', 'Elliott', '』 Marley 』', 'Swizzy',
+        'Jeffrey Kirkstein The 3rd', 'U Got Kirkified'];
+    let calls = 0;
+    const result = await CinfoPanelRefinement.refineCinfoPanels(buffer.toString('base64'), [original],
+        async (_image, options) => {
+            calls += 1;
+            Assert.equal(options.psm, 6);
+            return refinedNames.map((text, index) => positioned(text, 10, index * 80));
+        }, { timeoutMs: 45000 });
+    Assert.equal(calls, 1);
+    Assert.deepEqual(result.blocks[0].parsed.members.map(member => member.name), refinedNames);
+    Assert.equal(result.blocks[0].memberBoxes.length, 6);
+    Assert.equal(result.blocks[0].memberBoxes[2]
+        .some(box => box.x <= 205 && box.x + box.width >= 280), true);
+    Assert.equal(result.blocks[0].memberBoxes[3].every(box => box.x >= 289), true);
+    Assert.equal(result.warning, null);
+});
+
+Test('isolated cinfo roster read cannot alter or exchange member letters', async () => {
+    const image = await new Promise((resolve, reject) => new Jimp(240, 100, 0x5d514cff,
+        (error, value) => error ? reject(error) : resolve(value)));
+    const positioned = (text, x, y) => ({ text, x, y, width: Math.max(8, text.length * 7),
+        height: 16, confidence: 95 });
+    const words = [
+        positioned('ClanTag:', 10, 10), positioned('FBM', 90, 10),
+        positioned('Members:', 10, 30), positioned('2', 90, 30),
+        positioned('Clan', 10, 50), positioned('Members:', 45, 50),
+        positioned('Marley,', 115, 50), positioned('Swizzy', 175, 50),
+        positioned('Established:', 10, 70), positioned('09/29/2026', 100, 70)
+    ];
+    const original = Object.freeze({ words: Object.freeze(words), parsed: Object.freeze({
+        kind: 'cinfo', tag: 'FBM', declaredCount: 2, complete: true,
+        establishedAtUtc: '2026-09-29T14:00:08.000Z', errors: Object.freeze([]),
+        members: Object.freeze(['Marley', 'Swizzy'].map(name => Object.freeze({ name, role: 'member' })))
+    }) });
+    const result = await CinfoPanelRefinement.refineRosterMembers(image, original,
+        async () => [positioned('Swizzy', 10, 10), positioned('Marley', 10, 90)],
+        { timeoutMs: 30000 }, {}, Jimp);
+    Assert.equal(result, original);
+});
+
+Test('isolated cinfo roster sheet rejects oversized derived geometry before allocation', async () => {
+    await Assert.rejects(() => CinfoPanelRefinement.createIsolatedRosterSheet({},
+        [[{ x: 0, y: 0, width: 3000, height: 1000 }]], Jimp), /pixel limit/);
+});
+
 Test('confirmed resolved shapes persist in the server data directory, not in source code', async t => {
     const value = createHarness(t);
     value.client.playerIntelligenceImportDependencies.disableOcrPreprocessing = true;
