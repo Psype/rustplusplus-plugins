@@ -42,6 +42,39 @@ function findMemberBoxes(words, name) {
     return Object.freeze([]);
 }
 
+/** @param {readonly OcrWord[]} words @param {string} name @param {number} minimumStart */
+function findMemberMatches(words, name, minimumStart) {
+    const expected = name.split(/\s+/u).map(token).filter(Boolean);
+    if (expected.length === 0) return Object.freeze([]);
+    const matches = [];
+    for (let start = minimumStart; start <= words.length - expected.length; start += 1) {
+        const candidate = words.slice(start, start + expected.length);
+        if (candidate.every((word, index) => token(word.text) === expected[index])) {
+            matches.push(Object.freeze({ start, end: start + expected.length, boxes: Object.freeze(candidate) }));
+        }
+    }
+    return Object.freeze(matches);
+}
+
+/**
+ * Proves a one-to-one roster partition. A partial roster has no stable positional
+ * indexes, and a repeated spelling is ambiguous, so both fail closed.
+ * @param {readonly OcrWord[]} words @param {readonly string[]} names
+ */
+function findMemberBoxAssignments(words, names) {
+    if (!Array.isArray(words) || !Array.isArray(names) || names.length === 0) return Object.freeze([]);
+    const assignments = [];
+    let cursor = 0;
+    for (const name of names) {
+        const matches = findMemberMatches(words, name, cursor);
+        if (matches.length !== 1) return Object.freeze([]);
+        const match = matches[0];
+        assignments.push(match.boxes);
+        cursor = match.end;
+    }
+    return Object.freeze(assignments);
+}
+
 /** @param {{r:number,g:number,b:number,a:number}} color */
 function roleColor(color) {
     const { r, g, b, a } = color;
@@ -95,9 +128,12 @@ function inferFromImage(image, blocks, JimpImpl) {
             return Object.freeze([]);
         }
         const candidates = rosterWords(block.words);
-        return Object.freeze(block.parsed.members.map((/** @type {any} */ member) => Object.freeze({
+        const names = block.parsed.members.map((/** @type {any} */ member) => member.name);
+        const assignments = block.parsed.complete ? findMemberBoxAssignments(candidates, names) : [];
+        return Object.freeze(block.parsed.members.map((/** @type {any} */ member,
+            /** @type {number} */ index) => Object.freeze({
             name: member.name,
-            role: colorVotes(image, findMemberBoxes(candidates, member.name), JimpImpl)
+            role: colorVotes(image, assignments[index] || [], JimpImpl)
         })));
     }));
 }
@@ -118,6 +154,7 @@ async function inferCinfoRoleHints(imageBase64, words, parsed, dependencies = {}
 
 module.exports = Object.freeze({
     colorVotes,
+    findMemberBoxAssignments,
     findMemberBoxes,
     inferCinfoRoleHints,
     inferCinfoRoleHintsBatch,

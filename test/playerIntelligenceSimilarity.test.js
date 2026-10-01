@@ -130,3 +130,24 @@ Test('cinfo resolver keeps uncertain identities pending and immutable', () => {
     Assert.equal(Object.isFrozen(result), true);
     Assert.equal(Object.isFrozen(result.resolvedMembers), true);
 });
+
+Test('partial cinfo resolves exact names but never strips adjacent Marley glyphs into Swizzy', () => {
+    const parsed = {
+        kind: 'cinfo', tag: 'FBM', declaredCount: 6,
+        members: [
+            { name: 'Rw', role: 'leader' },
+            { name: '] Swizzy ]', role: 'member' }
+        ],
+        complete: false,
+        establishedRaw: '09/29/2026 14:00:08',
+        establishedAtUtc: '2026-09-29T14:00:08.000Z',
+        timezoneConfidence: 'probable', rawText: '',
+        errors: Object.freeze(['Roster count mismatch: expected 6, read 2.'])
+    };
+    const result = resolveCinfo(parsed, [
+        { name: 'Rw', steamId: STEAM_A, battlemetricsPlayerId: null },
+        { name: 'Swizzy', steamId: STEAM_B, battlemetricsPlayerId: null, corroborated: true }
+    ]);
+    Assert.deepEqual(result.resolvedMembers.map(member => member.name), ['Rw']);
+    Assert.equal(result.unresolvedMembers[0].observedText, '] Swizzy ]');
+});

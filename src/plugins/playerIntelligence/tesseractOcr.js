@@ -10,7 +10,7 @@ const MAX_USER_WORDS = 1000;
 let queue = Promise.resolve();
 
 /** @typedef {{executable?:string,language?:string,psm?:number,spawnImpl?:Function,timeoutMs?:number,
- * maxOutputBytes?:number,userWords?:unknown}} OcrOptions */
+ * maxOutputBytes?:number,userWords?:unknown,characterWhitelist?:unknown}} OcrOptions */
 
 /** @param {string} tsv */
 function parseTsv(tsv) {
@@ -58,10 +58,16 @@ function spawnRecognition(image, options, userWordsPath) {
     const psm = typeof requestedPsm === 'number' && Number.isInteger(requestedPsm) &&
         requestedPsm >= 3 && requestedPsm <= 13 ? requestedPsm : 11;
     const spawnImpl = options.spawnImpl || ChildProcess.spawn;
+    const whitelist = options.characterWhitelist;
+    if (whitelist !== undefined && (typeof whitelist !== 'string' || whitelist.length < 1 ||
+        whitelist.length > 128 || /[\u0000-\u001f\u007f]/u.test(whitelist))) {
+        throw new TypeError('Tesseract character whitelist is invalid.');
+    }
 
     return new Promise((resolve, reject) => {
         const args = ['stdin', 'stdout', '-l', language, '--psm', `${psm}`];
         if (userWordsPath) args.push('--user-words', userWordsPath);
+        if (typeof whitelist === 'string') args.push('-c', `tessedit_char_whitelist=${whitelist}`);
         args.push('tsv');
         const child = spawnImpl(executable, args,
             { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });

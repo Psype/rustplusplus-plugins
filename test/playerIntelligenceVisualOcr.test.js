@@ -62,6 +62,7 @@ Test('Tesseract receives the generated user-word file and removes it after recog
     const spawnImpl = (_executable, args) => {
         const index = args.indexOf('--user-words');
         Assert.notEqual(index, -1);
+        Assert.equal(args.includes('tessedit_char_whitelist=0123456789/: '), true);
         temporaryFile = args[index + 1];
         contents = Fs.readFileSync(temporaryFile, 'utf8');
         const child = new EventEmitter();
@@ -79,7 +80,7 @@ Test('Tesseract receives the generated user-word file and removes it after recog
         return child;
     };
     const words = await TesseractOcr.recognize(Buffer.from('image').toString('base64'), {
-        spawnImpl, userWords: ['Nirks', 'Jeffrey Kirkstein']
+        spawnImpl, userWords: ['Nirks', 'Jeffrey Kirkstein'], characterWhitelist: '0123456789/: '
     });
     Assert.equal(words[0].text, 'Nirks');
     Assert.equal(contents, 'Nirks\nJeffrey\nKirkstein\n');
@@ -93,13 +94,13 @@ Test('visual aliases persist outside code and exact collisions remain explicit c
     const file = Path.join(directory, 'visual-alias-library.json');
     const sharedFeature = feature(0x55);
     const first = {
-        visualSamples: [{ memberIndex: 0, observedText: 'RW', feature: sharedFeature }],
+        visualSamples: [{ memberIndex: 0, observedText: 'RW', boundaryProof: true, feature: sharedFeature }],
         parsed: { kind: 'cinfo', resolvedMembers: [{
             memberIndex: 0, name: 'RW', steamId: '76561197900000001', battlemetricsPlayerId: null
         }] }
     };
     const second = {
-        visualSamples: [{ memberIndex: 0, observedText: 'RW', feature: sharedFeature }],
+        visualSamples: [{ memberIndex: 0, observedText: 'RW', boundaryProof: true, feature: sharedFeature }],
         parsed: { kind: 'cinfo', resolvedMembers: [{
             memberIndex: 0, name: 'RW', steamId: '76561197900000002', battlemetricsPlayerId: null
         }] }
@@ -111,7 +112,7 @@ Test('visual aliases persist outside code and exact collisions remain explicit c
     Assert.equal((await Visual.read(file)).samples.length, 2);
 
     const matches = await Visual.candidatesForItems(file, [{
-        visualSamples: [{ memberIndex: 3, feature: sharedFeature }]
+        visualSamples: [{ memberIndex: 3, boundaryProof: true, feature: sharedFeature }]
     }]);
     Assert.equal(matches[0].length, 2);
     Assert.equal(matches[0].every(candidate => candidate.corroborated && candidate.visualScore === 1 &&
@@ -150,6 +151,31 @@ Test('F7 name shapes seed the persistent library with their exact SteamID and no
     Assert.equal(sample.caseFidelity, false);
 });
 
+Test('partial cinfo rosters cannot emit or persist position-based visual samples', async t => {
+    const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-visual-partial-'));
+    t.after(() => Fs.rmSync(directory, { recursive: true, force: true }));
+    const file = Path.join(directory, 'visual-alias-library.json');
+    const image = await newImage(2, 2, 0xffffffff);
+    const buffer = await image.getBufferAsync(Jimp.MIME_PNG);
+    const block = {
+        words: [],
+        parsed: {
+            kind: 'cinfo', complete: false, declaredCount: 6,
+            members: [{ name: 'Marley' }, { name: 'Swizzy' }],
+            resolvedMembers: [{
+                memberIndex: 1, name: 'Swizzy', steamId: '76561197900000031',
+                battlemetricsPlayerId: null
+            }]
+        }
+    };
+    Assert.deepEqual(await Visual.extractVisualSamples(buffer.toString('base64'), [block]), [[]]);
+    Assert.deepEqual(await Visual.recordResolved(file, [{
+        ...block,
+        visualSamples: [{ memberIndex: 1, observedText: 'Swizzy', feature: feature(0x55) }]
+    }], '2026-10-01T12:00:00.000Z'), { added: 0, total: 0 });
+    Assert.equal((await Visual.read(file)).samples.length, 0);
+});
+
 Test('corrupt visual library is preserved and rejected instead of silently reset', async t => {
     const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-visual-alias-corrupt-'));
     t.after(() => Fs.rmSync(directory, { recursive: true, force: true }));
@@ -166,14 +192,14 @@ Test('approximate visual similarity retrieves but never marks an identity corrob
     const file = Path.join(directory, 'visual-alias-library.json');
     const known = feature(0x55);
     await Visual.recordResolved(file, [{
-        visualSamples: [{ memberIndex: 0, feature: known }],
+        visualSamples: [{ memberIndex: 0, observedText: 'Player', boundaryProof: true, feature: known }],
         parsed: { kind: 'cinfo', resolvedMembers: [{
             memberIndex: 0, name: 'Player', steamId: '76561197900000003', battlemetricsPlayerId: null
         }] }
     }], '2026-10-01T12:00:00.000Z');
     const changed = feature(0x54);
     const result = await Visual.candidatesForItems(file, [{
-        visualSamples: [{ memberIndex: 0, feature: changed }]
+        visualSamples: [{ memberIndex: 0, boundaryProof: true, feature: changed }]
     }]);
     Assert.equal(result[0].length, 1);
     Assert.equal(result[0][0].corroborated, false);
@@ -190,6 +216,7 @@ Test('resolved cinfo learns persistent grapheme shapes and recalls an alias from
         visualSamples: [{
             memberIndex: 0,
             observedText: 'AB',
+            boundaryProof: true,
             feature: feature(0x55),
             glyphs: [{ grapheme: 'A', feature: glyphA }, { grapheme: 'B', feature: glyphB }]
         }],
@@ -199,11 +226,12 @@ Test('resolved cinfo learns persistent grapheme shapes and recalls an alias from
     }], '2026-10-01T12:00:00.000Z');
 
     const document = await Visual.read(file);
-    Assert.equal(document.schemaVersion, 2);
+    Assert.equal(document.schemaVersion, 3);
     Assert.deepEqual(document.glyphSamples.map(sample => sample.grapheme), ['A', 'B']);
     const result = await Visual.candidatesForItems(file, [{
         visualSamples: [{
             memberIndex: 7,
+            boundaryProof: true,
             feature: feature(0xaa),
             glyphs: [{ feature: glyphA }, { feature: glyphB }]
         }]
@@ -214,7 +242,7 @@ Test('resolved cinfo learns persistent grapheme shapes and recalls an alias from
     Assert.equal(result[0][0].visualScore, 0.999999);
 });
 
-Test('glyph journal refuses an OCR spelling that differs from the resolved alias', async t => {
+Test('visual journal refuses every cinfo shape whose OCR spelling differs from the resolved alias', async t => {
     const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-visual-glyph-refuse-'));
     t.after(() => Fs.rmSync(directory, { recursive: true, force: true }));
     const file = Path.join(directory, 'visual-alias-library.json');
@@ -222,6 +250,7 @@ Test('glyph journal refuses an OCR spelling that differs from the resolved alias
         visualSamples: [{
             memberIndex: 0,
             observedText: 'A8',
+            boundaryProof: true,
             feature: feature(0x55),
             glyphs: [
                 { grapheme: 'A', feature: feature(0x0f, 0.5) },
@@ -232,7 +261,9 @@ Test('glyph journal refuses an OCR spelling that differs from the resolved alias
             memberIndex: 0, name: 'AB', steamId: '76561197900000005', battlemetricsPlayerId: null
         }] }
     }], '2026-10-01T12:00:00.000Z');
-    Assert.equal((await Visual.read(file)).glyphSamples.length, 0);
+    const document = await Visual.read(file);
+    Assert.equal(document.samples.length, 0);
+    Assert.equal(document.glyphSamples.length, 0);
 });
 
 Test('word boxes yield glyphs only when foreground runs match Unicode graphemes', async () => {
@@ -252,23 +283,24 @@ Test('word boxes yield glyphs only when foreground runs match Unicode graphemes'
         [{ text: 'ABC', x: 1, y: 1, width: 12, height: 10 }], 'ABC'), []);
 });
 
-Test('schema 1 visual alias journals migrate in memory without losing word samples', async t => {
+Test('pre-boundary visual journals are invalidated in memory without trusting shifted samples', async t => {
     const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-visual-schema-'));
     t.after(() => Fs.rmSync(directory, { recursive: true, force: true }));
     const file = Path.join(directory, 'visual-alias-library.json');
     await Visual.recordResolved(file, [{
-        visualSamples: [{ memberIndex: 0, observedText: 'RW', feature: feature(0x55) }],
+        visualSamples: [{
+            memberIndex: 0, observedText: 'RW', boundaryProof: true, feature: feature(0x55)
+        }],
         parsed: { kind: 'cinfo', resolvedMembers: [{
             memberIndex: 0, name: 'RW', steamId: '76561197900000006', battlemetricsPlayerId: null
         }] }
     }], '2026-10-01T12:00:00.000Z');
     const legacy = JSON.parse(Fs.readFileSync(file, 'utf8'));
-    legacy.schemaVersion = 1;
-    delete legacy.glyphSamples;
+    legacy.schemaVersion = 2;
     Fs.writeFileSync(file, `${JSON.stringify(legacy)}\n`, 'utf8');
 
     const migrated = await Visual.read(file);
-    Assert.equal(migrated.schemaVersion, 2);
-    Assert.equal(migrated.samples.length, 1);
+    Assert.equal(migrated.schemaVersion, 3);
+    Assert.equal(migrated.samples.length, 0);
     Assert.deepEqual(migrated.glyphSamples, []);
 });

@@ -6,6 +6,7 @@ const Discord = require('discord.js');
 
 const Scrape = require('../../util/scrape.js');
 const ImageAttachment = require('./imageAttachment.js');
+const CinfoPanelRefinement = require('./cinfoPanelRefinement.js');
 const CinfoRoles = require('./cinfoRoles.js');
 const OcrImagePreprocess = require('./ocrImagePreprocess.js');
 const { detectImportKind } = require('./detectImportKind.js');
@@ -151,13 +152,37 @@ function recognitionQuality(result) {
         return parsed.entries.length * 100 + (parsed.complete ? 40 : 0) -
             parsed.rejectedPartialIds.length * 4 - parsed.errors.length * 2;
     }
-    return result.blocks.reduce((score, block) => {
-        const parsed = block.parsed;
-        const structure = Number(Boolean(parsed.tag)) + Number(Number.isSafeInteger(parsed.declaredCount)) +
-            Number(Boolean(parsed.establishedAtUtc));
-        return score + 1000 + structure * 100 + parsed.members.length * 12 +
-            (parsed.complete ? 50 : 0) - parsed.errors.length * 3;
-    }, 0);
+    return result.blocks.reduce((score, block) => score + cinfoBlockQuality(block), 0);
+}
+
+/** @param {{parsed:any}} block */
+function cinfoBlockQuality(block) {
+    const parsed = block.parsed;
+    const structure = Number(Boolean(parsed.tag)) + Number(Number.isSafeInteger(parsed.declaredCount)) +
+        Number(Boolean(parsed.establishedAtUtc));
+    return 1000 + structure * 100 + parsed.members.length * 12 +
+        (parsed.complete ? 50 : 0) - parsed.errors.length * 3;
+}
+
+/** @param {{label:string,result:any,quality:number}[]} recognized */
+function selectRecognizedResult(recognized) {
+    recognized.sort((left, right) => right.quality - left.quality ||
+        Number(right.label === 'text-mask') - Number(left.label === 'text-mask'));
+    const selected = recognized[0].result;
+    if (selected.kind !== 'cinfo' || recognized.length === 1) return selected;
+    const blocks = selected.blocks.map((/** @type {any} */ block, /** @type {number} */ index) => {
+        const tag = `${block.parsed.tag || ''}`.normalize('NFKC').toLocaleLowerCase('en');
+        const candidates = [block];
+        for (const variant of recognized.slice(1)) {
+            const sameTag = tag ? variant.result.blocks.filter((/** @type {any} */ candidate) =>
+                `${candidate.parsed.tag || ''}`.normalize('NFKC').toLocaleLowerCase('en') === tag) : [];
+            const candidate = sameTag.length === 1 ? sameTag[0] :
+                variant.result.blocks.length === selected.blocks.length ? variant.result.blocks[index] : null;
+            if (candidate) candidates.push(candidate);
+        }
+        return candidates.sort((left, right) => cinfoBlockQuality(right) - cinfoBlockQuality(left))[0];
+    });
+    return Object.freeze({ kind: 'cinfo', blocks: Object.freeze(blocks) });
 }
 
 /**
@@ -212,10 +237,29 @@ async function parseAttachment(client, kindHint, attachment, reference, attachme
         const reason = failures.at(-1);
         throw reason instanceof Error ? reason : new Error('No OCR variant produced a valid semantic result.');
     }
-    recognized.sort((left, right) => right.quality - left.quality ||
-        Number(right.label === 'text-mask') - Number(left.label === 'text-mask'));
-    const { kind } = recognized[0].result;
-    let blocks = recognized[0].result.blocks;
+    const selected = selectRecognizedResult(recognized);
+    const { kind } = selected;
+    let blocks = selected.blocks;
+    if (kind === 'cinfo' && blocks.some((/** @type {any} */ block) =>
+        !block.parsed.complete || !block.parsed.establishedAtUtc)) {
+        try {
+            const refine = dependencies.refineCinfoPanels || CinfoPanelRefinement.refineCinfoPanels;
+            const refined = await refine(image.imageBase64, blocks, recognize, ocrOptions, dependencies);
+            if (!refined || !Array.isArray(refined.blocks) || refined.blocks.length !== blocks.length) {
+                throw new TypeError('Cinfo panel refiner returned an invalid result.');
+            }
+            blocks = refined.blocks;
+            if (refined.warning && typeof client.log === 'function') {
+                client.log('PLAYER_INTELLIGENCE', `Optional cinfo panel refinement: ${refined.warning}`, 'warn');
+            }
+        }
+        catch (error) {
+            if (typeof client.log === 'function') {
+                client.log('PLAYER_INTELLIGENCE', `Optional cinfo panel refinement failed: ${
+                    sanitizeError(error)}`, 'warn');
+            }
+        }
+    }
     /** @type {readonly (readonly any[])[]} */
     let visualSamples = Object.freeze(blocks.map(() => Object.freeze([])));
     if (kind === 'cinfo') {
@@ -700,5 +744,6 @@ module.exports = Object.freeze({
     handleButton,
     normalizeWebhookIds,
     previewItems,
-    previewText
+    previewText,
+    selectRecognizedResult
 });

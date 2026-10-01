@@ -367,6 +367,10 @@ function threshold(value, fallback, label) {
 /** @param {readonly string[]} observedNames @param {readonly any[]} candidates @param {any} options */
 function resolveRoster(observedNames, candidates, options = {}) {
     if (!Array.isArray(observedNames)) throw new TypeError('Observed roster names must be an array.');
+    if (options.exactOnly !== undefined && typeof options.exactOnly !== 'boolean') {
+        throw new TypeError('exactOnly must be a boolean.');
+    }
+    const exactOnly = options.exactOnly === true;
     const observed = observedNames.map(name => clean(name));
     if (observed.some(name => !name || name.length > 128)) {
         throw new TypeError('Observed roster names must be non-empty bounded strings.');
@@ -384,8 +388,9 @@ function resolveRoster(observedNames, candidates, options = {}) {
                     if (visualExact) return true;
                     const left = strongRetrievalKey(name);
                     const right = strongRetrievalKey(alias.name);
-                    return left.exact === right.exact || Boolean(left.alnum && left.alnum === right.alnum) ||
-                        Boolean(left.accentless && left.accentless === right.accentless);
+                    return left.exact === right.exact || (!exactOnly &&
+                        (Boolean(left.alnum && left.alnum === right.alnum) ||
+                        Boolean(left.accentless && left.accentless === right.accentless)));
                 })()
             };
         }).sort((/** @type {any} */ left, /** @type {any} */ right) =>
@@ -422,7 +427,8 @@ function resolveRoster(observedNames, candidates, options = {}) {
         const corroboratedMatches = alternatives.filter(item => item.score >= requiredScore &&
             item.alias.corroborated);
         const externallyConfirmed = Boolean(assigned && assigned.alias.corroborated &&
-            assignedScore >= requiredScore && corroboratedMatches.length === 1);
+            assignedScore >= requiredScore && corroboratedMatches.length === 1 &&
+            (!exactOnly || assigned.strong));
         const status = assigned && assignedScore >= requiredScore &&
             ((assigned.strong && margin >= requiredMargin) || externallyConfirmed) ? 'resolved' :
             assigned && assignedScore >= provisionalScore ? 'provisional' : 'unresolved';

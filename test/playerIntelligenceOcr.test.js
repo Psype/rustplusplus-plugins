@@ -253,3 +253,27 @@ Test('cinfo role classification stays unknown when only the world background is 
         intToRGBA: () => ({ r: 125, g: 72, b: 52, a: 255 })
     }), 'unknown');
 });
+
+Test('cinfo member boxes stay ordered and never shift Marley glyphs onto Swizzy', () => {
+    const words = [
+        { text: 'Rw,', x: 10, y: 10, width: 20, height: 10, confidence: 95 },
+        { text: 'Elliott,', x: 35, y: 10, width: 35, height: 10, confidence: 95 },
+        { text: 'Marley', x: 75, y: 10, width: 40, height: 10, confidence: 95 },
+        { text: 'J,', x: 120, y: 10, width: 8, height: 10, confidence: 95 },
+        { text: 'Swizzy,', x: 135, y: 10, width: 40, height: 10, confidence: 95 }
+    ];
+    const assignments = CinfoRoles.findMemberBoxAssignments(words,
+        ['Rw', 'Elliott', 'Marley J', 'Swizzy']);
+    Assert.equal(assignments.length, 4);
+    Assert.deepEqual(assignments[2].map(word => word.text), ['Marley', 'J,']);
+    Assert.deepEqual(assignments[3].map(word => word.text), ['Swizzy,']);
+    Assert.equal(assignments[2].at(-1).x < assignments[3][0].x, true);
+});
+
+Test('cinfo member box partition fails closed on ambiguous repeated names', () => {
+    const words = [
+        { text: 'Joe,', x: 10, y: 10, width: 20, height: 10, confidence: 95 },
+        { text: 'Joe', x: 40, y: 10, width: 20, height: 10, confidence: 95 }
+    ];
+    Assert.deepEqual(CinfoRoles.findMemberBoxAssignments(words, ['Joe']), []);
+});

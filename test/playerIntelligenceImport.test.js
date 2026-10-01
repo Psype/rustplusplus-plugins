@@ -5,8 +5,12 @@ const Os = require('node:os');
 const Path = require('node:path');
 const Test = require('node:test');
 
+const Jimp = require('jimp');
+
 const Core = require('../src/plugins/playerIntelligence');
+const CinfoPanelRefinement = require('../src/plugins/playerIntelligence/cinfoPanelRefinement.js');
 const ImportWorkflow = require('../src/plugins/playerIntelligence/importWorkflow.js');
+const { parseCinfoWords } = require('../src/plugins/playerIntelligence/parseCinfo.js');
 const VisualAliasLibrary = require('../src/plugins/playerIntelligence/visualAliasLibrary.js');
 
 function word(text, y) {
@@ -130,6 +134,87 @@ Test('OCR compares one text-mask pass with raw semantics and feeds persistent al
         call.options.userWords.includes('tom.le.geek.2')), true);
 });
 
+Test('cinfo selection takes the safest panel independently from each OCR variant', () => {
+    const block = (tag, members, establishedAtUtc, marker) => Object.freeze({
+        words: Object.freeze([{ text: marker }]),
+        parsed: Object.freeze({
+            tag,
+            declaredCount: 3,
+            members: Object.freeze(Array.from({ length: members }, (_, index) => ({ name: `${marker}${index}` }))),
+            complete: members === 3,
+            establishedAtUtc,
+            errors: Object.freeze(establishedAtUtc ? [] : ['Established timestamp is invalid.'])
+        })
+    });
+    const selected = ImportWorkflow.selectRecognizedResult([
+        { label: 'text-mask', quality: 1, result: { kind: 'cinfo', blocks: [
+            block('A', 3, null, 'mask-a'), block('B', 3, '2026-10-01T12:00:00.000Z', 'mask-b')
+        ] } },
+        { label: 'raw', quality: 2, result: { kind: 'cinfo', blocks: [
+            block('A', 3, '2026-10-01T12:00:00.000Z', 'raw-a'), block('B', 1, null, 'raw-b')
+        ] } }
+    ]);
+    Assert.equal(selected.blocks[0].words[0].text, 'raw-a');
+    Assert.equal(selected.blocks[1].words[0].text, 'mask-b');
+    Assert.equal(Object.isFrozen(selected.blocks), true);
+});
+
+Test('incomplete cinfo panels receive one bounded semantic crop OCR pass', async () => {
+    const image = await new Promise((resolve, reject) => new Jimp(480, 180, 0x5d514cff,
+        (error, value) => error ? reject(error) : resolve(value)));
+    const buffer = await image.getBufferAsync(Jimp.MIME_PNG);
+    const originalWords = [
+        word('ClanTag: TEST', 20), word('Members: 3', 45),
+        word('Clan Members: Alice', 70), word('Established: broken', 95)
+    ];
+    const original = Object.freeze({ words: originalWords, parsed: parseCinfoWords(originalWords) });
+    const calls = [];
+    const result = await CinfoPanelRefinement.refineCinfoPanels(buffer.toString('base64'), [original],
+        async (_image, options) => {
+            calls.push(options);
+            return [
+                word('ClanTag: TEST', 10), word('Members: 3', 35),
+                word('Clan Members: Alice, Bob and Charly', 60),
+                word('Established: 09/29/2026 14:58:27', 85)
+            ];
+        }, { userWords: ['Alice', 'Bob', 'Charly'], timeoutMs: 45000 }, {
+            preprocessPanelImage: async () => ({ imageBase64: 'panel-mask', scale: 1 })
+        });
+    Assert.equal(calls.length, 1);
+    Assert.equal(calls[0].psm, 6);
+    Assert.equal(calls[0].timeoutMs, 30000);
+    Assert.equal(result.blocks[0].parsed.complete, true);
+    Assert.equal(result.blocks[0].parsed.establishedAtUtc, '2026-09-29T14:58:27.000Z');
+    Assert.deepEqual(result.blocks[0].parsed.members.map(member => member.name), ['Alice', 'Bob', 'Charly']);
+    Assert.equal(result.warning, null);
+});
+
+Test('invalid cinfo dates receive a constrained numeric field read', async () => {
+    const image = await new Promise((resolve, reject) => new Jimp(480, 180, 0x5d514cff,
+        (error, value) => error ? reject(error) : resolve(value)));
+    const buffer = await image.getBufferAsync(Jimp.MIME_PNG);
+    const originalWords = [
+        word('ClanTag: TEST', 20), word('Members: 1', 45),
+        word('Clan Members: Alice', 70), word('Established: 09/29/2 b2 6 14:58:27 t', 95)
+    ];
+    const original = Object.freeze({ words: originalWords, parsed: parseCinfoWords(originalWords) });
+    const calls = [];
+    const result = await CinfoPanelRefinement.refineCinfoPanels(buffer.toString('base64'), [original],
+        async (_image, options) => {
+            calls.push(options);
+            return options.psm === 7 ? [word('09/29/2026 14:58:27', 5)] : originalWords;
+        }, { timeoutMs: 45000 }, {
+            preprocessPanelImage: async () => ({ imageBase64: 'panel-mask', scale: 1 }),
+            preprocessDateImage: async () => ({ imageBase64: 'date-mask', scale: 1 })
+        });
+    Assert.deepEqual(calls.map(call => call.psm), [6, 7]);
+    Assert.equal(calls[1].characterWhitelist, '0123456789/: ');
+    Assert.deepEqual(calls[1].userWords, []);
+    Assert.equal(result.blocks[0].parsed.establishedRaw, '09/29/2026 14:58:27');
+    Assert.equal(result.blocks[0].parsed.establishedAtUtc, '2026-09-29T14:58:27.000Z');
+    Assert.equal(result.warning, null);
+});
+
 Test('confirmed resolved shapes persist in the server data directory, not in source code', async t => {
     const value = createHarness(t);
     value.client.playerIntelligenceImportDependencies.disableOcrPreprocessing = true;
@@ -143,7 +228,7 @@ Test('confirmed resolved shapes persist in the server data directory, not in sou
         digest: Crypto.createHash('sha256').update(bits).update(`:${aspectRatio.toFixed(3)}`, 'utf8').digest('hex')
     });
     value.client.playerIntelligenceImportDependencies.extractCinfoVisualSamples = async () => [[{
-        memberIndex: 0, observedText: 'Nirks', feature
+        memberIndex: 0, observedText: 'Nirks', boundaryProof: true, feature
     }]];
     await ImportWorkflow.beginImport(value.client, value.command);
     const customId = value.edits[0].components[0].components[0].data.custom_id;

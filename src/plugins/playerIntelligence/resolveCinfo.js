@@ -13,7 +13,10 @@ function resolveCinfo(parsed, candidates, options = {}) {
             candidate.knownClanTags.includes(tagKey)
     }));
     const matches = resolveRoster(parsed.members.map((/** @type {any} */ member) => member.name),
-        contextualCandidates, options);
+        contextualCandidates, {
+            ...options,
+            exactOnly: parsed.complete !== true || options.exactOnly === true
+        });
     const enriched = parsed.members.map((/** @type {any} */ member, /** @type {number} */ index) => Object.freeze({
         index,
         name: member.name,

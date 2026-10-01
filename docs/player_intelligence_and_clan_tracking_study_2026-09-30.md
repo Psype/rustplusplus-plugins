@@ -196,6 +196,12 @@ tag, compteur, date, roster ou SteamID complets) choisit déterministement la me
 indépendantes, pas des retries aveugles. Les boîtes de la variante agrandie sont ramenées à l'échelle originale avant
 la lecture relative des couleurs de rôles.
 
+Depuis la version 1.22.4, le choix brut/masqué est effectué panneau par panneau. Un panneau encore incomplet reçoit
+une seule lecture PSM 6 d'un crop borné relativement entre `ClanTag` et `Established`; le résultat n'est accepté que
+s'il conserve tag/compteur et améliore la structure. Une date encore invalide reçoit une lecture PSM 7 séparée avec
+alphabet `0123456789/: `, puis passe le même validateur calendaire strict. Une panne de ce raffinement optionnel est
+un avertissement et ne peut pas annuler une transaction serveur déjà valide.
+
 Les membres `/cinfo` déjà résolus et les lignes F7 nom/SteamID non ambiguës enrichissent enfin une mémoire visuelle
 persistante par serveur sous
 `data/player-intelligence/<guild>/<battlemetricsServerId>/visual-alias-library.json`. Elle stocke au plus 2 000
@@ -206,14 +212,24 @@ reste insuffisante pour le lier. Deux identités ayant la même signature resten
 validé, borné, écrit atomiquement et sa corruption est préservée ; sa panne après le commit canonique ne peut pas
 annuler ce commit.
 
-Depuis la version 1.22.3, le même sidecar schema 2 journalise aussi jusqu'à 4 096 signatures
+Depuis la version 1.22.3, le même sidecar journalise aussi jusqu'à 4 096 signatures
 glyphe↔graphème Unicode, avec douze variantes maximum par graphème. L'apprentissage exige un alias `/cinfo` déjà
 résolu, une graphie OCR strictement identique à l'alias et une séparation non ambiguë d'un segment visuel par graphème.
 Une graphie liée, des lettres qui se touchent ou un découpage incohérent ne produisent aucun échantillon. Lors d'une
 capture suivante, la séquence de glyphes rappelle et réordonne les alias visuels de même longueur, y compris avec des
 graphèmes non latins séparables, mais reste une preuve de classement non corroborante. Seule une signature de mot
-entier strictement identique peut conserver le statut visuel fort antérieur. Les journaux schema 1 sont lus et migrés
-sans perte lors d'une future écriture utile.
+entier strictement identique peut conserver le statut visuel fort antérieur.
+
+La version 1.22.4 corrige une contamination de frontière : l'index d'un pseudo dans un roster OCR partiel ne représente
+pas sa position réelle dans le clan. L'extraction, la recherche visuelle, l'apprentissage de mots/glyphes et le vote
+de rôle `/cinfo` exigent désormais le compteur complet et une partition unique, ordonnée et non chevauchante de toutes
+les boîtes de pseudos. Ainsi la forme de `Marley` ne peut plus être attribuée au slot reconnu de `Swizzy`. Le sidecar
+passe au schema 3 ; les fichiers schema 1/2 restent validés et préservés, mais leurs échantillons dérivés antérieurs à
+cette preuve de frontière sont ignorés. Ils se reconstruisent sur les imports confirmés suivants, sans modifier les
+événements canoniques de joueurs ou de clans. Même avec une partition prouvée, aucune signature de mot ni de glyphe
+`/cinfo` n'est apprise si le résolveur a changé la graphie OCR. Enfin, un roster incomplet ne lie automatiquement que
+les alias exacts après normalisation de casse : suppression des décorations, similarité floue et corroboration externe
+restent provisoires tant que les frontières ne sont pas complètes.
 
 Le benchmark synthétique dédié de la version 1.22.3 rappelle la cible parmi 2 000 alias, 104 variantes de glyphes et
 une séquence de huit graphèmes en 20,797 ms de médiane. Le benchmark global 200 joueurs ne régresse pas entre les
@@ -645,7 +661,7 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
    WarBandits/Steam plafonnée à trois requêtes candidates par lot, le masque couleur agrandi, les user-words et la
    mémoire visuelle persistante sont également implémentés.
 3. **À calibrer et étendre** : corpus de PNG originaux, précision champ par champ et seuils couleur/OCR sur Linux,
-   recadrage relatif par champ, modèle synthétique multi-fontes et moteur de scène multilingue ; les tests
+   lectures isolées du roster/tag/compteur, modèle synthétique multi-fontes et moteur de scène multilingue ; les tests
    déterministes utilisent actuellement les textes et boîtes correspondant aux exemples fournis.
 4. **À ajouter si utile** : import legacy en lecture seule, Rust+ own-clan, vue d'historique détaillée et outil audité
    de liaison/révocation ; aucune de ces étapes ne doit modifier les bases existantes.
@@ -657,8 +673,8 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale finale après ajout des snapshots partiels, de la résolution/corroboration et de la mémoire OCR :
-`npm.cmd test` passe 168/168,
+QA locale finale après raffinement OCR par panneau, validation des frontières du roster et schema visuel 3 :
+`npm.cmd test` passe 186/186,
 dont le typage strict `tsc --noEmit`. Une
 exécution antérieure avait reproduit le timeout FCM historique sous charge, puis son fichier était repassé 5/5
 isolément. Le sélecteur Windows, un webhook Discord réel et l'OCR de PNG originaux restent à valider interactivement ;
@@ -704,6 +720,8 @@ de forme ni la pénalité d'aspect. Le premier chargement valide toujours intég
 - scission de roster projetée avec couverture sans inventer un litige ni modifier l'historique source ;
 - co-play ne créant aucun membership, équipe Rust+ ne devenant pas automatiquement un clan ;
 - OCR `/cinfo` : noms colorés, guillemets, accents, virgules, lignes coupées, compteur incohérent et image dupliquée ;
+- roster `/cinfo` partiel : aucune association visuelle positionnelle, aucune permutation Marley/Swizzy et aucun
+  apprentissage de mot/glyphe avant une partition complète, unique et ordonnée ;
 - OCR F7 : regroupement dynamique nom/SteamID sans coordonnées fixes, casse non fidèle, Unicode, ligne partiellement
   masquée, SteamID tronqué ou mal lu, homonymes et variations d'ordre des colonnes/résolution ;
 - rapprochement `/cinfo`/F7 : correspondance case-foldée unique acceptée après confirmation, collision refusée ;

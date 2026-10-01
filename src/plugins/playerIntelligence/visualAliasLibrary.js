@@ -11,8 +11,8 @@ const { isRustUiTextPixel } = require('./ocrImagePreprocess.js');
 
 /** @typedef {Readonly<{text:string,x:number,y:number,width:number,height:number,confidence:number|null}>} OcrWord */
 
-const SCHEMA_VERSION = 2;
-const LEGACY_SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 3;
+const LEGACY_SCHEMA_VERSIONS = Object.freeze([1, 2]);
 const FEATURE_WIDTH = 96;
 const FEATURE_HEIGHT = 24;
 const FEATURE_BYTES = FEATURE_WIDTH * FEATURE_HEIGHT / 8;
@@ -146,7 +146,7 @@ function validateGlyphSample(input) {
 function validateDocument(input) {
     const value = /** @type {any} */ (input);
     if (!input || typeof input !== 'object' ||
-        ![LEGACY_SCHEMA_VERSION, SCHEMA_VERSION].includes(value.schemaVersion) ||
+        ![...LEGACY_SCHEMA_VERSIONS, SCHEMA_VERSION].includes(value.schemaVersion) ||
         !Array.isArray(/** @type {any} */ (input).samples) ||
         /** @type {any} */ (input).samples.length > MAX_SAMPLES) {
         throw new TypeError('Visual alias library schema is invalid.');
@@ -164,7 +164,7 @@ function validateDocument(input) {
         }
         counts.set(identity, count);
     }
-    const rawGlyphSamples = value.schemaVersion === LEGACY_SCHEMA_VERSION ? [] : value.glyphSamples;
+    const rawGlyphSamples = value.schemaVersion === 1 ? [] : value.glyphSamples;
     if (!Array.isArray(rawGlyphSamples) || rawGlyphSamples.length > MAX_GLYPH_SAMPLES) {
         throw new TypeError('Visual glyph library schema is invalid.');
     }
@@ -180,10 +180,14 @@ function validateDocument(input) {
         }
         glyphCounts.set(sample.grapheme, count);
     }
+    // Schema 1/2 samples predate proven roster boundaries. They remain valid JSON,
+    // but cannot safely be reused because a missing member shifted positional indexes.
+    const trustedSamples = value.schemaVersion === SCHEMA_VERSION ? samples : [];
+    const trustedGlyphSamples = value.schemaVersion === SCHEMA_VERSION ? glyphSamples : [];
     return Object.freeze({
         schemaVersion: SCHEMA_VERSION,
-        samples: Object.freeze(samples),
-        glyphSamples: Object.freeze(glyphSamples)
+        samples: Object.freeze(trustedSamples),
+        glyphSamples: Object.freeze(trustedGlyphSamples)
     });
 }
 
@@ -408,14 +412,21 @@ async function extractVisualSamples(imageBase64, blocks, options = {}) {
         const entries = cinfo ? block.parsed.members : block.parsed.entries;
         if (!Array.isArray(entries)) return Object.freeze([]);
         const words = cinfo ? CinfoRoles.rosterWords(block.words) : Layout.normalizeWords(block.words);
+        if (cinfo && (!block.parsed.complete || entries.length !== block.parsed.declaredCount)) {
+            return Object.freeze([]);
+        }
+        const assignments = cinfo ? CinfoRoles.findMemberBoxAssignments(words,
+            entries.map((/** @type {any} */ entry) => entry.name)) : Object.freeze([]);
+        if (cinfo && assignments.length !== entries.length) return Object.freeze([]);
         return Object.freeze(entries.map((/** @type {any} */ entry, /** @type {number} */ index) => {
             const name = cinfo ? entry.name : entry.ambiguous ? null : entry.name;
             if (!name) return null;
-            const boxes = CinfoRoles.findMemberBoxes(words, name);
+            const boxes = cinfo ? assignments[index] : CinfoRoles.findMemberBoxes(words, name);
             const feature = featureFromBoxes(image, boxes, JimpImpl);
             return feature ? Object.freeze({
                 memberIndex: index,
                 observedText: name,
+                boundaryProof: true,
                 feature,
                 glyphs: glyphFeaturesFromBoxes(image, boxes, name, JimpImpl)
             }) : null;
@@ -509,6 +520,7 @@ async function candidatesForItems(file, items) {
     return Object.freeze(items.map(item => {
         const candidates = new Map();
         for (const visual of item.visualSamples || []) {
+            if (visual.boundaryProof !== true) continue;
             for (const match of matchFeature(visual.feature, document.samples)) {
                 addVisualCandidate(candidates, match, visual.memberIndex, match.score === 1);
             }
@@ -539,8 +551,13 @@ function recordResolved(file, items, observedAt) {
             (item.parsed.entries || []).map((/** @type {any} */ entry, /** @type {number} */ index) =>
                 [index, entry.ambiguous || !entry.name ? null : entry]));
         for (const visual of item.visualSamples || []) {
+            if (visual.boundaryProof !== true) continue;
             const member = resolved.get(visual.memberIndex);
             if (!member) continue;
+            const exactObservedName = cleanName(visual.observedText).normalize('NFC') ===
+                cleanName(member.name).normalize('NFC');
+            if (item.parsed.kind === 'cinfo' &&
+                (!exactObservedName || member.caseFidelity === false)) continue;
             const feature = validateFeature(visual.feature);
             const base = {
                 name: member.name,
@@ -553,10 +570,7 @@ function recordResolved(file, items, observedAt) {
             const sampleId = Crypto.createHash('sha256').update(`${base.steamId || ''}\0${
                 base.battlemetricsPlayerId || ''}\0${base.name}\0${feature.digest}`, 'utf8').digest('hex');
             additions.push(validateSample({ ...base, sampleId }));
-            const exactObservedName = cleanName(visual.observedText).normalize('NFC') ===
-                cleanName(member.name).normalize('NFC');
-            if (item.parsed.kind !== 'cinfo' || !exactObservedName || member.caseFidelity === false ||
-                !Array.isArray(visual.glyphs)) continue;
+            if (item.parsed.kind !== 'cinfo' || !Array.isArray(visual.glyphs)) continue;
             for (const glyph of visual.glyphs) {
                 if (!glyph || typeof glyph.grapheme !== 'string') continue;
                 const glyphFeature = validateFeature(glyph.feature);
