@@ -206,6 +206,20 @@ reste insuffisante pour le lier. Deux identités ayant la même signature resten
 validé, borné, écrit atomiquement et sa corruption est préservée ; sa panne après le commit canonique ne peut pas
 annuler ce commit.
 
+Depuis la version 1.22.3, le même sidecar schema 2 journalise aussi jusqu'à 4 096 signatures
+glyphe↔graphème Unicode, avec douze variantes maximum par graphème. L'apprentissage exige un alias `/cinfo` déjà
+résolu, une graphie OCR strictement identique à l'alias et une séparation non ambiguë d'un segment visuel par graphème.
+Une graphie liée, des lettres qui se touchent ou un découpage incohérent ne produisent aucun échantillon. Lors d'une
+capture suivante, la séquence de glyphes rappelle et réordonne les alias visuels de même longueur, y compris avec des
+graphèmes non latins séparables, mais reste une preuve de classement non corroborante. Seule une signature de mot
+entier strictement identique peut conserver le statut visuel fort antérieur. Les journaux schema 1 sont lus et migrés
+sans perte lors d'une future écriture utile.
+
+Le benchmark synthétique dédié de la version 1.22.3 rappelle la cible parmi 2 000 alias, 104 variantes de glyphes et
+une séquence de huit graphèmes en 20,797 ms de médiane. Le benchmark global 200 joueurs ne régresse pas entre les
+mesures immédiatement avant/après (chargement initial 41,702→39,357 ms, poll silencieux 0,044→0,030 ms, dix
+transitions 51,356→50,742 ms). Ces chiffres locaux valident le bornage, pas la précision sur captures réelles.
+
 Le contrat `clan_snapshot` accepte désormais, sans casser les événements schema 1 existants, des membres résolus et
 des slots `unresolvedMembers`. Une structure tag/compteur/date valide peut donc être confirmée malgré un roster
 incomplet. Les slots ne créent ni alias exact, ni relation `Played with`; chaque reconstruction de la projection les
@@ -266,6 +280,14 @@ SteamID64/dates/tags/rosters, le taux d'erreur caractère Unicode et les faux co
 faux lien définitif sur le corpus de validation ; les états provisoires et non résolus permettent ensuite d'améliorer
 le rappel sans abaisser ce garde-fou ni jeter tout le snapshot. En attendant ce corpus, le système ne doit pas être
 présenté comme une transcription Unicode complète : sa sûreté vient aussi de ses slots partiels et de ses refus.
+
+L'évolution recommandée est hybride et entièrement offline : affiner un reconnaisseur de séquences sur des lignes
+synthétiques rendues avec la chaîne Roboto/Noto de Rust, ses tailles, contours, ombres, couleurs et compressions, puis
+utiliser un atlas de glyphes comme seconde mesure et pour reclasser les alias déjà connus. Un atlas lettre par lettre
+seul ne couvre pas correctement crénage, ligatures, signes combinants ni façonnage arabe contextuel. Les champs
+numériques conservent leurs lectures contraintes indépendantes. L'objectif mesurable est une exactitude très élevée
+sur le corpus réel et zéro faux lien définitif, pas une garantie théorique de 100 % lorsque la rasterisation a déjà
+rendu deux caractères différents identiques au niveau des pixels.
 
 ### Menu de signalement F7
 
@@ -607,6 +629,11 @@ homonymes après perte de casse. Le SteamID à 17 chiffres, la prévisualisation
 bornent ce risque sans inventer de correspondance.
 
 ## Plan chirurgical
+
+Calibration confirmée le 2026-10-01 pour `/cinfo` : le beige/jaune pâle désaturé indique un membre normal, le jaune
+vif saturé un leader et le bleu saturé un modérateur. Le vote travaille dans les boîtes relatives des mots OCR, sépare
+teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position écran. Une couleur illisible reste
+`unknown`, et les pixels beige d'anti-crénelage ne peuvent plus promouvoir un membre en leader.
 
 1. **Terminé** : contrats stricts, journal JSONL mensuel durable, projections identité/clan/présence/wipe,
    déduplication/corruption, hook BattleMetrics global sans second poller et requêtes compactes.

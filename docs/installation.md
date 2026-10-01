@@ -34,14 +34,34 @@ Unicode; unresolved members are stored as pending slots rather than invented or 
 Resolved `/cinfo` name shapes and unambiguous F7 name/SteamID rows are stored independently from the code in
 `data/player-intelligence/<guild>/<battlemetricsServerId>/visual-alias-library.json`. The file is bounded, validated,
 written atomically, ignored by Git and survives bot restarts/upgrades as long as the `data/player-intelligence`
-directory is preserved. It contains normalized binary word signatures and identity references, never screenshot
-pixels. Exact visual repeats may corroborate an existing identity; approximate shapes only retrieve candidates and
-cannot create a definitive link by themselves. A corrupt sidecar is preserved and disabled instead of silently reset.
+directory is preserved. Schema 2 contains normalized binary word signatures, identity references, and a bounded
+glyph↔Unicode-grapheme journal; it never stores screenshot pixels. The glyph journal learns only from exact `/cinfo`
+spellings already resolved to a stable identity and only when foreground runs form an unambiguous segmentation.
+Connected/touching writing is skipped. Exact whole-word repeats may corroborate an existing identity; glyph and
+approximate shapes only retrieve/rank candidates and cannot create a definitive link by themselves. A schema 1 file
+is read compatibly, while a corrupt sidecar is preserved and disabled instead of silently reset.
 
 The private `intel-imports` channel is created automatically when the guild is set up again or the bot restarts. A
 manual message may contain 1 to 10 PNG/JPEG/WebP images. The bot detects F7 versus `/cinfo` from OCR anchors; an optional
 leading `cinfo` or `f7` acts as a strict hint for every attached image. One image may contain several vertically
 stacked `/cinfo` panels: repeated `ClanTag` anchors are split and validated independently, without fixed coordinates.
+
+## Editable in-game raid alert
+
+Edit `config/raid-alarm.json` to change the recognized raid alert sent to Rust team chat:
+
+```json
+{
+  "inGameMessageTemplate": ":exclamation: :poggers: GETTING RAIDED: {message}  :oldmanlaugh: :exclamation:"
+}
+```
+
+The file is read again for each incoming raid, so no bot restart is required. Supported named placeholders are
+`{title}` (localized title), `{message}` (localized complete detail without its final period), `{item}` and
+`{location}`. The last two are available only when the producer supplied the canonical
+`<item> destroyed at <location>` body. Keep the template on one line and below 512 characters. An absent/malformed
+file, a template without at least one supported placeholder, an unknown placeholder, or unavailable
+`{item}`/`{location}` logs a warning and uses the built-in `{message}` template; the Rust+ alert is still sent.
 
 For the optional Windows region-capture helper, create a webhook only in that private channel. The Linux bot needs
 only its numeric ID, never its token:

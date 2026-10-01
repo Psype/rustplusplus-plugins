@@ -42,28 +42,50 @@ function findMemberBoxes(words, name) {
     return Object.freeze([]);
 }
 
+/** @param {{r:number,g:number,b:number,a:number}} color */
+function roleColor(color) {
+    const { r, g, b, a } = color;
+    const maximum = Math.max(r, g, b);
+    const minimum = Math.min(r, g, b);
+    if (a < 128 || maximum < 90) return null;
+    const chroma = maximum - minimum;
+    const saturation = maximum === 0 ? 0 : chroma / maximum;
+    let hue = 0;
+    if (chroma !== 0) {
+        if (maximum === r) hue = 60 * (((g - b) / chroma) % 6);
+        else if (maximum === g) hue = 60 * (((b - r) / chroma) + 2);
+        else hue = 60 * (((r - g) / chroma) + 4);
+        if (hue < 0) hue += 360;
+    }
+
+    if (saturation >= 0.38 && hue >= 175 && hue <= 245 && b > r * 1.15) return 'moderator';
+    if (saturation >= 0.38 && hue >= 40 && hue <= 110 && g > b * 1.35) return 'leader';
+    if (maximum >= 145 && saturation < 0.38) return 'member';
+    return null;
+}
+
 /** @param {any} image @param {readonly {x:number,y:number,width:number,height:number}[]} boxes @param {any} JimpImpl */
 function colorVotes(image, boxes, JimpImpl) {
     let blue = 0;
     let yellow = 0;
+    let beige = 0;
     for (const box of boxes) {
         const step = Math.max(1, Math.floor(Math.sqrt(box.width * box.height / 1200)));
         const right = Math.min(image.bitmap.width, Math.ceil(box.x + box.width));
         const bottom = Math.min(image.bitmap.height, Math.ceil(box.y + box.height));
         for (let y = Math.max(0, Math.floor(box.y)); y < bottom; y += step) {
             for (let x = Math.max(0, Math.floor(box.x)); x < right; x += step) {
-                const { r, g, b, a } = JimpImpl.intToRGBA(image.getPixelColor(x, y));
-                if (a < 128 || Math.max(r, g, b) < 90) continue;
-                if (b > r * 1.25 && b > g * 1.05) blue += 1;
-                else if (r > b * 1.35 && g > b * 1.25 && Math.abs(r - g) < Math.max(r, g) * 0.45) {
-                    yellow += 1;
-                }
+                const role = roleColor(JimpImpl.intToRGBA(image.getPixelColor(x, y)));
+                if (role === 'moderator') blue += 1;
+                else if (role === 'leader') yellow += 1;
+                else if (role === 'member') beige += 1;
             }
         }
     }
-    if (blue >= 3 && blue > yellow * 1.5) return 'moderator';
-    if (yellow >= 3 && yellow > blue * 1.5) return 'leader';
-    return 'member';
+    if (blue >= 3 && blue > yellow * 1.5 && blue > beige * 0.2) return 'moderator';
+    if (yellow >= 3 && yellow > blue * 1.5 && yellow > beige * 0.2) return 'leader';
+    if (beige >= 3) return 'member';
+    return 'unknown';
 }
 
 /** @param {any} image @param {readonly {words:unknown,parsed:any}[]} blocks @param {any} JimpImpl */
@@ -100,5 +122,6 @@ module.exports = Object.freeze({
     inferCinfoRoleHints,
     inferCinfoRoleHintsBatch,
     inferFromImage,
+    roleColor,
     rosterWords
 });

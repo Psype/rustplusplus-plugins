@@ -179,3 +179,96 @@ Test('approximate visual similarity retrieves but never marks an identity corrob
     Assert.equal(result[0][0].corroborated, false);
     Assert.equal(result[0][0].contextPriority, true);
 });
+
+Test('resolved cinfo learns persistent grapheme shapes and recalls an alias from them', async t => {
+    const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-visual-glyph-'));
+    t.after(() => Fs.rmSync(directory, { recursive: true, force: true }));
+    const file = Path.join(directory, 'visual-alias-library.json');
+    const glyphA = feature(0x0f, 0.5);
+    const glyphB = feature(0xf0, 0.55);
+    await Visual.recordResolved(file, [{
+        visualSamples: [{
+            memberIndex: 0,
+            observedText: 'AB',
+            feature: feature(0x55),
+            glyphs: [{ grapheme: 'A', feature: glyphA }, { grapheme: 'B', feature: glyphB }]
+        }],
+        parsed: { kind: 'cinfo', resolvedMembers: [{
+            memberIndex: 0, name: 'AB', steamId: '76561197900000004', battlemetricsPlayerId: null
+        }] }
+    }], '2026-10-01T12:00:00.000Z');
+
+    const document = await Visual.read(file);
+    Assert.equal(document.schemaVersion, 2);
+    Assert.deepEqual(document.glyphSamples.map(sample => sample.grapheme), ['A', 'B']);
+    const result = await Visual.candidatesForItems(file, [{
+        visualSamples: [{
+            memberIndex: 7,
+            feature: feature(0xaa),
+            glyphs: [{ feature: glyphA }, { feature: glyphB }]
+        }]
+    }]);
+    Assert.equal(result[0][0].name, 'AB');
+    Assert.equal(result[0][0].targetMemberIndex, 7);
+    Assert.equal(result[0][0].corroborated, false);
+    Assert.equal(result[0][0].visualScore, 0.999999);
+});
+
+Test('glyph journal refuses an OCR spelling that differs from the resolved alias', async t => {
+    const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-visual-glyph-refuse-'));
+    t.after(() => Fs.rmSync(directory, { recursive: true, force: true }));
+    const file = Path.join(directory, 'visual-alias-library.json');
+    await Visual.recordResolved(file, [{
+        visualSamples: [{
+            memberIndex: 0,
+            observedText: 'A8',
+            feature: feature(0x55),
+            glyphs: [
+                { grapheme: 'A', feature: feature(0x0f, 0.5) },
+                { grapheme: '8', feature: feature(0xf0, 0.55) }
+            ]
+        }],
+        parsed: { kind: 'cinfo', resolvedMembers: [{
+            memberIndex: 0, name: 'AB', steamId: '76561197900000005', battlemetricsPlayerId: null
+        }] }
+    }], '2026-10-01T12:00:00.000Z');
+    Assert.equal((await Visual.read(file)).glyphSamples.length, 0);
+});
+
+Test('word boxes yield glyphs only when foreground runs match Unicode graphemes', async () => {
+    const image = await newImage(20, 12, 0x5d514cff);
+    for (let y = 2; y < 10; y += 1) {
+        for (let x = 2; x < 5; x += 1) image.setPixelColor(0xffffffff, x, y);
+        for (let x = 8; x < 12; x += 1) image.setPixelColor(0xffffffff, x, y);
+    }
+    const glyphs = Visual.glyphFeaturesFromBoxes(image,
+        [{ text: 'AB', x: 1, y: 1, width: 12, height: 10 }], 'AB');
+    Assert.deepEqual(glyphs.map(glyph => glyph.grapheme), ['A', 'B']);
+    Assert.equal(glyphs.every(glyph => Visual.validateFeature(glyph.feature)), true);
+    Assert.deepEqual(Visual.glyphFeaturesFromBoxes(image,
+        [{ text: '玩家', x: 1, y: 1, width: 12, height: 10 }], '玩家')
+        .map(glyph => glyph.grapheme), ['玩', '家']);
+    Assert.deepEqual(Visual.glyphFeaturesFromBoxes(image,
+        [{ text: 'ABC', x: 1, y: 1, width: 12, height: 10 }], 'ABC'), []);
+});
+
+Test('schema 1 visual alias journals migrate in memory without losing word samples', async t => {
+    const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-visual-schema-'));
+    t.after(() => Fs.rmSync(directory, { recursive: true, force: true }));
+    const file = Path.join(directory, 'visual-alias-library.json');
+    await Visual.recordResolved(file, [{
+        visualSamples: [{ memberIndex: 0, observedText: 'RW', feature: feature(0x55) }],
+        parsed: { kind: 'cinfo', resolvedMembers: [{
+            memberIndex: 0, name: 'RW', steamId: '76561197900000006', battlemetricsPlayerId: null
+        }] }
+    }], '2026-10-01T12:00:00.000Z');
+    const legacy = JSON.parse(Fs.readFileSync(file, 'utf8'));
+    legacy.schemaVersion = 1;
+    delete legacy.glyphSamples;
+    Fs.writeFileSync(file, `${JSON.stringify(legacy)}\n`, 'utf8');
+
+    const migrated = await Visual.read(file);
+    Assert.equal(migrated.schemaVersion, 2);
+    Assert.equal(migrated.samples.length, 1);
+    Assert.deepEqual(migrated.glyphSamples, []);
+});

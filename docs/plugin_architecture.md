@@ -16,7 +16,8 @@ that boundary and must not import individual feature plugins.
   transport; vanilla Smart Alarms, haggbart's uMod plugin, and unpublished server integrations are producers of the
   same native Rust notification channel. No specific mod, title, or vanilla entity is required. The transport remains
   outside the plugin in `src/util/reliableFcmReceiver.js`, which exposes the stable `ON_DATA_RECEIVED` boundary only
-  after an accepted MCS login.
+  after an accepted MCS login. Recognized raid text is hot-read from `config/raid-alarm.json`; validation/fallback stays
+  inside the plugin and cannot cancel its critical Rust+ send.
 - `teammateLanguageDatabase`: stores the shared append-only player identity history in
   `steamid,battlemetrics_id,date,name,language` CSV form. It accepts teammate observations and proven SteamID64
   identities from the tracker; tracker-only language cells may be empty, while existing languages are preserved.

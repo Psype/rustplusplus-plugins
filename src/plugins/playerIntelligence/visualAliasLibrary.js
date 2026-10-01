@@ -9,15 +9,24 @@ const CinfoRoles = require('./cinfoRoles.js');
 const Layout = require('./ocrLayout.js');
 const { isRustUiTextPixel } = require('./ocrImagePreprocess.js');
 
-const SCHEMA_VERSION = 1;
+/** @typedef {Readonly<{text:string,x:number,y:number,width:number,height:number,confidence:number|null}>} OcrWord */
+
+const SCHEMA_VERSION = 2;
+const LEGACY_SCHEMA_VERSION = 1;
 const FEATURE_WIDTH = 96;
 const FEATURE_HEIGHT = 24;
 const FEATURE_BYTES = FEATURE_WIDTH * FEATURE_HEIGHT / 8;
 const MAX_SAMPLES = 2000;
 const MAX_SAMPLES_PER_ALIAS = 4;
+const MAX_GLYPH_SAMPLES = 4096;
+const MAX_GLYPH_SAMPLES_PER_GRAPHEME = 12;
+const MAX_GLYPHS_PER_ALIAS = 64;
 const APPROXIMATE_THRESHOLD = 0.72;
+const GLYPH_APPROXIMATE_THRESHOLD = 0.72;
 const sharedQueues = new Map();
 const decodedFeatures = new WeakMap();
+const graphemeSegmenter = typeof Intl.Segmenter === 'function' ?
+    new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
 const bitCounts = Object.freeze(Array.from({ length: 256 }, (_, value) => {
     let count = 0;
     for (let work = value; work > 0; work >>>= 1) count += work & 1;
@@ -37,6 +46,12 @@ class VisualAliasLibraryCorruptionError extends Error {
 /** @param {unknown} value */
 function cleanName(value) {
     return `${value || ''}`.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim();
+}
+
+/** @param {unknown} value */
+function graphemes(value) {
+    const text = `${value || ''}`;
+    return graphemeSegmenter ? [...graphemeSegmenter.segment(text)].map(item => item.segment) : Array.from(text);
 }
 
 /** @param {unknown} value @param {string} label */
@@ -107,8 +122,31 @@ function validateSample(input) {
 }
 
 /** @param {unknown} input */
+function validateGlyphSample(input) {
+    if (!input || typeof input !== 'object') throw new TypeError('Visual glyph sample is invalid.');
+    const value = /** @type {any} */ (input);
+    const grapheme = typeof value.grapheme === 'string' ? value.grapheme.normalize('NFC') : '';
+    if (!grapheme || /[\u0000-\u001f\u007f\s]/u.test(grapheme) || graphemes(grapheme).length !== 1 ||
+        Array.from(grapheme).length > 16 || typeof value.observedAt !== 'string' ||
+        Number.isNaN(Date.parse(value.observedAt))) {
+        throw new TypeError('Visual glyph identity is invalid.');
+    }
+    const feature = validateFeature(value.feature);
+    const sampleId = Crypto.createHash('sha256').update(`${grapheme}\0${feature.digest}`, 'utf8').digest('hex');
+    if (value.sampleId !== sampleId) throw new TypeError('Visual glyph sample ID is invalid.');
+    return Object.freeze({
+        sampleId,
+        grapheme,
+        observedAt: new Date(value.observedAt).toISOString(),
+        feature
+    });
+}
+
+/** @param {unknown} input */
 function validateDocument(input) {
-    if (!input || typeof input !== 'object' || /** @type {any} */ (input).schemaVersion !== SCHEMA_VERSION ||
+    const value = /** @type {any} */ (input);
+    if (!input || typeof input !== 'object' ||
+        ![LEGACY_SCHEMA_VERSION, SCHEMA_VERSION].includes(value.schemaVersion) ||
         !Array.isArray(/** @type {any} */ (input).samples) ||
         /** @type {any} */ (input).samples.length > MAX_SAMPLES) {
         throw new TypeError('Visual alias library schema is invalid.');
@@ -126,7 +164,27 @@ function validateDocument(input) {
         }
         counts.set(identity, count);
     }
-    return Object.freeze({ schemaVersion: SCHEMA_VERSION, samples: Object.freeze(samples) });
+    const rawGlyphSamples = value.schemaVersion === LEGACY_SCHEMA_VERSION ? [] : value.glyphSamples;
+    if (!Array.isArray(rawGlyphSamples) || rawGlyphSamples.length > MAX_GLYPH_SAMPLES) {
+        throw new TypeError('Visual glyph library schema is invalid.');
+    }
+    const glyphSamples = rawGlyphSamples.map(validateGlyphSample);
+    if (new Set(glyphSamples.map((/** @type {any} */ sample) => sample.sampleId)).size !== glyphSamples.length) {
+        throw new TypeError('Visual glyph library contains duplicate samples.');
+    }
+    const glyphCounts = new Map();
+    for (const sample of glyphSamples) {
+        const count = (glyphCounts.get(sample.grapheme) || 0) + 1;
+        if (count > MAX_GLYPH_SAMPLES_PER_GRAPHEME) {
+            throw new TypeError('Visual glyph library exceeds the per-grapheme sample limit.');
+        }
+        glyphCounts.set(sample.grapheme, count);
+    }
+    return Object.freeze({
+        schemaVersion: SCHEMA_VERSION,
+        samples: Object.freeze(samples),
+        glyphSamples: Object.freeze(glyphSamples)
+    });
 }
 
 /** @param {string} file */
@@ -137,7 +195,11 @@ async function read(file) {
     }
     catch (error) {
         if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT') {
-            return Object.freeze({ schemaVersion: SCHEMA_VERSION, samples: Object.freeze([]) });
+            return Object.freeze({
+                schemaVersion: SCHEMA_VERSION,
+                samples: Object.freeze([]),
+                glyphSamples: Object.freeze([])
+            });
         }
         if (error instanceof VisualAliasLibraryCorruptionError) throw error;
         throw new VisualAliasLibraryCorruptionError(file, error);
@@ -237,6 +299,71 @@ function featureFromBoxes(image, boxes, JimpImpl = Jimp) {
     });
 }
 
+/** @param {any} image @param {{x:number,y:number,width:number,height:number}} box @param {any} JimpImpl */
+function foregroundColumnRuns(image, box, JimpImpl = Jimp) {
+    const left = Math.max(0, Math.floor(box.x));
+    const top = Math.max(0, Math.floor(box.y));
+    const right = Math.min(image.bitmap.width, Math.ceil(box.x + box.width));
+    const bottom = Math.min(image.bitmap.height, Math.ceil(box.y + box.height));
+    if (right <= left || bottom <= top) return Object.freeze([]);
+    const active = [];
+    for (let x = left; x < right; x += 1) {
+        let foreground = false;
+        for (let y = top; y < bottom && !foreground; y += 1) {
+            const { r, g, b, a } = JimpImpl.intToRGBA(image.getPixelColor(x, y));
+            foreground = isRustUiTextPixel(r, g, b, a);
+        }
+        active.push(foreground);
+    }
+    const runs = [];
+    let start = -1;
+    for (let index = 0; index <= active.length; index += 1) {
+        if (active[index] === true && start === -1) start = index;
+        if (active[index] !== true && start !== -1) {
+            runs.push(Object.freeze({ x: left + start, y: top, width: index - start, height: bottom - top }));
+            start = -1;
+        }
+    }
+    return Object.freeze(runs);
+}
+
+/**
+ * Learns only when one foreground run maps to one Unicode grapheme. Connected scripts,
+ * touching letters, and uncertain segmentations deliberately return no samples.
+ * @param {any} image @param {readonly OcrWord[]} boxes @param {string} name @param {any} [JimpImpl]
+ */
+function glyphFeaturesFromBoxes(image, boxes, name, JimpImpl = Jimp) {
+    const expectedWords = cleanName(name).split(/\s+/u).filter(Boolean);
+    if (!Array.isArray(boxes) || boxes.length !== expectedWords.length || expectedWords.length === 0) {
+        return Object.freeze([]);
+    }
+    if (expectedWords.reduce((total, word) => total + graphemes(word).length, 0) > MAX_GLYPHS_PER_ALIAS) {
+        return Object.freeze([]);
+    }
+    const result = [];
+    for (let index = 0; index < boxes.length; index += 1) {
+        const box = boxes[index];
+        const labels = graphemes(expectedWords[index]);
+        let runs = foregroundColumnRuns(image, box, JimpImpl);
+        const rawText = `${box.text || ''}`.normalize('NFC');
+        const leading = graphemes((rawText.match(/^[,;:]+/u) || [''])[0]).length;
+        const trailing = graphemes((rawText.match(/[,;:]+$/u) || [''])[0]).length;
+        const stripped = rawText.replace(/^[,;:]+|[,;:]+$/gu, '');
+        const comparable = (/** @type {string} */ value) => value.normalize('NFKC').toLocaleLowerCase('en');
+        if (runs.length !== labels.length && comparable(stripped) === comparable(expectedWords[index]) &&
+            runs.length === labels.length + leading + trailing) {
+            runs = Object.freeze(runs.slice(leading, runs.length - trailing));
+        }
+        if (runs.length !== labels.length) return Object.freeze([]);
+        for (let glyphIndex = 0; glyphIndex < labels.length; glyphIndex += 1) {
+            const feature = featureFromBoxes(image, [runs[glyphIndex]], JimpImpl);
+            if (!feature) return Object.freeze([]);
+            result.push(Object.freeze({ grapheme: labels[glyphIndex].normalize('NFC'), feature }));
+        }
+    }
+    return Object.freeze(result);
+}
+
 /** @param {any} value */
 function decodedFeature(value) {
     if (value && typeof value === 'object' && decodedFeatures.has(value)) return decodedFeatures.get(value);
@@ -284,8 +411,14 @@ async function extractVisualSamples(imageBase64, blocks, options = {}) {
         return Object.freeze(entries.map((/** @type {any} */ entry, /** @type {number} */ index) => {
             const name = cinfo ? entry.name : entry.ambiguous ? null : entry.name;
             if (!name) return null;
-            const feature = featureFromBoxes(image, CinfoRoles.findMemberBoxes(words, name), JimpImpl);
-            return feature ? Object.freeze({ memberIndex: index, observedText: name, feature }) : null;
+            const boxes = CinfoRoles.findMemberBoxes(words, name);
+            const feature = featureFromBoxes(image, boxes, JimpImpl);
+            return feature ? Object.freeze({
+                memberIndex: index,
+                observedText: name,
+                feature,
+                glyphs: glyphFeaturesFromBoxes(image, boxes, name, JimpImpl)
+            }) : null;
         }).filter(Boolean));
     }));
 }
@@ -300,26 +433,93 @@ function matchFeature(feature, samples) {
     return Object.freeze(matches.slice(0, 8).map(match => Object.freeze(match)));
 }
 
+/** @param {any} feature @param {readonly any[]} glyphSamples */
+function glyphScores(feature, glyphSamples) {
+    const scores = new Map();
+    for (const sample of glyphSamples) {
+        const score = featureSimilarity(feature, sample.feature);
+        if (score < 0.5 || score <= (scores.get(sample.grapheme) || 0)) continue;
+        scores.set(sample.grapheme, score);
+    }
+    return scores;
+}
+
+/** @param {string} name */
+function compactGraphemes(name) {
+    return graphemes(cleanName(name).normalize('NFC')).filter(grapheme => !/^\s+$/u.test(grapheme));
+}
+
+/** @param {readonly any[]} glyphs @param {readonly any[]} samples @param {readonly any[]} glyphSamples */
+function matchGlyphSequence(glyphs, samples, glyphSamples) {
+    if (!Array.isArray(glyphs) || glyphs.length === 0 || glyphs.length > MAX_GLYPHS_PER_ALIAS ||
+        glyphSamples.length === 0) {
+        return Object.freeze([]);
+    }
+    const positionScores = glyphs.map(glyph => glyphScores(validateFeature(glyph.feature), glyphSamples));
+    const identities = new Map();
+    for (const sample of samples) {
+        const expected = compactGraphemes(sample.name);
+        if (expected.length !== positionScores.length) continue;
+        const scores = expected.map((grapheme, index) => positionScores[index].get(grapheme));
+        if (scores.some(score => score === undefined)) continue;
+        const numericScores = /** @type {number[]} */ (scores);
+        const minimum = Math.min(...numericScores);
+        const average = numericScores.reduce((sum, score) => sum + score, 0) / numericScores.length;
+        const score = Number((average * 0.8 + minimum * 0.2).toFixed(6));
+        if (score < GLYPH_APPROXIMATE_THRESHOLD) continue;
+        const key = `${sample.steamId || ''}\0${sample.battlemetricsPlayerId || ''}\0${sample.name}`;
+        const previous = identities.get(key);
+        if (!previous || score > previous.score) identities.set(key, { sample, score });
+    }
+    return Object.freeze([...identities.values()].sort((left, right) => right.score - left.score ||
+        right.sample.observedAt.localeCompare(left.sample.observedAt) ||
+        left.sample.sampleId.localeCompare(right.sample.sampleId)).slice(0, 8)
+        .map(match => Object.freeze(match)));
+}
+
+/** @param {Map<string,any>} candidates @param {any} match @param {number} memberIndex @param {boolean} exact */
+function addVisualCandidate(candidates, match, memberIndex, exact) {
+    const sample = match.sample;
+    const key = `${memberIndex}\0${sample.steamId || ''}\0${sample.battlemetricsPlayerId || ''}\0${sample.name}`;
+    const score = exact ? match.score : Math.min(match.score, 0.999999);
+    const previous = candidates.get(key);
+    if (previous) {
+        candidates.set(key, Object.freeze({
+            ...previous,
+            corroborated: previous.corroborated || exact,
+            visualScore: Math.max(previous.visualScore, score)
+        }));
+        return;
+    }
+    candidates.set(key, Object.freeze({
+        name: sample.name,
+        steamId: sample.steamId,
+        battlemetricsPlayerId: sample.battlemetricsPlayerId,
+        caseFidelity: sample.caseFidelity,
+        corroborated: exact,
+        contextPriority: true,
+        targetMemberIndex: memberIndex,
+        visualScore: score
+    }));
+}
+
 /** @param {string} file @param {readonly any[]} items */
 async function candidatesForItems(file, items) {
     const document = await serialized(file, () => read(file));
     return Object.freeze(items.map(item => {
-        const candidates = [];
+        const candidates = new Map();
         for (const visual of item.visualSamples || []) {
             for (const match of matchFeature(visual.feature, document.samples)) {
-                candidates.push(Object.freeze({
-                    name: match.sample.name,
-                    steamId: match.sample.steamId,
-                    battlemetricsPlayerId: match.sample.battlemetricsPlayerId,
-                    caseFidelity: match.sample.caseFidelity,
-                    corroborated: match.score === 1,
-                    contextPriority: true,
-                    targetMemberIndex: visual.memberIndex,
-                    visualScore: match.score
-                }));
+                addVisualCandidate(candidates, match, visual.memberIndex, match.score === 1);
+            }
+            for (const match of matchGlyphSequence(visual.glyphs || [], document.samples,
+                document.glyphSamples)) {
+                addVisualCandidate(candidates, match, visual.memberIndex, false);
             }
         }
-        return Object.freeze(candidates);
+        return Object.freeze([...candidates.values()].sort((left, right) =>
+            Number(right.corroborated) - Number(left.corroborated) ||
+            right.visualScore - left.visualScore || left.name.localeCompare(right.name)));
     }));
 }
 
@@ -330,6 +530,8 @@ function recordResolved(file, items, observedAt) {
     }
     /** @type {any[]} */
     const additions = [];
+    /** @type {any[]} */
+    const glyphAdditions = [];
     for (const item of items) {
         if (!item.parsed || !['cinfo', 'f7'].includes(item.parsed.kind)) continue;
         const resolved = new Map(item.parsed.kind === 'cinfo' ?
@@ -351,12 +553,32 @@ function recordResolved(file, items, observedAt) {
             const sampleId = Crypto.createHash('sha256').update(`${base.steamId || ''}\0${
                 base.battlemetricsPlayerId || ''}\0${base.name}\0${feature.digest}`, 'utf8').digest('hex');
             additions.push(validateSample({ ...base, sampleId }));
+            const exactObservedName = cleanName(visual.observedText).normalize('NFC') ===
+                cleanName(member.name).normalize('NFC');
+            if (item.parsed.kind !== 'cinfo' || !exactObservedName || member.caseFidelity === false ||
+                !Array.isArray(visual.glyphs)) continue;
+            for (const glyph of visual.glyphs) {
+                if (!glyph || typeof glyph.grapheme !== 'string') continue;
+                const glyphFeature = validateFeature(glyph.feature);
+                const grapheme = glyph.grapheme.normalize('NFC');
+                const glyphSampleId = Crypto.createHash('sha256').update(`${grapheme}\0${
+                    glyphFeature.digest}`, 'utf8').digest('hex');
+                glyphAdditions.push(validateGlyphSample({
+                    sampleId: glyphSampleId,
+                    grapheme,
+                    observedAt: new Date(observedAt).toISOString(),
+                    feature: glyphFeature
+                }));
+            }
         }
     }
-    if (additions.length === 0) return Promise.resolve(Object.freeze({ added: 0, total: 0 }));
+    if (additions.length === 0 && glyphAdditions.length === 0) {
+        return Promise.resolve(Object.freeze({ added: 0, total: 0 }));
+    }
     return serialized(file, async () => {
         const document = await read(file);
         const samples = [...document.samples];
+        const glyphSamples = [...document.glyphSamples];
         let added = 0;
         for (const sample of additions) {
             if (samples.some(existing => existing.sampleId === sample.sampleId)) continue;
@@ -370,7 +592,24 @@ function recordResolved(file, items, observedAt) {
         samples.sort((left, right) => left.observedAt.localeCompare(right.observedAt) ||
             left.sampleId.localeCompare(right.sampleId));
         const bounded = samples.slice(Math.max(0, samples.length - MAX_SAMPLES));
-        if (added > 0) await write(file, { schemaVersion: SCHEMA_VERSION, samples: bounded });
+        let glyphsAdded = 0;
+        for (const sample of glyphAdditions) {
+            if (glyphSamples.some(existing => existing.sampleId === sample.sampleId)) continue;
+            if (glyphSamples.filter(existing => existing.grapheme === sample.grapheme).length >=
+                MAX_GLYPH_SAMPLES_PER_GRAPHEME) continue;
+            glyphSamples.push(sample);
+            glyphsAdded += 1;
+        }
+        glyphSamples.sort((left, right) => left.observedAt.localeCompare(right.observedAt) ||
+            left.sampleId.localeCompare(right.sampleId));
+        const boundedGlyphs = glyphSamples.slice(Math.max(0, glyphSamples.length - MAX_GLYPH_SAMPLES));
+        if (added > 0 || glyphsAdded > 0 || document.schemaVersion !== SCHEMA_VERSION) {
+            await write(file, {
+                schemaVersion: SCHEMA_VERSION,
+                samples: bounded,
+                glyphSamples: boundedGlyphs
+            });
+        }
         return Object.freeze({ added, total: bounded.length });
     });
 }
@@ -379,6 +618,10 @@ module.exports = Object.freeze({
     APPROXIMATE_THRESHOLD,
     FEATURE_HEIGHT,
     FEATURE_WIDTH,
+    GLYPH_APPROXIMATE_THRESHOLD,
+    MAX_GLYPH_SAMPLES,
+    MAX_GLYPH_SAMPLES_PER_GRAPHEME,
+    MAX_GLYPHS_PER_ALIAS,
     MAX_SAMPLES,
     MAX_SAMPLES_PER_ALIAS,
     VisualAliasLibraryCorruptionError,
@@ -387,9 +630,12 @@ module.exports = Object.freeze({
     extractVisualSamples,
     featureFromBoxes,
     featureSimilarity,
+    glyphFeaturesFromBoxes,
+    matchGlyphSequence,
     matchFeature,
     read,
     recordResolved,
     validateDocument,
-    validateFeature
+    validateFeature,
+    validateGlyphSample
 });

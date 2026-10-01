@@ -40,6 +40,11 @@ bypasses the ordinary delayed chat queue and the potentially stale all-team-offl
 server response before logging `raid-alarm.in-game: delivered`. Discord is attempted afterward and cannot cancel the
 in-game transaction. The explicit global in-game mute still applies.
 
+The recognized raid message is editable in `config/raid-alarm.json` through the named placeholders `{title}`,
+`{message}`, `{item}` and `{location}`. It is re-read for every alarm. Invalid configuration and structured
+placeholders unavailable in a nonstandard payload fall back to the built-in complete-message template, so an external
+configuration error cannot cancel the authoritative Rust+ delivery.
+
 `!raidtest` sends `[RAID TEST] ...` through this same critical acknowledged Rust team-chat boundary. It is the first
 deployment check: use it in Rust team chat or the Discord commands channel. Incoming FCM logs include `alarm received`
 with the source SteamID, server endpoint, type, title, and message; malformed bodies are rejected without crashing the

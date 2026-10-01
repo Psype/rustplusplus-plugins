@@ -2,6 +2,7 @@ const Assert = require('node:assert/strict');
 const Test = require('node:test');
 
 const RaidAlarm = require('../src/plugins/raidAlarm');
+const RaidAlarmSettings = require('../src/plugins/raidAlarm/settings.js');
 
 function createContext({ notifyInGame = true, title = RaidAlarm.DEFAULT_TITLE,
     message = 'Armored Door destroyed at B15' } = {}) {
@@ -65,6 +66,64 @@ Test('generic SmartAlarm notification queues in-game before an isolated Discord 
     const failureLog = fixture.logs.find(log => String(log[1]).includes('raid-alarm.discord'));
     Assert.ok(failureLog);
     Assert.equal(failureLog[2], 'warn');
+});
+
+Test('raid message settings reload and render every supported named placeholder', () => {
+    let template = '{title} | {message} | {item} | {location}';
+    const readFileSync = () => JSON.stringify({ inGameMessageTemplate: template });
+    const first = RaidAlarmSettings.load({ filePath: 'test-config.json', readFileSync });
+
+    Assert.equal(RaidAlarmSettings.render(first.template, {
+        title: 'Base under attack',
+        message: 'Armored Door destroyed at B15',
+        item: 'Armored Door',
+        location: 'B15'
+    }), 'Base under attack | Armored Door destroyed at B15 | Armored Door | B15');
+    Assert.equal(Object.isFrozen(first), true);
+
+    template = 'RAID {location}: {item}';
+    const second = RaidAlarmSettings.load({ filePath: 'test-config.json', readFileSync });
+    Assert.equal(second.template, 'RAID {location}: {item}');
+});
+
+Test('invalid external raid template falls back without cancelling the critical alert', async () => {
+    const fixture = createContext();
+    await RaidAlarm.handleFcmAlarm(fixture.context, {
+        deduplicate: false,
+        loadSettings: () => Object.freeze({ template: 'RAID {unknown}' }),
+        sendDiscord: async () => fixture.calls.push(Object.freeze({ output: 'discord' }))
+    });
+
+    Assert.equal(fixture.calls[0].text,
+        ':exclamation: :poggers: GETTING RAIDED: Armored Door destroyed at B15  ' +
+        ':oldmanlaugh: :exclamation:');
+    Assert.deepEqual(fixture.calls.map(call => call.output), ['in-game', 'discord']);
+    Assert.ok(fixture.logs.some(log => String(log[1]).includes('raid-alarm.config') && log[2] === 'warn'));
+});
+
+Test('unavailable structured placeholder falls back to the complete raid message', async () => {
+    const fixture = createContext({ message: 'Unknown raid payload' });
+    await RaidAlarm.handleFcmAlarm(fixture.context, {
+        deduplicate: false,
+        loadSettings: () => Object.freeze({ template: 'RAID {item} at {location}' }),
+        sendDiscord: async () => {}
+    });
+
+    Assert.equal(fixture.calls[0].text,
+        ':exclamation: :poggers: GETTING RAIDED: Unknown raid payload  :oldmanlaugh: :exclamation:');
+    Assert.ok(fixture.logs.some(log => String(log[1]).includes('{item} is unavailable')));
+});
+
+Test('malformed raid config resolves to an immutable built-in fallback', () => {
+    const settings = RaidAlarmSettings.load({
+        filePath: 'broken.json',
+        readFileSync: () => '{broken'
+    });
+
+    Assert.equal(settings.template, RaidAlarmSettings.DEFAULT_IN_GAME_MESSAGE_TEMPLATE);
+    Assert.equal(settings.source, 'built-in default');
+    Assert.equal(typeof settings.warning, 'string');
+    Assert.equal(Object.isFrozen(settings), true);
 });
 
 Test('generic SmartAlarm notification honors its in-game output setting without a vanilla entity', async () => {

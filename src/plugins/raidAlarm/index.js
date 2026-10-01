@@ -8,13 +8,12 @@
 
 const Path = require('path');
 const LoggingSettings = require('../../util/loggingSettings.js');
+const RaidAlarmSettings = require('./settings.js');
 
 const DEFAULT_TITLE = 'You\'re getting raided!';
 const RAID_TITLE = /^(?:you(?:'|\u2019)?re|you\s+are)?\s*getting\s+raided!?\s*$/i;
 const DEDUPLICATION_MS = 5000;
 const PAIR_WATCH_MS = 120000;
-const RAID_IN_GAME_PREFIX = ':exclamation: :poggers: GETTING RAIDED';
-const RAID_IN_GAME_SUFFIX = ':oldmanlaugh: :exclamation:';
 const recentAlerts = new Map();
 const pairWatches = new Map();
 
@@ -133,11 +132,11 @@ function getText(client, guildId, title, message) {
 
     if (isRaidTitle(translatedTitle)) translatedTitle = client.intlGet(guildId, 'baseIsUnderAttack');
 
-    const destroyedMatch = /^(.*) destroyed at (.*)$/i.exec(translatedMessage);
-    if (destroyedMatch) {
+    const destroyedParts = getDestroyedParts(translatedMessage);
+    if (destroyedParts) {
         translatedMessage = client.intlGet(guildId, 'raidAlarmDestroyedAt', {
-            item: destroyedMatch[1],
-            location: destroyedMatch[2]
+            item: destroyedParts.item,
+            location: destroyedParts.location
         });
     }
 
@@ -207,11 +206,57 @@ function formatAlert(alertText) {
     return [alertText.title, alertText.message].filter(value => value !== '').join(': ');
 }
 
-function formatInGameAlert(title, alertText) {
+function getDestroyedParts(message) {
+    if (typeof message !== 'string') return null;
+    const match = /^(.*) destroyed at (.*)$/i.exec(message.trim());
+    if (!match || match[1].trim() === '' || match[2].trim() === '') return null;
+    return Object.freeze({ item: match[1].trim(), location: match[2].trim() });
+}
+
+function formatInGameAlert(title, rawMessage, alertText, settings) {
     if (!isRaidTitle(title)) return formatAlert(alertText);
     const detail = alertText.message.replace(/\.$/, '');
-    return detail === '' ? `${RAID_IN_GAME_PREFIX}  ${RAID_IN_GAME_SUFFIX}` :
-        `${RAID_IN_GAME_PREFIX}: ${detail}  ${RAID_IN_GAME_SUFFIX}`;
+    const destroyedParts = getDestroyedParts(rawMessage) || Object.freeze({ item: '', location: '' });
+    return RaidAlarmSettings.render(settings.template, Object.freeze({
+        title: alertText.title,
+        message: detail,
+        item: destroyedParts.item,
+        location: destroyedParts.location
+    }));
+}
+
+function getConfiguredInGameAlert(context, alertText, adapters) {
+    if (!isRaidTitle(context.title)) return formatAlert(alertText);
+    const loadSettings = adapters.loadSettings || RaidAlarmSettings.load;
+    let settings;
+    try {
+        settings = loadSettings();
+        if (!settings || typeof settings !== 'object' || typeof settings.template !== 'string') {
+            throw new TypeError('raid-alarm settings loader returned an invalid result');
+        }
+    }
+    catch (error) {
+        settings = Object.freeze({
+            template: RaidAlarmSettings.DEFAULT_IN_GAME_MESSAGE_TEMPLATE,
+            source: 'built-in default',
+            warning: error instanceof Error ? error.message : String(error)
+        });
+    }
+
+    if (settings.warning) {
+        logFailure(context.client, context.guild.id, 'config',
+            `${settings.warning}; using built-in in-game template`);
+    }
+    try {
+        return formatInGameAlert(context.title, context.message, alertText, settings);
+    }
+    catch (error) {
+        logFailure(context.client, context.guild.id, 'config',
+            `${error instanceof Error ? error.message : String(error)}; using built-in in-game template`);
+        return formatInGameAlert(context.title, context.message, alertText, Object.freeze({
+            template: RaidAlarmSettings.DEFAULT_IN_GAME_MESSAGE_TEMPLATE
+        }));
+    }
 }
 
 function getDeduplicationKey(guildId, serverId, alertText) {
@@ -421,7 +466,7 @@ async function handleFcmAlarm(context, adapters = {}) {
             logInGameRoute(context.client, guildId, `skipped; ${blockReason}.`, 'warn');
         }
         else if (await deliver(context.client, guildId, 'in-game', () =>
-            sendInGameAlert(rustplus, formatInGameAlert(context.title, alertText)))) {
+            sendInGameAlert(rustplus, getConfiguredInGameAlert(context, alertText, adapters)))) {
             logInGameRoute(context.client, guildId, `delivered for ${serverId}.`);
         }
         else {

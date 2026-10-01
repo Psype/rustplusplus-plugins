@@ -220,6 +220,36 @@ Test('cinfo roles use text-relative boxes and relative colors, never fixed scree
         intToRGBA: () => ({ r: 30, g: 145, b: 230, a: 255 })
     }), 'moderator');
     Assert.equal(CinfoRoles.colorVotes(image, box, {
-        intToRGBA: () => ({ r: 220, g: 220, b: 220, a: 255 })
+        intToRGBA: () => ({ r: 226, g: 211, b: 180, a: 255 })
     }), 'member');
+});
+
+Test('pale beige cinfo text and its brown anti-aliasing never become a leader vote', () => {
+    const colors = Object.freeze([
+        Object.freeze({ r: 226, g: 211, b: 180, a: 255 }),
+        Object.freeze({ r: 190, g: 166, b: 130, a: 255 }),
+        Object.freeze({ r: 125, g: 72, b: 52, a: 255 }),
+        Object.freeze({ r: 65, g: 43, b: 36, a: 255 })
+    ]);
+    const image = {
+        bitmap: { width: 20, height: 20 },
+        getPixelColor: (x, y) => (x + y) % colors.length
+    };
+    Assert.equal(CinfoRoles.colorVotes(image, [{ x: 2, y: 2, width: 12, height: 8 }], {
+        intToRGBA: index => colors[index]
+    }), 'member');
+});
+
+Test('cinfo role colors are separated by hue and saturation', () => {
+    Assert.equal(CinfoRoles.roleColor({ r: 226, g: 211, b: 180, a: 255 }), 'member');
+    Assert.equal(CinfoRoles.roleColor({ r: 235, g: 200, b: 55, a: 255 }), 'leader');
+    Assert.equal(CinfoRoles.roleColor({ r: 30, g: 145, b: 230, a: 255 }), 'moderator');
+    Assert.equal(CinfoRoles.roleColor({ r: 125, g: 72, b: 52, a: 255 }), null);
+});
+
+Test('cinfo role classification stays unknown when only the world background is visible', () => {
+    const image = { bitmap: { width: 20, height: 20 }, getPixelColor: () => 1 };
+    Assert.equal(CinfoRoles.colorVotes(image, [{ x: 2, y: 2, width: 12, height: 8 }], {
+        intToRGBA: () => ({ r: 125, g: 72, b: 52, a: 255 })
+    }), 'unknown');
 });
