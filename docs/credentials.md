@@ -6,18 +6,35 @@
 
 The old rustplusplus credential application is no longer the canonical registration path. Use the current
 [`rustplus.js` FCM registration flow](https://github.com/liamcottle/rustplus.js#using-the-command-line-tool) on a trusted
-desktop with Chrome installed:
+desktop with a compatible Chromium browser installed:
 
 ```powershell
 npx.cmd --yes @liamcottle/rustplus.js@latest --config-file=rustplus.config.json fcm-register
 ```
+
+On the current Windows development workstation, Google Chrome is unavailable and Brave must be used from:
+
+```text
+C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe
+```
+
+The installed local CLI currently has this path set as `chromePath` in
+`node_modules/@liamcottle/rustplus.js/cli/index.js`. To use that exact local copy, run:
+
+```powershell
+node .\node_modules\@liamcottle\rustplus.js\cli\index.js --config-file=rustplus.config.json fcm-register
+```
+
+This `node_modules` edit is deliberately untracked and will be lost after reinstalling dependencies. Reapply the
+Brave `chromePath` before rerunning the local command, or use the upstream `npx.cmd` command on a machine where its
+browser launcher works.
 
 This performs the complete required chain: Google GCM/Firebase registration, FCM token creation, Expo token exchange,
 Steam login, and registration of that Expo token with the Facepunch Rust Companion service. Keep the resulting JSON
 private; it contains long-lived push credentials.
 
 Run it on a trusted desktop, not the headless dedicated server. The CLI starts a loopback callback on port `3000` and
-launches a temporary Chrome profile with browser security disabled so it can emulate the Rust app's
+launches a temporary Chromium profile with browser security disabled so it can emulate the Rust app's
 `ReactNativeWebView.postMessage` login bridge. Close that temporary browser after completion. If port 3000 is already
 occupied, stop the local process using it before retrying.
 
@@ -36,6 +53,9 @@ Copy only these values from the generated file into Discord `/credentials add`:
 `issued_date` and `expire_date` are optional legacy metadata. Reusing `/credentials add` for the same SteamID64 and
 Discord user now renews the stored credentials atomically and restarts the corresponding listener; removing the old
 entry first is unnecessary. Credential secrets are never written to bot logs.
+
+`rustplus.config.json` is ignored by Git in this workspace. Keep it local and private; do not upload the whole file to
+the Linux bot host. The bot needs the three values above through its credential command, not the registration file.
 
 After renewal, pair the active server once from Rust while the bot is running. A healthy end-to-end path logs
 `Facepunch push delivery verified` and `notification received: channel="pairing"`. `MCS login accepted` alone only

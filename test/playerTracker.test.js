@@ -544,7 +544,11 @@ Test('poll sync, tracklist and untrack preserve last seen without deleting the n
         client: harness.client,
         guildId: 'guild',
         rustplus: harness.rustplus,
-        playerTrackerDependencies: harness.dependencies
+        playerTrackerDependencies: harness.dependencies,
+        playerIntelligenceDependencies: {
+            dataDirectory: Path.join(harness.dependencies.dataDirectory, 'player-intelligence'),
+            now: harness.dependencies.now
+        }
     });
 
     const list = await PlayerTracker.handleCommand(command(harness, '!tracklist'));

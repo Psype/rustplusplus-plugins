@@ -45,6 +45,8 @@ module.exports = async (client, interaction) => {
         return;
     }
 
+    if (await PluginManager.handleButton({ client, interaction, guildId, rustplus })) return;
+
     const notificationPrefixes = ['DiscordNotification', 'InGameNotification', 'VoiceNotification'];
     const notificationPrefix = notificationPrefixes.find(prefix => interaction.customId.startsWith(prefix));
     if (notificationPrefix) {

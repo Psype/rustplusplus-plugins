@@ -11,6 +11,8 @@ const DeepSea = require('./deepSea');
 const HiddenVendors = require('./hiddenVendors');
 const MapMarkerCapabilities = require('./mapMarkerCapabilities');
 const PlayerTracker = require('./playerTracker');
+const PlayerIntelligence = require('./playerIntelligence/runtime.js');
+const PlayerIntelligenceImports = require('./playerIntelligence/importWorkflow.js');
 const RaidAlarm = require('./raidAlarm');
 const TeammateLanguageDatabase = require('./teammateLanguageDatabase');
 const WarBandits = require('./warBandits');
@@ -41,6 +43,19 @@ function withPlayerTrackerDependencies(context) {
     });
 }
 
+function withPlayerIntelligenceDependencies(context) {
+    const dependencies = context.playerIntelligenceDependencies ||
+        context.client.playerIntelligenceDependencies || {};
+    if (Object.prototype.hasOwnProperty.call(dependencies, 'identityHistory')) return context;
+    return Object.freeze({
+        ...context,
+        playerIntelligenceDependencies: Object.freeze({
+            ...dependencies,
+            identityHistory: TeammateLanguageDatabase
+        })
+    });
+}
+
 const plugins = Object.freeze([
     Object.freeze({ name: 'auto-translate' }),
     Object.freeze({ name: 'battlemetrics' }),
@@ -58,6 +73,14 @@ const plugins = Object.freeze([
         handleCommand: context => PlayerTracker.handleCommand(withPlayerTrackerDependencies(context)),
         onBattlemetricsUpdated: context => PlayerTracker.onBattlemetricsUpdated(
             withPlayerTrackerDependencies(context))
+    }),
+    Object.freeze({
+        name: 'player-intelligence',
+        handleCommand: context => PlayerIntelligence.handleCommand(withPlayerIntelligenceDependencies(context)),
+        handleButton: context => PlayerIntelligenceImports.handleButton(context),
+        handleMessage: context => PlayerIntelligenceImports.handleMessage(context),
+        onBattlemetricsUpdated: context => PlayerIntelligence.onBattlemetricsUpdated(
+            withPlayerIntelligenceDependencies(context))
     }),
     Object.freeze({
         name: 'raid-alarm',
@@ -194,6 +217,8 @@ module.exports = Object.freeze({
             return Array.isArray(response) ? Object.freeze([...response]) : response;
         }),
     handleCommand,
+    handleButton: context => runFirstHandled('handleButton', context),
+    handleMessage: context => runFirstHandled('handleMessage', context),
     handleFcmAlarm: context => runFirstHandled('onFcmAlarm', context),
     isDiscordOptionEnabled: optionName => MapMarkerCapabilities.isDiscordOptionEnabled(optionName),
     isNotificationSettingEnabled: settingName =>

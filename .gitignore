@@ -8,3 +8,4 @@ logs
 temp
 data/player-trackers/*.json
 data/warbandits/*.json
+data/player-intelligence/

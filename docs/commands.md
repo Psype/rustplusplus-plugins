@@ -18,6 +18,7 @@ Slash Command | Description
 [**/decay**](commands.md#decay) | Display the decay time of an item.
 [**/despawn**](commands.md#despawn) | Display the despawn time of an item.
 [**/help**](commands.md#help) | Display help message.
+[**/intelimport**](commands.md#intelimport) | OCR, preview, and confirm a `/cinfo` or F7 screenshot.
 [**/item**](commands.md#item) | Get the details of an item.
 [**/leader**](commands.md#leader) | Give or take the leadership from/to a team member.
 [**/map**](commands.md#map) | Get the currently connected server map image.
@@ -154,6 +155,33 @@ Options | Description | Required
 > Display help message.
 
 ![Discord Slash Command help Image](images/slash_commands/help.png)
+
+
+## **/intelimport**
+
+> **Import player intelligence from an original PNG or JPEG screenshot.** Use `/intelimport cinfo image:<file>` for a
+> WarBandits `/cinfo` panel or `/intelimport f7 image:<file>` for Rust's F7 recent-player list. The command works only
+> in the configured private commands channel. It validates the Discord CDN origin, type, signature, byte size and
+> decoded pixel count, runs one serialized local Tesseract process, then displays an ephemeral preview. Only the
+> requester can confirm it for five minutes, on the same server and wipe. The event journal is committed before the
+> Discord acknowledgement; a Discord failure cannot roll it back. Ambiguous name/SteamID associations, inconsistent
+> `/cinfo` member counts and truncated IDs are never guessed. A complete SteamID with a hidden name is retained without
+> an alias. Set `RPP_TESSERACT_PATH` when the executable is not available as `tesseract`; production Linux therefore
+> needs the local `tesseract-ocr` package and English model, with no runtime model download.
+
+The bot also creates a private `intel-imports` channel. A message may contain 1–10 images and needs no caption: F7 and
+`/cinfo` are detected from semantic OCR anchors. Starting the message with `cinfo` or `f7` remains an optional strict
+hint for all attachments. Repeated `ClanTag` anchors allow several stacked `/cinfo` panels in one image; every panel is
+validated separately and the whole preview is confirmed as one batch. If one block is invalid or the complete preview
+cannot fit safely, nothing is offered for confirmation. The human sender alone can confirm. An approved Windows helper
+webhook can post the same messages when its ID is listed in `RPP_INTEL_IMPORT_WEBHOOK_IDS`; because a webhook has no
+human requester, any member with the configured bot role (or an administrator) may confirm it. Unapproved webhooks are
+ignored. All paths use the same validation, five-minute server/wipe binding and durable batch commit logic.
+
+Subcommand | Options | Description | Required
+---------- | ------- | ----------- | --------
+`cinfo` | `image` | Original `/cinfo` PNG or JPEG. | `True`
+`f7` | `image` | Original F7 PNG or JPEG. | `True`
 
 
 ## **/item**
@@ -352,6 +380,11 @@ Command | Description
 [**afk**](commands.md#afk) | Get the currently afk players in your team.
 [**alive**](commands.md#alive) | Get the player with the longest time alive.
 [**autotranslate**](commands.md#autotranslate) | Automatically translate relayed team-chat messages in Discord.
+[**activity**](commands.md#player-intelligence) | Show conservative known-online time over the rolling month or all retained history.
+[**affinity**](commands.md#player-intelligence) | Show confirmed ClanTag and repeated-clanmate counts.
+[**clan**](commands.md#player-intelligence) | Show the latest confirmed stored snapshot for a ClanTag.
+[**clanhistory**](commands.md#player-intelligence) | Show the five latest stored snapshots for a ClanTag.
+[**clantop**](commands.md#player-intelligence) | Rank observed ClanTags by distinct confirmed snapshots.
 [**commands/help**](commands.md#commandshelp) | List available commands or show the documented synopsis and description for a command.
 [**connection/connections**](commands.md#connectionconnections) | Get recent connection events.
 [**craft**](commands.md#craft-ingame) | Display the cost to craft an item.
@@ -359,6 +392,7 @@ Command | Description
 [**decay**](commands.md#decay-ingame) | Display the decay time of an item.
 [**despawn**](commands.md#despawn-ingame) | Display the despawn time of an item.
 [**language**](commands.md#language) | Show or change the bot language for this server and config file.
+[**intel**](commands.md#player-intelligence) | Show compact identity, reliable presence, known tags, and repeated clanmates.
 [**leader**](commands.md#leader-1) | Give/Take the Team Leadership.
 [**marker/markers**](commands.md#marker) | Set or list custom markers anywhere on the map.
 [**logs**](commands.md#logs) | Show, enable, or disable bot file/debug logging.
@@ -559,6 +593,25 @@ Subcommand | Description | Required
 
 ![In-Game Command players Image](images/ingame_commands/players_ingame.png)
 ![In-Game Command player Image](images/ingame_commands/player_ingame.png)
+
+
+## **player intelligence**
+
+> **Query the append-only player, clan and presence history for the active BattleMetrics server.** The plugin reuses
+> the existing 60-second BattleMetrics update; it never creates a second poller. A failed/censored update changes
+> provider state to `unknown`, never to a false logout. Exact SteamID64 is the strong identity; exact-name-only links
+> remain reversible and ambiguous homonyms are not selected automatically.
+<br>Command: `!intel <SteamID64|BattleMetrics ID|exact name>`
+<br>Command: `!affinity <SteamID64|BattleMetrics ID|exact name>`
+<br>Command: `!activity <SteamID64|BattleMetrics ID|exact name> [1mo|all]`
+<br>Command: `!clan <ClanTag>`
+<br>Command: `!clanhistory <ClanTag>`
+<br>Command: `!clantop [1-10]`
+<br>`!intel` returns only the current display name, available SteamID64/BattleMetrics ID, reliable compact presence,
+`Known tags`, and `Played with`. The `x` count is the number of distinct confirmed `/cinfo` screenshots, not shared
+wipes or BattleMetrics co-presence. `!activity` defaults to a rolling 30 days (`1mo`); `all` covers all retained local
+events. Only known-online segments count, provider outages are excluded, and overlapping providers are merged.
+`!clan` is the latest stored observation, not a claim that the roster is still current.
 
 
 ## **track/trackinfo/trackhistory/trackrelated/tracklist/tracks/untrack**

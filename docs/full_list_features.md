@@ -10,6 +10,10 @@
 - **/decay** - Display the decay time of an item.
 - **/despawn** - Display the despawn time of an item.
 - **/help** - Get help message.
+- **/intelimport** - OCR, preview, and confirm `/cinfo` or F7 screenshots without fixed pixel coordinates.
+- **intel-imports channel** - Drop 1–10 screenshots manually or through the allowlisted Windows region-capture
+  webhook. F7 versus `/cinfo` and repeated `/cinfo` panels are detected semantically; every batch still requires a
+  Discord confirmation.
 - **/item** - Get the details of an item.
 - **/leader** - Transfer leadership.
 - **/map** - Display the In-Game Map.
@@ -31,11 +35,17 @@
 - **autotranslate** - `!autotranslate on [language[,language...]]` or `!autotranslate off` - Translate a teammate only when the message matches one of their recorded languages and the active translation pair; relay the result to Rust team chat and Discord.
 - **commands/help** - `!commands [command]` or `!help [command]` - List all commands or show the documented synopsis and description for one command.
 - **connection/connections** - `!connection [steamid]` or `!connections` - Display latest team connections.
+- **activity** - `!activity [SteamID64|BattleMetrics ID|exact name] [1mo|all]` - Show conservative known-online time from the local event history; `1mo` is the default rolling 30 days.
+- **affinity** - `!affinity [SteamID64|BattleMetrics ID|exact name]` - Show compact confirmed `Known tags` and `Played with` counts.
+- **clan** - `!clan [ClanTag]` - Show the latest confirmed stored snapshot for a ClanTag.
+- **clanhistory** - `!clanhistory [ClanTag]` - Show the five latest stored snapshots for a ClanTag.
+- **clantop** - `!clantop [1-10]` - Rank observed ClanTags by distinct confirmed snapshots.
 - **craft** - `!craft [item] [quantity]` - Display the cost to craft an item.
 - **death/deaths** - `!death [steamid]` or `!deaths` - Display latest deaths.
 - **decay** - `!decay [item]` - Display the decay time of an item.
 - **despawn** - `!despawn [item]` - Display the despawn time of an item.
 - **language** - `!language [code]` - Show or change the bot language for this server.
+- **intel** - `!intel [SteamID64|BattleMetrics ID|exact name]` - Show compact identity, reliable presence, known tags, and repeated clanmates.
 - **leader** - `!leader [teammate]` - Transfer leadership.
 - **logs** - `!logs [on|off]` - Show, enable, or disable bot file/debug logging.
 - **marker/markers** - `!marker [name]` or `!markers` - Set markers to navigate to.

@@ -54,7 +54,8 @@ Test('plugin registry exposes an immutable stable list', () => {
     const names = PluginManager.getPluginNames();
     Assert.deepEqual(names, [
         'auto-translate', 'battlemetrics', 'map-marker-capabilities', 'custom-commands', 'warbandits',
-        'player-tracker', 'raid-alarm', 'teammate-language-database', 'hidden-vendors', 'deep-sea'
+        'player-tracker', 'player-intelligence', 'raid-alarm', 'teammate-language-database', 'hidden-vendors',
+        'deep-sea'
     ]);
     Assert.equal(Object.isFrozen(names), true);
 });
@@ -157,8 +158,8 @@ Test('canonical documentation covers every static in-game command', () => {
     for (const syntaxKey of PluginManager.getDisabledMapMarkerSyntaxKeys()) runtimeKeys.delete(syntaxKey);
     const runtimeNames = new Set([...runtimeKeys].map(key => language[key]));
     for (const name of [
-        'alarmstatus', 'help', 'raidtest', 'track', 'trackhistory', 'trackinfo', 'tracklist', 'trackrelated', 'tracks',
-        'untrack'
+        'activity', 'affinity', 'alarmstatus', 'clan', 'clanhistory', 'clantop', 'help', 'intel', 'raidtest',
+        'track', 'trackhistory', 'trackinfo', 'tracklist', 'trackrelated', 'tracks', 'untrack'
     ]) runtimeNames.add(name);
 
     Assert.deepEqual([...CommandCatalog.getCommandNames()].sort(), [...runtimeNames].sort());

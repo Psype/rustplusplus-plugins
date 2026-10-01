@@ -11,7 +11,9 @@
         "test:types": "tsc --noEmit -p .",
         "test:autotranslate:live": "node test/liveAutoTranslate.js",
         "test:battlemetrics:live": "node test/liveBattlemetrics.js",
-        "benchmark:plugins": "node benchmark/plugin-dispatch.js"
+        "benchmark:plugins": "node benchmark/plugin-dispatch.js",
+        "benchmark:player-intelligence": "node benchmark/player-intelligence.js",
+        "capture:intel": "node tools/player-intelligence-capture.js"
     },
     "repository": {
         "type": "git",

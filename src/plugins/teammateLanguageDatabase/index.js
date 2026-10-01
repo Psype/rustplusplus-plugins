@@ -90,6 +90,22 @@ function getKnownLanguages(rustplus, steamId) {
     return getLanguagesForSteamId(rows, normalizedSteamId);
 }
 
+function getIdentityRows(rustplus) {
+    return Object.freeze(readRows(getCsvPath(rustplus)).flatMap(row => {
+        const steamId = normalizeSteamId(row.steamid);
+        const battlemetricsPlayerId = normalizeStoredBattlemetricsId(row.battlemetrics_id);
+        const name = normalizeName(row.name);
+        const observedAt = new Date(row.date);
+        if (!steamId || !name || Number.isNaN(observedAt.getTime())) return [];
+        return [Object.freeze({
+            steamId,
+            battlemetricsPlayerId: battlemetricsPlayerId || null,
+            name,
+            observedAt: observedAt.toISOString()
+        })];
+    }));
+}
+
 function recordPlayer(rustplus, player) {
     const steamId = normalizeSteamId(player.steamId);
     const name = normalizeName(player.name);
@@ -317,5 +333,6 @@ module.exports = {
     recordIdentity,
     getKnownPseudonyms,
     getKnownLanguage,
-    getKnownLanguages
+    getKnownLanguages,
+    getIdentityRows
 };

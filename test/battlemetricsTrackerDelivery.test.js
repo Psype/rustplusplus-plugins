@@ -1,5 +1,6 @@
 const Assert = require('node:assert/strict');
 const Fs = require('node:fs');
+const Os = require('node:os');
 const Path = require('node:path');
 const Test = require('node:test');
 
@@ -19,9 +20,11 @@ Test('native tracker logs and delivers exact online/offline messages despite Dis
     const savePath = Path.join(__dirname, '..', 'data', 'player-trackers', `${guildId}-42.json`);
     const identityPath = Path.join(__dirname, '..', 'data', 'teammate-language-database',
         `${guildId}-127_0_0_1-28082.csv`);
+    const intelligenceDirectory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-player-intelligence-delivery-'));
     t.after(() => {
         if (Fs.existsSync(savePath)) Fs.unlinkSync(savePath);
         if (Fs.existsSync(identityPath)) Fs.unlinkSync(identityPath);
+        Fs.rmSync(intelligenceDirectory, { recursive: true, force: true });
     });
 
     let instance = {
@@ -77,6 +80,7 @@ Test('native tracker logs and delivers exact online/offline messages despite Dis
     };
     const client = {
         battlemetricsInstances: { 42: battlemetrics },
+        playerIntelligenceDependencies: { dataDirectory: intelligenceDirectory },
         battlemetricsIntervalCounter: 1,
         guilds: { cache: new Map([[guildId, {}]]) },
         rustplusInstances: { [guildId]: rustplus },

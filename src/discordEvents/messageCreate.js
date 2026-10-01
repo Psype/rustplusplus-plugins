@@ -20,11 +20,14 @@
 
 const DiscordCommandHandler = require('../handlers/discordCommandHandler.js');
 const DiscordTools = require('../discordTools/discordTools');
+const PluginManager = require('../plugins/pluginManager.js');
 
 module.exports = {
     name: 'messageCreate',
     async execute(client, message) {
+        if (!message.guild) return;
         const instance = client.getInstance(message.guild.id);
+        if (await PluginManager.handleMessage({ client, message })) return;
         const rustplus = client.rustplusInstances[message.guild.id];
 
         if (message.author.bot || !rustplus || (rustplus && !rustplus.isOperational)) return;
