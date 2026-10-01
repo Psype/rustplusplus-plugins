@@ -161,8 +161,10 @@ Options | Description | Required
 
 > **Import player intelligence from an original PNG, JPEG, or WebP screenshot.** Use `/intelimport cinfo image:<file>` for a
 > WarBandits `/cinfo` panel or `/intelimport f7 image:<file>` for Rust's F7 recent-player list. The command works only
-> in the configured private commands channel. It validates the Discord CDN origin, type, signature, byte size and
-> decoded pixel count, runs one serialized local Tesseract process, then displays an ephemeral preview. Only the
+> in the configured private commands channel. It validates the Discord CDN origin, supported extension and declared
+> type, then trusts only the downloaded PNG/JPEG/WebP signature when Discord's two metadata hints disagree. Byte size
+> and decoded pixel count remain bounded before OCR. It runs one serialized local Tesseract process, then displays an
+> ephemeral preview. Only the
 > requester can confirm it for five minutes, on the same server and wipe. The event journal is committed before the
 > Discord acknowledgement; a Discord failure cannot roll it back. Ambiguous name/SteamID associations, inconsistent
 > `/cinfo` member counts and truncated IDs are never guessed. A complete SteamID with a hidden name is retained without

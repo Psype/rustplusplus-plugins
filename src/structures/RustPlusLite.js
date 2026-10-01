@@ -21,6 +21,7 @@
 const RustPlusLib = require('@liamcottle/rustplus.js');
 
 const Client = require('../../index.ts');
+const ApplicationVersion = require('../util/applicationVersion.js');
 const Config = require('../../config');
 
 class RustPlusLite extends RustPlusLib {
@@ -114,7 +115,7 @@ async function rustPlusLiteConnectedEvent(rustplusLite) {
         return;
     }
     rustplusLite.log(Client.client.intlGet(null, 'connectedCap'),
-        Client.client.intlGet(null, 'rustplusOperational'));
+        ApplicationVersion.operationalMessage);
 
     if (Client.client.rustplusReconnectTimers[rustplusLite.guildId]) {
         clearTimeout(Client.client.rustplusReconnectTimers[rustplusLite.guildId]);

@@ -145,6 +145,14 @@ Test('Discord image boundary validates origin, signature, size and decoded dimen
     Assert.equal(Object.isFrozen(result), true);
     Assert.equal(ImageAttachment.validateMetadata({ ...attachment, contentType: null }).contentType, 'image/png');
 
+    const discordMismatch = ImageAttachment.validateMetadata({ ...attachment, contentType: 'image/webp' });
+    Assert.deepEqual(discordMismatch.acceptedContentTypes, ['image/png', 'image/webp']);
+    Assert.equal(Object.isFrozen(discordMismatch.acceptedContentTypes), true);
+    Assert.equal((await ImageAttachment.downloadImage({ ...attachment, contentType: 'image/webp' }, {
+        fetchImpl: async () => fakeResponse,
+        JimpImpl: { read: async () => ({ bitmap: { width: 1260, height: 820 } }) }
+    })).mime, 'image/png');
+
     Assert.throws(() => ImageAttachment.validateMetadata({
         ...attachment, url: 'https://example.invalid/f7.png'
     }), /Discord CDN/);
@@ -163,7 +171,7 @@ Test('Discord image boundary accepts a structurally valid bounded WebP', async (
     webp.writeUIntLE(1279, 24, 3);
     webp.writeUIntLE(719, 27, 3);
     const attachment = {
-        url: 'https://cdn.discordapp.com/attachments/1/2/cinfo.webp',
+        url: 'https://cdn.discordapp.com/attachments/1/2/cinfo.png',
         contentType: 'image/webp',
         size: webp.length
     };

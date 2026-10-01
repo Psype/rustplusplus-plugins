@@ -171,7 +171,7 @@ async function parseAttachment(client, kindHint, attachment, reference, attachme
  */
 async function prepareImports(client, source, requests, requesterUserId, reference) {
     if (!Array.isArray(requests) || requests.length < 1 || requests.length > 10) {
-        throw new Error('Attach between 1 and 10 PNG/JPEG images.');
+        throw new Error('Attach between 1 and 10 PNG/JPEG/WebP images.');
     }
     const items = [];
     for (let index = 0; index < requests.length; index += 1) {
@@ -266,7 +266,7 @@ async function handleMessage({ client, message }) {
         [...message.attachments.values()] : [];
     if (attachments.length < 1 || attachments.length > 10) {
         await message.reply({
-            content: 'Attach between 1 and 10 PNG/JPEG images. Type detection is automatic. Nothing was committed.',
+            content: 'Attach between 1 and 10 PNG/JPEG/WebP images. Type detection is automatic. Nothing was committed.',
             allowedMentions: { parse: [] }
         });
         return true;

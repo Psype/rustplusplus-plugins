@@ -36,13 +36,12 @@ function validateMetadata(attachment, options = {}) {
         throw new Error(`Unsupported Discord image type "${normalizedDeclared.slice(0, 80)}"; use PNG, JPEG or WebP.`);
     }
     const contentType = generic ? extensionMime : normalizedDeclared;
-    if (contentType !== extensionMime) {
-        throw new Error('Image extension and content type do not match.');
-    }
+    const acceptedContentTypes = Object.freeze([...new Set([extensionMime, contentType])]);
     if (!Number.isSafeInteger(record.size) || record.size <= 0 || record.size > maxBytes) {
         throw new Error(`Image size must be between 1 and ${maxBytes} bytes.`);
     }
-    return Object.freeze({ url: url.href, contentType, declaredSize: Number(record.size) });
+    return Object.freeze({ url: url.href, contentType, acceptedContentTypes,
+        declaredSize: Number(record.size) });
 }
 
 /** @param {Buffer} buffer */
@@ -113,7 +112,9 @@ async function downloadImage(attachment, dependencies = {}) {
         const buffer = await readLimitedBody(response, dependencies.maxBytes || MAX_BYTES);
         if (buffer.length !== metadata.declaredSize) throw new Error('Downloaded image length does not match Discord metadata.');
         const mime = detectMime(buffer);
-        if (mime !== metadata.contentType) throw new Error('Image signature and content type do not match.');
+        if (!mime || !metadata.acceptedContentTypes.includes(mime)) {
+            throw new Error('Image signature does not match the allowed Discord metadata.');
+        }
         let width;
         let height;
         if (mime === 'image/webp') {

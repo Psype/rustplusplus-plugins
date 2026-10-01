@@ -19,6 +19,7 @@
 */
 
 const DiscordMessages = require('../discordTools/discordMessages.js');
+const ApplicationVersion = require('../util/applicationVersion.js');
 const EventDebugLogger = require('../util/eventDebugLogger.js');
 const Info = require('../structures/Info');
 const Map = require('../structures/Map');
@@ -63,7 +64,7 @@ module.exports = {
             delete client.rustplusInstances[guildId];
             return;
         }
-        rustplus.log(client.intlGet(null, 'connectedCap'), client.intlGet(null, 'rustplusOperational'));
+        rustplus.log(client.intlGet(null, 'connectedCap'), ApplicationVersion.operationalMessage);
 
         const info = await rustplus.getInfoAsync();
         if (await rustplus.isResponseValid(info)) rustplus.info = new Info(info.info)
@@ -88,7 +89,7 @@ module.exports = {
         rustplus.isOperational = true;
 
         rustplus.updateLeaderRustPlusLiteInstance();
-        rustplus.sendInGameMessage(client.intlGet(guildId, 'rustplusOperational'));
+        rustplus.sendInGameMessage(ApplicationVersion.operationalMessage);
 
         await SyncRustplusDiscordState.synchronize(client, rustplus, { mapChanged, reconnected });
     },
