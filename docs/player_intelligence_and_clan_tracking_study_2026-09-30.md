@@ -148,6 +148,125 @@ séparateur infaillible. Le CLI Tesseract local retourne le TSV et ses positions
 doivent être benchmarkés sur un corpus de vraies captures avant activation. Le modèle doit être local en production,
 sans téléchargement implicite au runtime.
 
+#### Retour réel et décision OCR du 1er octobre 2026
+
+Le premier essai Discord réel sur une capture `/cinfo` d'environ 556×310 pixels contenant trois panneaux a démontré
+que la passe Tesseract brute `eng`, PSM 6/11, n'est pas exploitable pour une transcription autoritaire. Elle a mélangé
+ancres, dates et rosters, perdu des membres et attribué de faux rôles. Le rejet transactionnel a correctement empêché
+tout commit, mais ce pipeline reste un prototype. Il est en outre incapable de couvrir correctement des pseudos
+chinois, arabes ou composés de symboles avec le seul modèle anglais.
+
+Décision utilisateur : ne pas ajouter de formulaire de correction ni demander de retranscrire les résultats OCR. La
+confirmation peut rester un clic de contrôle. L'import est extrait automatiquement ; les membres certains sont liés,
+les autres restent dans des slots provisoires réévaluables au lieu de faire rejeter tout le snapshot. Une confiance
+moyenne ne doit jamais produire un nom « corrigé » silencieusement ni une identité définitive.
+
+Le pipeline structuré reste sans coordonnées absolues :
+
+1. détecter les panneaux et lignes sémantiques, puis recadrer chaque panneau relativement aux ancres ;
+2. produire une variante locale bornée (agrandissement et masque des couleurs/luminances de l'UI Rust) sans inventer
+   les détails absents de la capture originale, puis la comparer sémantiquement à la lecture brute ;
+3. lire séparément les ancres anglaises, le compteur et la date avec modèles/alphabets contraints ;
+4. benchmarker un moteur de scène multilingue local, en priorité PaddleOCR PP-OCRv5, pour les lignes de pseudos avec
+   reconnaisseurs Latin, CJK, cyrillique et arabe ; Tesseract reste utile comme seconde lecture spécialisée ;
+5. rendre une valeur définitive uniquement si les passes indépendantes convergent et si les contraintes du panneau
+   sont satisfaites. Une divergence produit un slot provisoire ou non résolu, sans correction humaine ;
+6. pour F7, OCRiser prioritairement le SteamID64 par consensus numérique puis obtenir le pseudo canonique via les
+   sources Steam/WarBandits déjà bornées. Le pseudo F7 en majuscules n'est jamais la source canonique ;
+7. pour `/cinfo`, classer les alias déjà connus par similarité textuelle, visuelle et contextuelle. Un candidat unique
+   nettement séparé peut être lié automatiquement ; sinon conserver un slot provisoire avec ses hypothèses bornées et
+   réévaluables. Le snapshot devient partiel sans perdre les membres déjà résolus et sans demander de correction.
+
+État implémenté au 1er octobre : le résolveur textuel partagé collecte les alias du journal, des trackers,
+BattleMetrics, de l'équipe Rust+ et des F7 du même lot. Il compare les graphèmes par Damerau-Levenshtein et bigrammes,
+conserve les écritures exactes, pénalise les changements de script et effectue une affectation globale un-à-un. Les
+pseudos de cinq caractères ou moins exigent des seuils et marges renforcés. L'historique du même ClanTag départage
+seulement les candidats à score égal ; il ne suffit jamais à lever une collision. Une similarité floue seule reste
+provisoire même au-dessus du seuil ; une écriture exacte/structurellement équivalente ou une corroboration externe
+unique est nécessaire pour lier automatiquement. Une ambiguïté conserve au plus trois
+hypothèses internes. Au plus trois requêtes par lot ciblent d'abord les SteamID probables, via le fournisseur
+WarBandits déjà sérialisé/caché puis le nom public du profil Steam. Une corroboration externe unique peut lever une
+collision ; deux réponses compatibles restent ambiguës. Aucun credential Steam ni clé Web API n'est requis.
+
+Avant chaque OCR, ces alias persistants alimentent aussi un fichier UTF-8 Tesseract `--user-words`, limité et supprimé
+après le processus. Pour chaque image, le bot produit une seule variante noir-sur-blanc agrandie, en conservant les
+pixels texte neutres, jaunes/orange, verts et cyan/bleus puis en rejetant un ratio de premier plan pathologique. La
+lecture masquée et la lecture brute sont toutes deux bornées et sérialisées ; la structure reconnue (ancres, blocs,
+tag, compteur, date, roster ou SteamID complets) choisit déterministement la meilleure. Ce sont deux entrées OCR
+indépendantes, pas des retries aveugles. Les boîtes de la variante agrandie sont ramenées à l'échelle originale avant
+la lecture relative des couleurs de rôles.
+
+Les membres `/cinfo` déjà résolus et les lignes F7 nom/SteamID non ambiguës enrichissent enfin une mémoire visuelle
+persistante par serveur sous
+`data/player-intelligence/<guild>/<battlemetricsServerId>/visual-alias-library.json`. Elle stocke au plus 2 000
+signatures binaires normalisées de formes de mots, quatre par alias/identité, jamais les pixels ni la capture brute.
+Les crops viennent des boîtes OCR relatives au roster, sans position d'écran fixe. Un digest visuel strictement
+identique peut corroborer l'identité ; une similarité approximative sert seulement à rappeler/prioriser le candidat et
+reste insuffisante pour le lier. Deux identités ayant la même signature restent toutes deux candidates. Le sidecar est
+validé, borné, écrit atomiquement et sa corruption est préservée ; sa panne après le commit canonique ne peut pas
+annuler ce commit.
+
+Le contrat `clan_snapshot` accepte désormais, sans casser les événements schema 1 existants, des membres résolus et
+des slots `unresolvedMembers`. Une structure tag/compteur/date valide peut donc être confirmée malgré un roster
+incomplet. Les slots ne créent ni alias exact, ni relation `Played with`; chaque reconstruction de la projection les
+réévalue contre les nouvelles observations, y compris les noms F7 liés à un SteamID mais marqués non fidèles à la
+casse. La confirmation Discord reste un clic transactionnel et non une transcription. Le recadrage sémantique par
+champ, les lectures numériques indépendantes et le moteur multilingue local restent à implémenter et à mesurer sur des
+PNG originaux.
+
+Les exemples F7 réels ajoutés le 1er octobre combinent décorations autour d'un nom latin, lettres volontairement
+espacées, `İ` turc, caractères cyrilliques, coréens et chaînes visuellement ambiguës mélangeant potentiellement
+plusieurs alphabets. Ils confirment que le pseudo F7 ne doit même pas être une cible de transcription autoritaire. Le
+pipeline doit détecter la ligne, effectuer plusieurs lectures numériques indépendantes du SteamID64 gris, exiger leur
+égalité et valider sa plage SteamID avant toute résolution. Le nom retourné ensuite par Steam/WarBandits est une
+observation fournisseur datée liée à cet ID, pas une affirmation que la graphie visible sur la capture a été lue. La
+chaîne visuelle peut seulement servir de signal de conflit non persistant.
+
+Ces identités exactes enrichissent ensuite un dictionnaire de candidats commun à F7, `/cinfo`, chat et clans. Le roster
+peut être reconnu de façon contrainte en comparant chaque segment visuel aux alias déjà connus et, si utile, à leur
+rendu synthétique avec les polices Rust et leurs fallbacks. Les espaces, signes décoratifs et alphabets doivent rester
+distincts : ne jamais assimiler automatiquement `O` latin, `О` cyrillique, `0`, ni supprimer ponctuation ou symboles.
+Les [squelettes de caractères Unicode confusables](https://www.unicode.org/reports/tr39/) servent seulement à rappeler
+des candidats, jamais à les fusionner ni à être affichés ou stockés comme pseudonymes normalisés.
+
+Le score cible doit à terme combiner des mesures indépendantes : distance Damerau-Levenshtein pondérée par les erreurs
+OCR réellement mesurées, similarité de graphèmes et n-grammes, script/direction, probabilité du reconnaisseur de scène,
+comparaison entre le crop et un rendu synthétique de l'alias — une approche cohérente avec la recherche de
+[reconnaissance guidée par dictionnaire visuel](https://arxiv.org/abs/2305.04524) —, récence sur le même serveur/wipe,
+observation F7 récente, historique du tag et marge entre les deux meilleurs candidats. Les poids et seuils proviennent
+du corpus de validation. Les seuils conservateurs actuels sont une base testée, pas une calibration OCR réelle. Les
+priorités temporelles/clan restent faibles afin de permettre
+recrutement, départ et scission sans verrouiller l'ancien roster.
+
+La résolution porte sur le roster complet : construire une matrice slots/candidats puis résoudre une affectation
+globale un-à-un avec une option `unresolved`. Cela empêche qu'un même joueur soit choisi pour deux graphies proches et
+exploite le compteur déclaré sans forcer une mauvaise identité. Trois sorties sont distinctes : `resolved` avec score
+et marge suffisants, `provisional` avec hypothèses classées, et `unresolved` sans candidat utile. Les deux dernières ne
+polluent ni les alias exacts ni les affinités confirmées.
+
+Un snapshot partiel conserve tag, date, compteur, membres résolus et slots provisoires. Il peut ajouter les relations
+positives suffisamment fortes, mais ne prouve jamais l'absence ou le départ d'un membre. Lorsqu'un futur F7, une
+réponse Steam/WarBandits ou un autre `/cinfo` apporte un alias/ID, la projection recalcule automatiquement les slots et
+émet une liaison réversible ; aucune correction humaine ni nouvel upload n'est requis. Le schéma compatible mis en
+place conserve le texte OCR brut et les hypothèses comme évidence interne, pas comme `exactName` ni comme membres
+confirmés tant que le seuil de liaison n'est pas atteint.
+
+Connaître la police aide à générer un corpus synthétique ou à affiner un reconnaisseur, mais n'est pas un paramètre
+magique à fournir à Tesseract. Le [code officiel Facepunch](https://github.com/Facepunch/Rust.Community/blob/master/CommunityEntity.UI.cs)
+utilise `RobotoCondensed-Bold.ttf` comme fonte CUI par
+défaut. L'audit des bundles installés localement le 1er octobre 2026 retrouve `RobotoCondensed-Bold SDF` et ses
+matériaux `Chat`, `PlayerName`, `Team List`, `Title` et `Outline` dans `content.bundle`, ainsi que le TTF embarqué dans
+`textures.4.bundle`, ce qui rend cette fonte très probable pour `/cinfo`.
+Le bundle contient cependant aussi Roboto Condensed Regular, Roboto Regular, Roboto Mono, Droid Sans Mono,
+Permanent Marker, Press Start 2P, Poxel, Super Chiby, LCD, VCR OSD, Dripping, ainsi que les replis Noto Sans Arabic,
+Noto Sans Hebrew, Noto Sans CJK chinois/japonais/coréen, Noto Emoji et Unifont 17. Un corpus synthétique devra donc reproduire
+Roboto Condensed Bold SDF puis ces fallbacks, pas une fonte unique. Avant activation d'un modèle affiné,
+constituer un corpus privé de captures originales et mesurer au minimum le rappel des ancres, l'exactitude complète des
+SteamID64/dates/tags/rosters, le taux d'erreur caractère Unicode et les faux commits. Le critère de livraison est zéro
+faux lien définitif sur le corpus de validation ; les états provisoires et non résolus permettent ensuite d'améliorer
+le rappel sans abaisser ce garde-fou ni jeter tout le snapshot. En attendant ce corpus, le système ne doit pas être
+présenté comme une transcription Unicode complète : sa sûreté vient aussi de ses slots partiels et de ses refus.
+
 ### Menu de signalement F7
 
 La capture fournie montre que chaque ligne du menu **Find Player** associe visuellement un pseudo à un SteamID64 de
@@ -495,8 +614,11 @@ bornent ce risque sans inventer de correspondance.
    `intel-imports`, détection sémantique du type, découpage de plusieurs panneaux `/cinfo`, validation de l'image,
    Tesseract local sérialisé, regroupement relatif, couleurs de rôles relatives, aperçu/confirmation et hash
    idempotent par bloc. Le batch est validé entièrement avant son unique append durable ; les webhooks non autorisés
-   sont ignorés.
-3. **À calibrer** : corpus de PNG originaux, précision champ par champ et seuils couleur/OCR sur Linux ; les tests
+   sont ignorés. Les snapshots partiels, le résolveur Unicode un-à-un, la réévaluation automatique et la corroboration
+   WarBandits/Steam plafonnée à trois requêtes candidates par lot, le masque couleur agrandi, les user-words et la
+   mémoire visuelle persistante sont également implémentés.
+3. **À calibrer et étendre** : corpus de PNG originaux, précision champ par champ et seuils couleur/OCR sur Linux,
+   recadrage relatif par champ, modèle synthétique multi-fontes et moteur de scène multilingue ; les tests
    déterministes utilisent actuellement les textes et boîtes correspondant aux exemples fournis.
 4. **À ajouter si utile** : import legacy en lecture seule, Rust+ own-clan, vue d'historique détaillée et outil audité
    de liaison/révocation ; aucune de ces étapes ne doit modifier les bases existantes.
@@ -508,8 +630,9 @@ bornent ce risque sans inventer de correspondance.
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale finale après ajout du multi-image/multi-panneau et du WebP Discord : `npm test` passe 150/150 et
-`tsc --noEmit` passe. Une
+QA locale finale après ajout des snapshots partiels, de la résolution/corroboration et de la mémoire OCR :
+`npm.cmd test` passe 168/168,
+dont le typage strict `tsc --noEmit`. Une
 exécution antérieure avait reproduit le timeout FCM historique sous charge, puis son fichier était repassé 5/5
 isolément. Le sélecteur Windows, un webhook Discord réel et l'OCR de PNG originaux restent à valider interactivement ;
 les tests n'envoient rien sur le réseau.
@@ -524,6 +647,17 @@ Une panne répétée ignore aussi les anciens tableaux de transitions BattleMetr
 Le dispatch `!unknown` mesuré avant/après l'ajout du descriptor plugin passe d'une médiane de `15,645 µs` à
 `16,204 µs` par commande (`+0,559 µs`, environ `+3,6 %`, 10 000 itérations). Le coût reste négligeable face aux I/O ;
 le benchmark et les résultats fonctionnels doivent être rerun après toute extension des hooks.
+
+Le résolveur a aussi été mesuré sur 20 slots et 2 000 alias synthétiques. La matrice exhaustive initiale prenait une
+médiane de `3 811 ms` sur trois exécutions. Un index de récupération exacte/alphanumérique/sans accents, puis de
+bigrammes rares bornés pour les seules hypothèses floues, réduit la médiane à `128 ms` (`-96,6 %`). Le bornage ne peut
+pas créer un lien définitif : une hypothèse seulement floue reste provisoire tant qu'une source externe unique ne la
+corrobore pas. Le coût réel sur le corpus de captures reste à mesurer.
+
+La recherche visuelle a été mesurée séparément sur 20 crops et la limite de 2 000 signatures. La validation/décodage
+répétée de chaque signature prenait une médiane de `600,386 ms` sur sept exécutions. Un cache faible des features
+validées/décodées et du nombre de pixels actifs ramène la médiane à `115,941 ms` (`-80,7 %`) sans changer le score Dice
+de forme ni la pénalité d'aspect. Le premier chargement valide toujours intégralement le sidecar.
 
 ## Tests déterministes indispensables
 

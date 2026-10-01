@@ -99,5 +99,6 @@ module.exports = Object.freeze({
     findMemberBoxes,
     inferCinfoRoleHints,
     inferCinfoRoleHintsBatch,
-    inferFromImage
+    inferFromImage,
+    rosterWords
 });

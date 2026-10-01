@@ -1,11 +1,16 @@
 // @ts-check
 const ChildProcess = require('node:child_process');
+const Fs = require('node:fs');
+const Os = require('node:os');
+const Path = require('node:path');
 
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const TIMEOUT_MS = 45 * 1000;
+const MAX_USER_WORDS = 1000;
 let queue = Promise.resolve();
 
-/** @typedef {{executable?:string,language?:string,psm?:number,spawnImpl?:Function,timeoutMs?:number,maxOutputBytes?:number}} OcrOptions */
+/** @typedef {{executable?:string,language?:string,psm?:number,spawnImpl?:Function,timeoutMs?:number,
+ * maxOutputBytes?:number,userWords?:unknown}} OcrOptions */
 
 /** @param {string} tsv */
 function parseTsv(tsv) {
@@ -24,13 +29,28 @@ function parseTsv(tsv) {
     return Object.freeze(words);
 }
 
-/** @param {string} imageBase64 @param {OcrOptions} options */
-function recognizeOnce(imageBase64, options = {}) {
-    if (typeof imageBase64 !== 'string' || imageBase64.length === 0) {
-        throw new TypeError('OCR image must be a non-empty base64 string.');
+/** @param {unknown} input */
+function normalizeUserWords(input) {
+    if (input === undefined || input === null) return Object.freeze([]);
+    if (!Array.isArray(input)) throw new TypeError('Tesseract user words must be an array.');
+    const values = [];
+    const seen = new Set();
+    for (const raw of input) {
+        if (typeof raw !== 'string') throw new TypeError('Tesseract user words must contain strings.');
+        const value = raw.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim();
+        for (const part of value.split(/\s+/u)) {
+            if (!part || Array.from(part).length > 128 || seen.has(part)) continue;
+            seen.add(part);
+            values.push(part);
+            if (values.length >= MAX_USER_WORDS) break;
+        }
+        if (values.length >= MAX_USER_WORDS) break;
     }
-    const image = Buffer.from(imageBase64, 'base64');
-    if (image.length === 0) throw new TypeError('OCR image is empty.');
+    return Object.freeze(values);
+}
+
+/** @param {Buffer} image @param {OcrOptions} options @param {string|null} userWordsPath */
+function spawnRecognition(image, options, userWordsPath) {
     const executable = options.executable || process.env.RPP_TESSERACT_PATH || 'tesseract';
     const language = typeof options.language === 'string' && /^[a-z+_]+$/iu.test(options.language) ?
         options.language : 'eng';
@@ -40,8 +60,10 @@ function recognizeOnce(imageBase64, options = {}) {
     const spawnImpl = options.spawnImpl || ChildProcess.spawn;
 
     return new Promise((resolve, reject) => {
-        const child = spawnImpl(executable,
-            ['stdin', 'stdout', '-l', language, '--psm', `${psm}`, 'tsv'],
+        const args = ['stdin', 'stdout', '-l', language, '--psm', `${psm}`];
+        if (userWordsPath) args.push('--user-words', userWordsPath);
+        args.push('tsv');
+        const child = spawnImpl(executable, args,
             { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
         /** @type {Buffer[]} */
         const stdout = [];
@@ -96,10 +118,30 @@ function recognizeOnce(imageBase64, options = {}) {
 }
 
 /** @param {string} imageBase64 @param {OcrOptions} options */
+async function recognizeOnce(imageBase64, options = {}) {
+    if (typeof imageBase64 !== 'string' || imageBase64.length === 0) {
+        throw new TypeError('OCR image must be a non-empty base64 string.');
+    }
+    const image = Buffer.from(imageBase64, 'base64');
+    if (image.length === 0) throw new TypeError('OCR image is empty.');
+    const userWords = normalizeUserWords(options.userWords);
+    if (userWords.length === 0) return spawnRecognition(image, options, null);
+    const temporaryDirectory = await Fs.promises.mkdtemp(Path.join(Os.tmpdir(), 'rpp-tesseract-'));
+    const wordsPath = Path.join(temporaryDirectory, 'user-words.txt');
+    try {
+        await Fs.promises.writeFile(wordsPath, `${userWords.join('\n')}\n`, 'utf8');
+        return await spawnRecognition(image, options, wordsPath);
+    }
+    finally {
+        await Fs.promises.rm(temporaryDirectory, { recursive: true, force: true });
+    }
+}
+
+/** @param {string} imageBase64 @param {OcrOptions} options */
 function recognize(imageBase64, options = {}) {
     const task = queue.then(() => recognizeOnce(imageBase64, options));
     queue = task.catch(() => undefined);
     return task;
 }
 
-module.exports = Object.freeze({ parseTsv, recognize });
+module.exports = Object.freeze({ normalizeUserWords, parseTsv, recognize });

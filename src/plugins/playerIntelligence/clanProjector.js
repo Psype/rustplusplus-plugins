@@ -3,9 +3,43 @@
 
 const { deepFreeze } = require('./contracts.js');
 const { nameKey } = require('./identityProjector.js');
+const { resolveRoster } = require('./nameSimilarity.js');
 
 const COUNTED_CONFIDENCE = new Set(['authoritative', 'verified']);
 const ROLE_WEIGHT = Object.freeze({ leader: 3, moderator: 2, member: 1, unknown: 0 });
+
+/** @param {readonly Readonly<Record<string, any>>[]} events @param {any} identities */
+function identityCandidates(events, identities) {
+    const values = [];
+    for (const person of identities.persons) {
+        for (const alias of person.names) values.push({
+            name: alias.name,
+            steamId: person.steamId,
+            battlemetricsPlayerId: person.battlemetricsPlayerIds[0] || null,
+            caseFidelity: true
+        });
+    }
+    for (const event of events) {
+        if (event.kind !== 'identity_observed' || event.subject.exactName === null ||
+            (event.subject.steamId === null && event.subject.battlemetricsPlayerId === null)) continue;
+        values.push({
+            name: event.subject.exactName,
+            steamId: event.subject.steamId,
+            battlemetricsPlayerId: event.subject.battlemetricsPlayerId,
+            caseFidelity: event.payload.caseFidelity
+        });
+    }
+    const unique = new Map();
+    for (const value of values) {
+        const key = `${value.steamId || ''}\u0000${value.battlemetricsPlayerId || ''}\u0000${value.name}`;
+        const previous = unique.get(key);
+        unique.set(key, Object.freeze({
+            ...value,
+            caseFidelity: Boolean(previous && previous.caseFidelity) || value.caseFidelity !== false
+        }));
+    }
+    return Object.freeze([...unique.values()]);
+}
 
 /** @param {readonly Readonly<Record<string, any>>[]} events @param {ReturnType<import('./identityProjector.js')['projectIdentities']>} identities */
 function projectClans(events, identities) {
@@ -15,6 +49,7 @@ function projectClans(events, identities) {
     const known = new Map();
     const played = new Map();
     const tags = new Map();
+    const candidates = identityCandidates(events, identities);
 
     for (const event of events.filter(item => item.kind === 'clan_snapshot').slice().sort((left, right) =>
         left.observedAt.localeCompare(right.observedAt) || left.eventId.localeCompare(right.eventId))) {
@@ -25,7 +60,8 @@ function projectClans(events, identities) {
         if (!duplicate) evidenceSeen.add(evidenceKey);
 
         const members = new Map();
-        for (const member of event.payload.members) {
+        /** @param {{name:string|null,steamId:string|null,battlemetricsPlayerId:string|null,role:string}} member */
+        function addMember(member) {
             const resolution = identities.resolveSubject({
                 steamId: member.steamId,
                 battlemetricsPlayerId: member.battlemetricsPlayerId,
@@ -43,7 +79,46 @@ function projectClans(events, identities) {
                     ambiguous: resolution.ambiguous
                 });
             }
+            return !previous;
         }
+        for (const member of event.payload.members) {
+            addMember(member);
+        }
+
+        const persistedUnresolved = /** @type {any[]} */ (Array.isArray(event.payload.unresolvedMembers) ?
+            event.payload.unresolvedMembers : []);
+        const availableCandidates = candidates.filter(candidate => {
+            const resolution = identities.resolveSubject({
+                steamId: candidate.steamId,
+                battlemetricsPlayerId: candidate.battlemetricsPlayerId,
+                exactName: candidate.name
+            });
+            return !members.has(resolution.personId);
+        });
+        const matches = resolveRoster(persistedUnresolved.map(member => member.observedText),
+            availableCandidates);
+        const unresolvedMembers = [];
+        for (let index = 0; index < persistedUnresolved.length; index += 1) {
+            const unresolved = persistedUnresolved[index];
+            const match = matches[index];
+            if (match.status === 'resolved' && match.candidate && addMember({
+                name: match.candidate.caseFidelity === false ?
+                    unresolved.observedText : match.candidate.name,
+                steamId: match.candidate.steamId,
+                battlemetricsPlayerId: match.candidate.battlemetricsPlayerId,
+                role: unresolved.role
+            })) continue;
+            unresolvedMembers.push({
+                observedText: unresolved.observedText,
+                role: unresolved.role,
+                candidates: match.alternatives
+            });
+        }
+        const declaredMemberCount = event.payload.declaredMemberCount;
+        const missingMemberCount = declaredMemberCount === null ? 0 :
+            Math.max(0, declaredMemberCount - members.size - unresolvedMembers.length);
+        const complete = declaredMemberCount !== null && members.size === declaredMemberCount &&
+            unresolvedMembers.length === 0;
         const tagKey = nameKey(event.payload.tag);
         const instanceKey = [event.scope.serverKey, event.scope.wipeId, tagKey,
             event.payload.establishedAt || 'unknown'].join('|');
@@ -55,9 +130,11 @@ function projectClans(events, identities) {
             tag: event.payload.tag,
             tagKey,
             establishedAt: event.payload.establishedAt,
-            complete: event.payload.complete,
-            declaredMemberCount: event.payload.declaredMemberCount,
+            complete,
+            declaredMemberCount,
             members: [...members.values()].sort((left, right) => left.personId.localeCompare(right.personId)),
+            unresolvedMembers,
+            missingMemberCount,
             instanceKey,
             confirmed,
             duplicate

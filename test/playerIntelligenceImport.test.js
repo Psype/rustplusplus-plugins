@@ -1,4 +1,5 @@
 const Assert = require('node:assert/strict');
+const Crypto = require('node:crypto');
 const Fs = require('node:fs');
 const Os = require('node:os');
 const Path = require('node:path');
@@ -6,6 +7,7 @@ const Test = require('node:test');
 
 const Core = require('../src/plugins/playerIntelligence');
 const ImportWorkflow = require('../src/plugins/playerIntelligence/importWorkflow.js');
+const VisualAliasLibrary = require('../src/plugins/playerIntelligence/visualAliasLibrary.js');
 
 function word(text, y) {
     return { text, x: 20, y, width: Math.max(10, text.length * 7), height: 16, confidence: 95 };
@@ -45,6 +47,12 @@ function createHarness(t) {
         playerIntelligenceImportDependencies: {
             downloadImage: async () => ({ imageBase64: 'AA==', sha256: 'a'.repeat(64) }),
             recognize: async () => words,
+            identityCandidates: async () => [
+                { name: 'Nirks', steamId: '76561197900000001', battlemetricsPlayerId: null },
+                { name: 'Psype', steamId: '76561197975819827', battlemetricsPlayerId: '101' },
+                { name: 'tom.le.geek.2', steamId: '76561197900000002', battlemetricsPlayerId: null }
+            ],
+            enableExternalCorroboration: false,
             allowedWebhookIds: ['12345678901234567'],
             warBanditsProvider: { resolvePlayer: async () => ({ available: false }) }
         },
@@ -95,7 +103,83 @@ Test('Discord import previews first, binds confirmation to requester, then commi
     Assert.equal((await store.readAll()).length, 4);
 });
 
-Test('inconsistent OCR never creates a pending import or journal', async t => {
+Test('OCR compares one text-mask pass with raw semantics and feeds persistent aliases as user words', async t => {
+    const value = createHarness(t);
+    const calls = [];
+    value.client.playerIntelligenceImportDependencies.preprocessImage = async () => ({
+        imageBase64: 'masked', scale: 2
+    });
+    value.client.playerIntelligenceImportDependencies.downloadImage = async () => ({
+        imageBase64: 'raw', sha256: 'd'.repeat(64)
+    });
+    value.client.playerIntelligenceImportDependencies.recognize = async (image, options) => {
+        calls.push({ image, options });
+        return image === 'masked' ? [
+            word('ClanTag: zeub', 40), word('Members: 3', 90),
+            word('Clan Members: Nirks, Psype and tom.le.geek.2', 140),
+            word('Established: 09/29/2026 14:58:27', 190)
+        ] : [
+            word('ClanTag: wrong', 20), word('Members: 3', 45),
+            word('Clan Members: noise', 70), word('Established: 09/29/2026 14:58:27', 95)
+        ];
+    };
+    await ImportWorkflow.beginImport(value.client, value.command);
+    Assert.match(value.edits[0].content, /OCR \/cinfo.+zeub.+3\/3/);
+    Assert.deepEqual(calls.map(call => call.image), ['masked', 'raw']);
+    Assert.equal(calls.every(call => call.options.userWords.includes('Nirks') &&
+        call.options.userWords.includes('tom.le.geek.2')), true);
+});
+
+Test('confirmed resolved shapes persist in the server data directory, not in source code', async t => {
+    const value = createHarness(t);
+    value.client.playerIntelligenceImportDependencies.disableOcrPreprocessing = true;
+    const bits = Buffer.alloc(VisualAliasLibrary.FEATURE_WIDTH * VisualAliasLibrary.FEATURE_HEIGHT / 8, 0x55);
+    const aspectRatio = 2;
+    const feature = Object.freeze({
+        width: VisualAliasLibrary.FEATURE_WIDTH,
+        height: VisualAliasLibrary.FEATURE_HEIGHT,
+        bits: bits.toString('base64'),
+        aspectRatio,
+        digest: Crypto.createHash('sha256').update(bits).update(`:${aspectRatio.toFixed(3)}`, 'utf8').digest('hex')
+    });
+    value.client.playerIntelligenceImportDependencies.extractCinfoVisualSamples = async () => [[{
+        memberIndex: 0, observedText: 'Nirks', feature
+    }]];
+    await ImportWorkflow.beginImport(value.client, value.command);
+    const customId = value.edits[0].components[0].components[0].data.custom_id;
+    await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { customId, guildId: 'guild', channelId: 'commands', user: { id: 'requester' } }
+    });
+    const libraryFile = Path.join(value.directory, 'guild', '42', 'visual-alias-library.json');
+    const document = await VisualAliasLibrary.read(libraryFile);
+    Assert.equal(document.samples.length, 1);
+    Assert.equal(document.samples[0].name, 'Nirks');
+    Assert.equal(document.samples[0].steamId, '76561197900000001');
+});
+
+Test('exact F7 visual evidence resolves only its cinfo slot and prefers the known canonical alias', async t => {
+    const value = createHarness(t);
+    const steamId = '76561197900000021';
+    value.client.playerIntelligenceImportDependencies.disableOcrPreprocessing = true;
+    value.client.playerIntelligenceImportDependencies.recognize = async () => [
+        word('ClanTag: TEST', 20), word('Members: 1', 45),
+        word('Clan Members: N01SY OCR', 70), word('Established: 09/29/2026 14:58:27', 95)
+    ];
+    value.client.playerIntelligenceImportDependencies.identityCandidates = async () => [{
+        name: 'Canonical Name', steamId, battlemetricsPlayerId: null, caseFidelity: true
+    }];
+    value.client.playerIntelligenceImportDependencies.visualCandidatesForItems = async () => [[{
+        name: 'CANONICAL NAME', steamId, battlemetricsPlayerId: null, caseFidelity: false,
+        corroborated: true, contextPriority: true, targetMemberIndex: 0, visualScore: 1
+    }]];
+    await ImportWorkflow.beginImport(value.client, value.command);
+    Assert.match(value.edits[0].content, /1\/1 linked/);
+    Assert.match(value.edits[0].content, /Members: Canonical Name/);
+    Assert.doesNotMatch(value.edits[0].content, /Members: N01SY OCR/);
+});
+
+Test('incomplete cinfo roster is committed only as a partial snapshot', async t => {
     const value = createHarness(t);
     value.client.playerIntelligenceImportDependencies.recognize = async () => [
         word('ClanTag: BAD', 20), word('Members: 3', 45),
@@ -103,12 +187,70 @@ Test('inconsistent OCR never creates a pending import or journal', async t => {
         word('Established: 09/29/2026 14:58:27', 95)
     ];
     await ImportWorkflow.beginImport(value.client, value.command);
-    Assert.match(value.edits[0].content, /Nothing was committed/);
-    Assert.deepEqual(value.edits[0].components, []);
+    Assert.match(value.edits[0].content, /0\/3 linked/);
+    Assert.match(value.edits[0].content, /Pending identities: 3/);
+    const customId = value.edits[0].components[0].components[0].data.custom_id;
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { customId, guildId: 'guild', channelId: 'commands', user: { id: 'requester' } }
+    }), true);
     const store = new Core.JsonlHistoryStore({
         directory: Path.join(value.directory, 'guild', '42')
     });
-    Assert.equal((await store.readAll()).length, 0);
+    const events = await store.readAll();
+    Assert.equal(events.length, 1);
+    const snapshot = events[0];
+    Assert.equal(snapshot.kind, 'clan_snapshot');
+    Assert.equal(snapshot.payload.complete, false);
+    Assert.equal(snapshot.payload.members.length, 0);
+    Assert.equal(snapshot.payload.unresolvedMembers.length, 2);
+});
+
+Test('short-name collision resolves only after bounded SteamID corroboration', async t => {
+    const value = createHarness(t);
+    const firstSteamId = '76561197900000011';
+    const secondSteamId = '76561197900000012';
+    value.client.playerIntelligenceImportDependencies.recognize = async () => [
+        word('ClanTag: TEST', 20), word('Members: 1', 45),
+        word('Clan Members: RW', 70), word('Established: 09/29/2026 14:58:27', 95)
+    ];
+    value.client.playerIntelligenceImportDependencies.identityCandidates = async () => [
+        { name: 'RW', steamId: firstSteamId, battlemetricsPlayerId: null, caseFidelity: false },
+        { name: 'RW', steamId: secondSteamId, battlemetricsPlayerId: null, caseFidelity: false }
+    ];
+    value.client.playerIntelligenceImportDependencies.enableExternalCorroboration = true;
+    const providerQueries = [];
+    value.client.playerIntelligenceImportDependencies.warBanditsProvider = {
+        resolvePlayer: async (_context, _scope, query) => {
+            providerQueries.push(query);
+            if (!/^7656119\d{10}$/u.test(query)) return { available: false };
+            const matching = query === firstSteamId;
+            return {
+                available: true, ambiguous: false,
+                player: { steamId: query, name: matching ? 'RW' : 'SOMEONE', aliases: [] }
+            };
+        }
+    };
+    const steamQueries = [];
+    value.client.playerIntelligenceImportDependencies.steamProfileName = async steamId => {
+        steamQueries.push(steamId);
+        return steamId === firstSteamId ? 'RW' : 'SOMEONE';
+    };
+
+    await ImportWorkflow.beginImport(value.client, value.command);
+    Assert.match(value.edits[0].content, /1\/1 linked/);
+    Assert.equal(providerQueries.length <= 3, true);
+    Assert.equal(providerQueries.includes(firstSteamId), true);
+    Assert.equal(providerQueries.includes(secondSteamId), true);
+    Assert.deepEqual(steamQueries.sort(), [firstSteamId, secondSteamId]);
+    const customId = value.edits[0].components[0].components[0].data.custom_id;
+    await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { customId, guildId: 'guild', channelId: 'commands', user: { id: 'requester' } }
+    });
+    const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
+    const snapshot = (await store.readAll()).find(event => event.kind === 'clan_snapshot');
+    Assert.equal(snapshot.payload.members[0].steamId, firstSteamId);
 });
 
 Test('dedicated import channel accepts only an approved helper webhook and still requires confirmation', async t => {

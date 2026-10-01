@@ -22,6 +22,22 @@ The bot invokes `tesseract` locally and never downloads a model at runtime. If t
 `command -v tesseract` and `tesseract --list-langs` under the deployment environment; `eng` must be listed. An import
 rejected for this reason commits nothing and can be submitted again after installation.
 
+Name reconciliation does not require Steam credentials or a Steam Web API key. On an uncertain `/cinfo`, the bot can
+make at most three candidate queries per batch through the existing rate-limited WarBandits provider and the bounded
+public Steam profile-name reader. Provider failure is non-blocking and never turns an ambiguous candidate into a match.
+Each image is read from one bounded Rust-UI color/luminance mask and from the original image; semantic completeness
+selects the result, not a blind retry. Known persistent aliases are supplied through Tesseract's
+[`--user-words`](https://github.com/tesseract-ocr/tesseract/blob/main/doc/tesseract.1.asc) file;
+that temporary UTF-8 file is deleted after the process. The current English model is still insufficient for arbitrary
+Unicode; unresolved members are stored as pending slots rather than invented or sent through a manual correction form.
+
+Resolved `/cinfo` name shapes and unambiguous F7 name/SteamID rows are stored independently from the code in
+`data/player-intelligence/<guild>/<battlemetricsServerId>/visual-alias-library.json`. The file is bounded, validated,
+written atomically, ignored by Git and survives bot restarts/upgrades as long as the `data/player-intelligence`
+directory is preserved. It contains normalized binary word signatures and identity references, never screenshot
+pixels. Exact visual repeats may corroborate an existing identity; approximate shapes only retrieve candidates and
+cannot create a definitive link by themselves. A corrupt sidecar is preserved and disabled instead of silently reset.
+
 The private `intel-imports` channel is created automatically when the guild is set up again or the bot restarts. A
 manual message may contain 1 to 10 PNG/JPEG/WebP images. The bot detects F7 versus `/cinfo` from OCR anchors; an optional
 leading `cinfo` or `f7` acts as a strict hint for every attached image. One image may contain several vertically

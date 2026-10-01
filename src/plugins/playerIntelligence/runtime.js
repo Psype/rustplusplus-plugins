@@ -72,12 +72,18 @@ function getScope(context) {
 }
 
 /** @param {any} context @param {any} scope */
+function getDataDirectory(context, scope) {
+    const dependencies = getDependencies(context);
+    const directory = dependencies.dataDirectory || DATA_DIRECTORY;
+    const guild = `${context.guildId}`.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return Path.join(directory, guild, scope.battlemetricsId);
+}
+
+/** @param {any} context @param {any} scope */
 function getStore(context, scope) {
     const dependencies = getDependencies(context);
     if (dependencies.store) return dependencies.store;
-    const directory = dependencies.dataDirectory || DATA_DIRECTORY;
-    const guild = `${context.guildId}`.replace(/[^a-zA-Z0-9._-]/g, '_');
-    return new Core.JsonlHistoryStore({ directory: Path.join(directory, guild, scope.battlemetricsId) });
+    return new Core.JsonlHistoryStore({ directory: getDataDirectory(context, scope) });
 }
 
 /** @param {string} kind @param {any} scope @param {any} subject @param {any} payload @param {any} details */
@@ -155,6 +161,71 @@ function trackedIdentities(scope) {
         }
     }
     return Object.freeze(identities);
+}
+
+/** @param {any} context */
+async function identityCandidates(context) {
+    const scope = getScope(context);
+    if (!scope) return Object.freeze([]);
+    const events = await getStore(context, scope).readAll();
+    const projection = Core.rebuild(events);
+    const values = [];
+    for (const person of projection.identities.persons) {
+        const knownClanTags = projection.clans.getAffinity({
+            steamId: person.steamId,
+            battlemetricsPlayerId: person.battlemetricsPlayerIds[0] || null,
+            exactName: person.names[0] ? person.names[0].name : null
+        }).knownTags.map((/** @type {any} */ tag) => normalize(tag.tag));
+        for (const alias of person.names) values.push({
+            name: alias.name,
+            steamId: person.steamId,
+            battlemetricsPlayerId: person.battlemetricsPlayerIds[0] || null,
+            caseFidelity: true,
+            knownClanTags
+        });
+    }
+    for (const event of events) {
+        if (event.kind !== 'identity_observed' || event.subject.exactName === null ||
+            (event.subject.steamId === null && event.subject.battlemetricsPlayerId === null)) continue;
+        values.push({
+            name: event.subject.exactName,
+            steamId: event.subject.steamId,
+            battlemetricsPlayerId: event.subject.battlemetricsPlayerId,
+            caseFidelity: event.payload.caseFidelity
+        });
+    }
+    values.push(...trackedIdentities(scope).map(value => ({ ...value, caseFidelity: true })));
+    for (const player of Object.values(scope.battlemetrics && scope.battlemetrics.players || {})) {
+        const record = /** @type {any} */ (player);
+        const name = sanitize(record && record.name);
+        const battlemetricsPlayerId = /^\d{1,32}$/u.test(`${record && record.id || ''}`) ? `${record.id}` : null;
+        const steamId = /^7656119\d{10}$/u.test(`${record && record.steamId || ''}`) ? `${record.steamId}` : null;
+        if (name && (steamId || battlemetricsPlayerId)) values.push({
+            name, steamId, battlemetricsPlayerId, caseFidelity: true
+        });
+    }
+    for (const player of context.rustplus && context.rustplus.team && context.rustplus.team.players || []) {
+        const name = sanitize(player && player.name);
+        const steamId = /^7656119\d{10}$/u.test(`${player && player.steamId || ''}`) ? `${player.steamId}` : null;
+        if (name && steamId) values.push({ name, steamId, battlemetricsPlayerId: null, caseFidelity: true });
+    }
+    const unique = new Map();
+    for (const value of values) {
+        if (!value.name) continue;
+        const key = `${value.steamId || ''}\u0000${value.battlemetricsPlayerId || ''}\u0000${value.name}`;
+        const previous = unique.get(key);
+        unique.set(key, Object.freeze({
+            name: value.name,
+            steamId: value.steamId || null,
+            battlemetricsPlayerId: value.battlemetricsPlayerId || null,
+            caseFidelity: Boolean(previous && previous.caseFidelity) || value.caseFidelity !== false,
+            knownClanTags: Object.freeze([...new Set([
+                ...(previous && previous.knownClanTags || []), ...(value.knownClanTags || [])
+            ])].sort())
+        }));
+    }
+    return Object.freeze([...unique.values()].sort((left, right) =>
+        left.name.localeCompare(right.name) || `${left.steamId || ''}`.localeCompare(`${right.steamId || ''}`)));
 }
 
 /** @param {any} battlemetrics @param {string} playerId */
@@ -509,9 +580,12 @@ function validateParsedImport(parsed, metadata, scope) {
     if (!metadata || !/^[a-f0-9]{64}$/iu.test(`${metadata.sha256 || ''}`)) {
         throw new TypeError('Import hash is invalid.');
     }
-    if (!scope.wipeId && parsed.kind === 'cinfo') throw new Error('Current wipe is unknown; import was not committed.');
-    if (!parsed.complete) throw new Error('Import contains unresolved OCR errors.');
     if (!['cinfo', 'f7'].includes(parsed.kind)) throw new TypeError('Unsupported import kind.');
+    if (!scope.wipeId && parsed.kind === 'cinfo') throw new Error('Current wipe is unknown; import was not committed.');
+    if (parsed.kind === 'f7' && !parsed.complete) throw new Error('Import contains unresolved F7 OCR errors.');
+    if (parsed.kind === 'cinfo' && parsed.complete !== true && parsed.importable !== true) {
+        throw new Error('Import does not contain enough cinfo structure for a partial snapshot.');
+    }
 }
 
 /** @param {any} context @param {any} scope @param {any} parsed @param {any} metadata @param {string} recordedAt */
@@ -529,9 +603,19 @@ function importEvents(context, scope, parsed, metadata, recordedAt) {
         }, { ...common, sourceEventId: `${hash}:f7:${index}:${entry.steamId}` })));
     }
     else {
-        parsed.members.forEach((/** @type {any} */ member, /** @type {number} */ index) =>
+        const resolvedMembers = Array.isArray(parsed.resolvedMembers) ? parsed.resolvedMembers :
+            parsed.members.map((/** @type {any} */ member) => ({
+                observedText: member.name,
+                name: member.name,
+                steamId: null,
+                battlemetricsPlayerId: null,
+                role: member.role
+            }));
+        const unresolvedMembers = Array.isArray(parsed.unresolvedMembers) ? parsed.unresolvedMembers : [];
+        resolvedMembers.forEach((/** @type {any} */ member, /** @type {number} */ index) =>
             events.push(identityEvent(scope, {
-            steamId: null, battlemetricsPlayerId: null, name: member.name, caseFidelity: true
+            steamId: member.steamId, battlemetricsPlayerId: member.battlemetricsPlayerId,
+            name: member.name, caseFidelity: member.caseFidelity !== false
         }, { ...common, sourceEventId: `${hash}:cinfo-name:${index}` })));
         events.push(baseEvent('clan_snapshot', scope,
             { steamId: null, battlemetricsPlayerId: null, exactName: null }, {
@@ -539,8 +623,21 @@ function importEvents(context, scope, parsed, metadata, recordedAt) {
                 establishedAt: parsed.establishedAtUtc,
                 complete: parsed.complete,
                 declaredMemberCount: parsed.declaredCount,
-                members: parsed.members.map((/** @type {any} */ member) => ({
-                    name: member.name, steamId: null, battlemetricsPlayerId: null, role: member.role
+                members: resolvedMembers.map((/** @type {any} */ member) => ({
+                    name: member.name,
+                    steamId: member.steamId,
+                    battlemetricsPlayerId: member.battlemetricsPlayerId,
+                    role: member.role
+                })),
+                unresolvedMembers: unresolvedMembers.map((/** @type {any} */ member) => ({
+                    observedText: member.observedText,
+                    role: member.role,
+                    candidates: (member.candidates || []).map((/** @type {any} */ candidate) => ({
+                        name: candidate.name,
+                        steamId: candidate.steamId,
+                        battlemetricsPlayerId: candidate.battlemetricsPlayerId,
+                        score: candidate.score
+                    }))
                 }))
             }, { ...common, sourceEventId: `${hash}:cinfo-snapshot` }));
     }
@@ -630,8 +727,10 @@ module.exports = Object.freeze({
     boundedList,
     commitParsedImport,
     commitParsedImports,
+    getDataDirectory,
     getScope,
     handleCommand,
+    identityCandidates,
     linkedClanSteamCandidates,
     onBattlemetricsUpdated,
     parseCommand,

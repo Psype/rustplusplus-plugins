@@ -179,12 +179,43 @@ function validateClanMember(value, index) {
     }
 }
 
+/** @param {unknown} value @param {string} label */
+function validateClanCandidate(value, label) {
+    assertExactKeys(/** @type {object} */ (value),
+        ['name', 'steamId', 'battlemetricsPlayerId', 'score'], label);
+    const candidate = /** @type {{name:unknown,steamId:unknown,battlemetricsPlayerId:unknown,score:unknown}} */ (value);
+    assertString(candidate.name, `${label}.name`, 128);
+    optionalSteamId(candidate.steamId, `${label}.steamId`);
+    optionalBattlemetricsId(candidate.battlemetricsPlayerId, `${label}.battlemetricsPlayerId`);
+    if (typeof candidate.score !== 'number' || !Number.isFinite(candidate.score) ||
+        candidate.score < 0 || candidate.score > 1) throw new TypeError(`${label}.score is invalid.`);
+}
+
+/** @param {unknown} value @param {number} index */
+function validateUnresolvedClanMember(value, index) {
+    const label = `clan_snapshot payload.unresolvedMembers[${index}]`;
+    assertExactKeys(/** @type {object} */ (value), ['observedText', 'role', 'candidates'], label);
+    const member = /** @type {{observedText:unknown,role:unknown,candidates:unknown}} */ (value);
+    assertString(member.observedText, `${label}.observedText`, 128);
+    if (!CLAN_ROLES.includes(/** @type {string} */ (member.role))) {
+        throw new TypeError(`${label}.role is unsupported.`);
+    }
+    if (!Array.isArray(member.candidates) || member.candidates.length > 3) {
+        throw new TypeError(`${label}.candidates must be a bounded array.`);
+    }
+    member.candidates.forEach((candidate, candidateIndex) =>
+        validateClanCandidate(candidate, `${label}.candidates[${candidateIndex}]`));
+}
+
 /** @param {unknown} value @param {unknown} scope */
 function validateClanSnapshot(value, scope) {
-    assertExactKeys(/** @type {object} */ (value),
+    const hasUnresolved = Boolean(value && typeof value === 'object' && !Array.isArray(value) &&
+        Object.prototype.hasOwnProperty.call(value, 'unresolvedMembers'));
+    assertExactKeys(/** @type {object} */ (value), hasUnresolved ?
+        ['tag', 'establishedAt', 'complete', 'declaredMemberCount', 'members', 'unresolvedMembers'] :
         ['tag', 'establishedAt', 'complete', 'declaredMemberCount', 'members'], 'clan_snapshot payload');
     const payload = /** @type {{tag: unknown, establishedAt: unknown, complete: unknown,
-        declaredMemberCount: unknown, members: unknown}} */ (value);
+        declaredMemberCount: unknown, members: unknown, unresolvedMembers?: unknown}} */ (value);
     assertString(payload.tag, 'clan_snapshot payload.tag', 32);
     optionalIso(payload.establishedAt, 'clan_snapshot payload.establishedAt');
     if (typeof payload.complete !== 'boolean') {
@@ -199,6 +230,21 @@ function validateClanSnapshot(value, scope) {
         throw new TypeError('clan_snapshot payload.members must be a bounded array.');
     }
     payload.members.forEach(validateClanMember);
+    if (hasUnresolved) {
+        if (!Array.isArray(payload.unresolvedMembers) || payload.unresolvedMembers.length > 1000) {
+            throw new TypeError('clan_snapshot payload.unresolvedMembers must be a bounded array.');
+        }
+        payload.unresolvedMembers.forEach(validateUnresolvedClanMember);
+        if (payload.declaredMemberCount !== null &&
+            payload.members.length + payload.unresolvedMembers.length > Number(payload.declaredMemberCount)) {
+            throw new TypeError('clan_snapshot resolved and unresolved members exceed the declared count.');
+        }
+    }
+    const unresolvedCount = hasUnresolved ? /** @type {any[]} */ (payload.unresolvedMembers).length : 0;
+    if (payload.complete && (payload.declaredMemberCount === null ||
+        payload.members.length !== Number(payload.declaredMemberCount) || unresolvedCount !== 0)) {
+        throw new TypeError('complete clan_snapshot must contain every declared member and no unresolved slot.');
+    }
     if (/** @type {{wipeId: unknown}} */ (scope).wipeId === null) {
         throw new TypeError('clan_snapshot scope.wipeId is required.');
     }

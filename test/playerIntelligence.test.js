@@ -72,6 +72,18 @@ Test('contracts reject unsupported input and return deeply immutable events', ()
         subject: { steamId: '42', battlemetricsPlayerId: null, exactName: 'Alice' }
     }), /SteamID64/u);
     Assert.throws(() => identity({ observedAt: '2026-09-30T12:00:00Z' }), /canonical/u);
+    Assert.throws(() => event('clan_snapshot', {
+        subject: { steamId: null, battlemetricsPlayerId: null, exactName: null },
+        payload: {
+            tag: 'BAD', establishedAt: '2026-09-29T16:02:03.000Z', complete: true,
+            declaredMemberCount: 1, members: [],
+            unresolvedMembers: [{
+                observedText: 'Alice', role: 'member',
+                candidates: [{ name: 'Alice', steamId: STEAM_A,
+                    battlemetricsPlayerId: null, score: 1 }]
+            }]
+        }
+    }), /complete clan_snapshot/u);
 });
 
 Test('JSONL history serializes concurrent appends, deduplicates and detects corruption', async t => {
@@ -185,6 +197,47 @@ Test('clan affinities count only distinct confirmed snapshots across wipes', () 
     Assert.equal(projection.snapshots.filter(snapshot => snapshot.duplicate).length, 1);
     Assert.equal(projection.snapshots.filter(snapshot => snapshot.confirmed).length, 4);
     Assert.equal(projection.snapshots[0].members[0].role, 'leader');
+});
+
+Test('partial clan snapshots resolve automatically from later stable aliases', () => {
+    const alice = identity({
+        observedAt: '2026-09-30T10:00:00.000Z',
+        subject: { steamId: STEAM_A, battlemetricsPlayerId: null, exactName: 'Alice' }
+    });
+    const partial = event('clan_snapshot', {
+        observedAt: '2026-09-30T10:01:00.000Z',
+        subject: { steamId: null, battlemetricsPlayerId: null, exactName: null },
+        payload: {
+            tag: 'TEST', establishedAt: '2026-09-29T16:02:03.000Z', complete: false,
+            declaredMemberCount: 2,
+            members: [
+                { name: 'Alice', steamId: STEAM_A, battlemetricsPlayerId: null, role: 'leader' }
+            ],
+            unresolvedMembers: [
+                { observedText: 'D E U S L R A', role: 'member', candidates: [] }
+            ]
+        },
+        evidence: { hash: 'e'.repeat(64), reference: null, expiresAt: null }
+    });
+    const before = PlayerIntelligence.rebuild([alice, partial]);
+    Assert.equal(before.clans.snapshots[0].complete, false);
+    Assert.equal(before.clans.snapshots[0].members.length, 1);
+    Assert.equal(before.clans.snapshots[0].unresolvedMembers.length, 1);
+    Assert.deepEqual(before.clans.getAffinity({
+        steamId: STEAM_A, battlemetricsPlayerId: null, exactName: null
+    }).playedWith, []);
+
+    const laterAlias = identity({
+        observedAt: '2026-09-30T11:00:00.000Z',
+        subject: { steamId: STEAM_B, battlemetricsPlayerId: '202', exactName: 'DEUSLRA' }
+    });
+    const after = PlayerIntelligence.rebuild([alice, partial, laterAlias]);
+    Assert.equal(after.clans.snapshots[0].complete, true);
+    Assert.equal(after.clans.snapshots[0].members.length, 2);
+    Assert.equal(after.clans.snapshots[0].unresolvedMembers.length, 0);
+    Assert.deepEqual(after.clans.getAffinity({
+        steamId: STEAM_A, battlemetricsPlayerId: null, exactName: null
+    }).playedWith, [{ personId: `steam:${STEAM_B}`, name: 'DEUSLRA', count: 1 }]);
 });
 
 Test('presence keeps outages unknown and closes sessions only on explicit offline evidence', () => {
