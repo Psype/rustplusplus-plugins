@@ -189,6 +189,39 @@ Test('incomplete cinfo panels receive one bounded semantic crop OCR pass', async
     Assert.equal(result.warning, null);
 });
 
+Test('an incomplete cinfo roster receives one dedicated roster-field read', async () => {
+    const image = await new Promise((resolve, reject) => new Jimp(620, 190, 0x5d514cff,
+        (error, value) => error ? reject(error) : resolve(value)));
+    const buffer = await image.getBufferAsync(Jimp.MIME_PNG);
+    const originalWords = [
+        word('ClanTag: GenX', 20), word('Members: 8', 45),
+        word('Clan Members: Sumdumsit, Tingtong, GingerMinx,', 70),
+        word('GrimReaper, n444. spirit_monger19, Egon and JawJax', 95),
+        word('Established: 09/29/2026 14:01:10', 120)
+    ];
+    const original = Object.freeze({ words: originalWords, parsed: parseCinfoWords(originalWords) });
+    const calls = [];
+    const result = await CinfoPanelRefinement.refineCinfoPanels(buffer.toString('base64'), [original],
+        async (input, options) => {
+            calls.push({ input, options });
+            if (input === 'roster-mask') return [
+                word('Clan Members: Sumdumsit, Tingtong, GingerMinx,', 10),
+                word('GrimReaper, n444shj, spirit_monger19, Egon and JawJax', 35)
+            ];
+            return originalWords;
+        }, { timeoutMs: 45000 }, {
+            preprocessPanelImage: async () => ({ imageBase64: 'panel-mask', scale: 1 }),
+            preprocessRosterImage: async () => ({ imageBase64: 'roster-mask', scale: 1 })
+        });
+    Assert.deepEqual(calls.map(call => call.input), ['panel-mask', 'roster-mask']);
+    Assert.equal(calls.every(call => call.options.psm === 6 && call.options.timeoutMs === 30000), true);
+    Assert.equal(result.blocks[0].parsed.complete, true);
+    Assert.deepEqual(result.blocks[0].parsed.members.map(member => member.name), [
+        'Sumdumsit', 'Tingtong', 'GingerMinx', 'GrimReaper', 'n444shj',
+        'spirit_monger19', 'Egon', 'JawJax'
+    ]);
+});
+
 Test('invalid cinfo dates receive a constrained numeric field read', async () => {
     const image = await new Promise((resolve, reject) => new Jimp(480, 180, 0x5d514cff,
         (error, value) => error ? reject(error) : resolve(value)));
@@ -366,6 +399,74 @@ Test('incomplete cinfo roster is committed only as a partial snapshot', async t 
     Assert.equal(snapshot.payload.complete, false);
     Assert.equal(snapshot.payload.members.length, 0);
     Assert.equal(snapshot.payload.unresolvedMembers.length, 2);
+});
+
+Test('manual roster correction is validated, previewed, and learned only after confirmation', async t => {
+    Assert.throws(() => ImportWorkflow.parseCorrectedRoster('Alice\nBob', 3), /exactly 3/);
+    Assert.throws(() => ImportWorkflow.parseCorrectedRoster('Alice\nAlice', 2), /unique/);
+    const value = createHarness(t);
+    value.client.playerIntelligenceImportDependencies.recognize = async () => [
+        word('ClanTag: GenX', 20), word('Members: 8', 45),
+        word('Clan Members: Sumdumsit, Tingtong, GingerMinx,', 70),
+        word('GrimReaper, n444. spirit_monger19, Egon and JawJax', 95),
+        word('Established: 09/29/2026 14:01:10', 120)
+    ];
+    await ImportWorkflow.beginImport(value.client, value.command);
+    Assert.match(value.edits[0].content, /7\/8 names read/);
+    const editId = value.edits[0].components[1].components[0].data.custom_id;
+    Assert.match(editId, /^PIImportEdit:/u);
+    let modal;
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: {
+            customId: editId, guildId: 'guild', channelId: 'commands', user: { id: 'requester' },
+            showModal: async value => { modal = value; }
+        }
+    }), true);
+    Assert.match(modal.data.custom_id, /^PIImportEditModal:/u);
+    const corrected = [
+        'Sumdumsit', 'Tingtong', 'GingerMinx', 'GrimReaper', 'n444shj',
+        'spirit_monger19', 'Egon', 'JawJax'
+    ];
+    Assert.equal(await ImportWorkflow.handleModal({
+        client: value.client,
+        interaction: {
+            customId: modal.data.custom_id,
+            guildId: 'guild', channelId: 'commands', user: { id: 'requester' },
+            fields: { getTextInputValue: () => corrected.join('\n') }
+        }
+    }), true);
+    const correctedPreview = value.updates.at(-1);
+    Assert.match(correctedPreview.content, /8\/8 names read/);
+    Assert.match(correctedPreview.content, /Corrected roster:.*n444shj, spirit_monger19/u);
+    const libraryFile = Path.join(value.directory, 'guild', '42', 'visual-alias-library.json');
+    Assert.deepEqual(await VisualAliasLibrary.confirmedUserWords(libraryFile), []);
+
+    const confirmId = correctedPreview.components[0].components[0].data.custom_id;
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { customId: confirmId, guildId: 'guild', channelId: 'commands', user: { id: 'requester' } }
+    }), true);
+    const learned = await VisualAliasLibrary.confirmedUserWords(libraryFile);
+    Assert.equal(learned.includes('n444shj'), true);
+    Assert.equal(learned.includes('spirit_monger19'), true);
+    const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
+    const snapshot = (await store.readAll()).find(event => event.kind === 'clan_snapshot');
+    Assert.equal(snapshot.payload.declaredMemberCount, 8);
+    Assert.equal(snapshot.payload.unresolvedMembers.some(member => member.observedText === 'n444shj'), true);
+    let futureUserWords = [];
+    value.client.playerIntelligenceImportDependencies.disableOcrPreprocessing = true;
+    value.client.playerIntelligenceImportDependencies.recognize = async (_image, options) => {
+        futureUserWords = options.userWords;
+        return [
+            word('ClanTag: GenX', 20), word('Members: 8', 45),
+            word('Clan Members: Sumdumsit, Tingtong, GingerMinx,', 70),
+            word('GrimReaper, n444shj, spirit_monger19, Egon and JawJax', 95),
+            word('Established: 09/29/2026 14:01:10', 120)
+        ];
+    };
+    await ImportWorkflow.beginImport(value.client, { ...value.command, id: 'interaction-2' });
+    Assert.equal(futureUserWords.includes('n444shj'), true);
 });
 
 Test('cinfo preview separates OCR-read names from linked identities in roster order', () => {

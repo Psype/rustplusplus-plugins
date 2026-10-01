@@ -183,6 +183,10 @@ Options | Description | Required
 > A complete `/cinfo` roster also receives one bounded OCR pass over temporary member rows split relatively at commas
 > and the final standalone `and`. It can correct which pseudo owns decorative punctuation, but it is rejected if it
 > changes any member's letters/numbers or the declared roster count.
+> A still-incomplete roster receives one separate roster-field-only read. If it remains wrong, use `Edit <tag>` and
+> enter exactly one player name per line. The bot validates the declared count and uniqueness, reruns identity matching,
+> and shows another preview. Nothing is stored until Confirm; afterward those names enter the bounded per-server OCR
+> user-word lexicon for future captures, without becoming SteamID proof or unsafe glyph training data.
 
 The bot also creates a private `intel-imports` channel. A message may contain 1–10 images and needs no caption: F7 and
 `/cinfo` are detected from semantic OCR anchors. Starting the message with `cinfo` or `f7` remains an optional strict

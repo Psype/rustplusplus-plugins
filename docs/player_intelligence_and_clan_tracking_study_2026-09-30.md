@@ -156,10 +156,11 @@ ancres, dates et rosters, perdu des membres et attribué de faux rôles. Le reje
 tout commit, mais ce pipeline reste un prototype. Il est en outre incapable de couvrir correctement des pseudos
 chinois, arabes ou composés de symboles avec le seul modèle anglais.
 
-Décision utilisateur : ne pas ajouter de formulaire de correction ni demander de retranscrire les résultats OCR. La
-confirmation peut rester un clic de contrôle. L'import est extrait automatiquement ; les membres certains sont liés,
-les autres restent dans des slots provisoires réévaluables au lieu de faire rejeter tout le snapshot. Une confiance
-moyenne ne doit jamais produire un nom « corrigé » silencieusement ni une identité définitive.
+La décision initiale était de ne pas ajouter de formulaire de correction. Elle est remplacée le 1er octobre par un
+fallback explicite : conserver l'extraction automatique et les slots provisoires, mais offrir `Edit <tag>` lorsqu'une
+coquille reste visible. Le modal impose exactement le compteur déclaré, avec un pseudo Unicode par ligne, puis montre
+un nouvel aperçu avant le même clic Confirm. Une confiance moyenne ne produit toujours jamais un nom « corrigé »
+silencieusement ni une identité définitive.
 
 Le pipeline structuré reste sans coordonnées absolues :
 
@@ -170,12 +171,13 @@ Le pipeline structuré reste sans coordonnées absolues :
 4. benchmarker un moteur de scène multilingue local, en priorité PaddleOCR PP-OCRv5, pour les lignes de pseudos avec
    reconnaisseurs Latin, CJK, cyrillique et arabe ; Tesseract reste utile comme seconde lecture spécialisée ;
 5. rendre une valeur définitive uniquement si les passes indépendantes convergent et si les contraintes du panneau
-   sont satisfaites. Une divergence produit un slot provisoire ou non résolu, sans correction humaine ;
+   sont satisfaites. Une divergence produit un slot provisoire ou non résolu, modifiable seulement par le fallback
+   utilisateur explicite avant confirmation ;
 6. pour F7, OCRiser prioritairement le SteamID64 par consensus numérique puis obtenir le pseudo canonique via les
    sources Steam/WarBandits déjà bornées. Le pseudo F7 en majuscules n'est jamais la source canonique ;
 7. pour `/cinfo`, classer les alias déjà connus par similarité textuelle, visuelle et contextuelle. Un candidat unique
    nettement séparé peut être lié automatiquement ; sinon conserver un slot provisoire avec ses hypothèses bornées et
-   réévaluables. Le snapshot devient partiel sans perdre les membres déjà résolus et sans demander de correction.
+   réévaluables. Le snapshot devient partiel sans perdre les membres déjà résolus ; l'édition reste facultative.
 
 Depuis la version 1.22.5, l'aperçu Discord ne confond plus transcription et liaison : il affiche séparément le nombre
 de noms OCR lus et le nombre d'identités liées. Pour un roster partiel, la ligne `OCR roster` conserve les noms dans
@@ -219,6 +221,13 @@ et chiffres Unicode normalisés restent identiques. Cette passe peut donc rattac
 produisent pas exactement le compteur attendu, le roster précédent est conservé. Aucune coordonnée écran fixe ni
 pixel de cette feuille temporaire n'est persisté.
 
+Depuis la version 1.22.7, un roster encore incomplet après la passe panneau reçoit une seule lecture PSM 6 du champ
+`Clan Members` isolé entre ses ancres relatives. Le résultat n'est retenu que si le tag/compteur restent ceux du même
+panneau et si la qualité structurelle augmente. Si `n444shj, spirit_monger19` reste par exemple fusionné en
+`n444. spirit_monger19`, le bouton `Edit GenX` ouvre le roster courant avec un pseudo par ligne. La soumission exige
+exactement huit lignes uniques dans cet exemple, relance le résolveur et sa corroboration bornée, puis remplace
+uniquement l'aperçu en attente. Le journal canonique et les dictionnaires restent intacts avant Confirm.
+
 Les membres `/cinfo` déjà résolus et les lignes F7 nom/SteamID non ambiguës enrichissent enfin une mémoire visuelle
 persistante par serveur sous
 `data/player-intelligence/<guild>/<battlemetricsServerId>/visual-alias-library.json`. Elle stocke au plus 2 000
@@ -252,6 +261,11 @@ La partition visuelle prouvée par la version 1.22.6 devient également la sourc
 signatures de mot entier. Elle évite que la couleur bleue de `』 Marley 』` soit lue sur `Swizzy`. Les fragments recollés
 ne permettent toutefois pas une correspondance sûre glyphe-par-graphème : ils ne nourrissent donc jamais le journal de
 glyphes. L'échec ou le timeout de cette passe optionnelle ne bloque ni la prévisualisation ni le commit canonique.
+
+Le sidecar passe au schema 4 pour ajouter un lexique borné à 2 000 noms OCR confirmés manuellement. Après le commit
+canonique seulement, les lignes corrigées sont écrites atomiquement puis injectées dans le `--user-words` Tesseract
+des captures suivantes. Elles ne constituent ni une preuve SteamID, ni une autorisation d'apprendre les pixels ou les
+glyphes du crop ambigu. Les échantillons visuels/glyphes fiables du schema 3 migrent sans être invalidés.
 
 Le benchmark synthétique dédié de la version 1.22.3 rappelle la cible parmi 2 000 alias, 104 variantes de glyphes et
 une séquence de huit graphèmes en 20,797 ms de médiane. Le benchmark global 200 joueurs ne régresse pas entre les
@@ -682,7 +696,9 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
    sont ignorés. Les snapshots partiels, le résolveur Unicode un-à-un, la réévaluation automatique et la corroboration
    WarBandits/Steam plafonnée à trois requêtes candidates par lot, le masque couleur agrandi, les user-words et la
    mémoire visuelle persistante sont également implémentés. Les rosters complets sont désormais redécoupés relativement
-   aux virgules/`and`, avec une ligne image isolée par membre et une seule lecture bornée par panneau.
+   aux virgules/`and`, avec une ligne image isolée par membre et une seule lecture bornée par panneau. Un roster
+   incomplet reçoit aussi une lecture de champ dédiée ; le fallback Edit/Confirm apprend un lexique textuel persistant
+   sans transformer la correction en preuve d'identité ou de glyphe.
 3. **À calibrer et étendre** : corpus de PNG originaux, précision champ par champ et seuils couleur/OCR sur Linux,
    lectures isolées du tag/compteur, modèle synthétique multi-fontes et moteur de scène multilingue ; les tests
    déterministes utilisent actuellement les textes et boîtes correspondant aux exemples fournis.
@@ -696,12 +712,13 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale finale après isolation visuelle du roster :
-`npm.cmd test` passe 190/190,
+QA locale finale après lecture de champ et correction confirmée du roster :
+`npm.cmd test` passe 192/192,
 dont le typage strict `tsc --noEmit`. Une
 couverture déterministe reproduit la mauvaise attribution `』Marley』`/`Swizzy`, vérifie le découpage relatif aux
-virgules et refuse un échange de lettres entre deux lignes. Le sélecteur Windows, un webhook Discord réel et l'OCR de
-PNG originaux restent à valider interactivement ; les tests n'envoient rien sur le réseau.
+virgules, la fusion `n444shj, spirit_monger19`, le rejet des comptes/doublons manuels et l'absence d'apprentissage avant
+Confirm. Elle vérifie ensuite la persistance et la réutilisation du mot corrigé. Le sélecteur Windows, un webhook
+Discord réel et l'OCR de PNG originaux restent à valider interactivement ; les tests n'envoient rien sur le réseau.
 
 Scénario reproductible `npm run benchmark:player-intelligence` : roster initial de 200 joueurs, 60 polls silencieux,
 puis 10 déconnexions. Le premier profilage lisait/reprojetait le journal à chaque poll silencieux : `25,397 ms/poll`.

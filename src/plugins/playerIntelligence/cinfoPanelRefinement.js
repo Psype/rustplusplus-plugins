@@ -55,6 +55,28 @@ function establishedBounds(image, block) {
     return Object.freeze({ left, top, width: right - left, height: bottom - top, line });
 }
 
+/** @param {any} image @param {{words:unknown}} block */
+function rosterBounds(image, block) {
+    const lines = Layout.groupLines(block.words);
+    const start = lines.findIndex(line => /clan\s+members\s*:/iu.test(line.text));
+    const end = lines.findIndex(line => /established\s*:/iu.test(line.text));
+    if (start === -1 || end <= start) return null;
+    const relevant = lines.slice(start, end);
+    const typicalHeight = Math.max(1, Layout.median(relevant.map(line => line.height)));
+    const left = Math.max(0, Math.floor(Math.min(...relevant.map(line => line.x)) - typicalHeight * 0.5));
+    const top = Math.max(0, Math.floor(relevant[0].y - typicalHeight * 0.4));
+    const recognizedRight = Math.max(...relevant.map(line => line.x + line.width));
+    const right = Math.min(image.bitmap.width, Math.ceil(recognizedRight + typicalHeight * 3));
+    const last = relevant.at(-1);
+    if (!last) return null;
+    const bottom = Math.min(image.bitmap.height, Math.ceil(last.y + last.height + typicalHeight * 0.4));
+    if (right - left < typicalHeight * 3 || bottom <= top) return null;
+    return Object.freeze({
+        left, top, width: right - left, height: bottom - top,
+        words: Object.freeze(relevant.flatMap(line => line.words))
+    });
+}
+
 /** @param {readonly any[]} words @param {number} scale @param {{left:number,top:number}} bounds */
 function mapCropWords(words, scale, bounds) {
     if (!Array.isArray(words) || !Number.isFinite(scale) || scale <= 0) {
@@ -227,6 +249,43 @@ async function refineRosterMembers(image, block, recognize, ocrOptions, dependen
 
 /** @param {any} image @param {any} block @param {Function} recognize @param {any} ocrOptions
  * @param {any} dependencies @param {any} JimpImpl */
+async function refineIncompleteRoster(image, block, recognize, ocrOptions, dependencies, JimpImpl) {
+    if (block.parsed.complete) return block;
+    const bounds = rosterBounds(image, block);
+    if (!bounds) return block;
+    const crop = image.clone().crop(bounds.left, bounds.top, bounds.width, bounds.height);
+    const cropBuffer = await crop.getBufferAsync(JimpImpl.MIME_PNG || Jimp.MIME_PNG);
+    const preprocess = dependencies.preprocessRosterImage || OcrImagePreprocess.createTextMask;
+    const processed = await preprocess(cropBuffer.toString('base64'), {
+        JimpImpl,
+        scale: 4,
+        minForegroundRatio: 0.001,
+        maxForegroundRatio: 0.75
+    });
+    const timeoutMs = Number.isFinite(Number(dependencies.rosterOcrTimeoutMs)) ?
+        Math.min(30000, Math.max(1000, Number(dependencies.rosterOcrTimeoutMs))) :
+        Math.min(30000, Number(ocrOptions.timeoutMs) || 30000);
+    const replacement = mapCropWords(await recognize(processed.imageBase64, {
+        ...ocrOptions,
+        psm: 6,
+        timeoutMs
+    }), processed.scale, bounds);
+    if (!Layout.groupLines(replacement).some(line => /clan\s+members\s*:/iu.test(line.text))) return block;
+    const wordKey = (/** @type {any} */ word) => `${word.text}\0${word.x}\0${word.y}\0${word.width}\0${word.height}`;
+    const targets = new Set(bounds.words.map(wordKey));
+    const candidateWords = Object.freeze([
+        ...Layout.normalizeWords(block.words).filter(word => !targets.has(wordKey(word))),
+        ...replacement
+    ]);
+    const candidate = Object.freeze({
+        words: candidateWords,
+        parsed: parseCinfoWords(candidateWords, dependencies.cinfoOptions)
+    });
+    return samePanel(block, candidate) && blockQuality(candidate) > blockQuality(block) ? candidate : block;
+}
+
+/** @param {any} image @param {any} block @param {Function} recognize @param {any} ocrOptions
+ * @param {any} dependencies @param {any} JimpImpl */
 async function refineEstablished(image, block, recognize, ocrOptions, dependencies, JimpImpl) {
     if (block.parsed.establishedAtUtc) return block;
     const bounds = establishedBounds(image, block);
@@ -324,6 +383,8 @@ async function refineCinfoPanels(imageBase64, blocks, recognize, ocrOptions, dep
                 selected = await refineEstablished(image, selected, recognize, ocrOptions, dependencies, JimpImpl);
             }
             try {
+                selected = await refineIncompleteRoster(image, selected, recognize, ocrOptions,
+                    dependencies, JimpImpl);
                 selected = await refineRosterMembers(image, selected, recognize, ocrOptions, dependencies, JimpImpl);
             }
             catch (error) {
@@ -364,7 +425,9 @@ module.exports = Object.freeze({
     panelBounds,
     refineCinfoPanels,
     refineEstablished,
+    refineIncompleteRoster,
     refineRosterMembers,
+    rosterBounds,
     rosterMemberFragments,
     samePanel
 });

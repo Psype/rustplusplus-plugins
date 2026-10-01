@@ -43,6 +43,13 @@ module.exports = async (client, interaction) => {
         return;
     }
 
+    if (await PluginManager.handleModal({
+        client,
+        interaction,
+        guildId,
+        rustplus: client.rustplusInstances[guildId]
+    })) return;
+
     if (interaction.customId.startsWith('CustomTimersEdit')) {
         if (!PluginManager.isDiscordOptionEnabled('customTimers')) {
             await interaction.deferUpdate();

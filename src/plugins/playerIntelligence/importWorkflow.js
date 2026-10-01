@@ -8,6 +8,7 @@ const Scrape = require('../../util/scrape.js');
 const ImageAttachment = require('./imageAttachment.js');
 const CinfoPanelRefinement = require('./cinfoPanelRefinement.js');
 const CinfoRoles = require('./cinfoRoles.js');
+const Layout = require('./ocrLayout.js');
 const OcrImagePreprocess = require('./ocrImagePreprocess.js');
 const { detectImportKind } = require('./detectImportKind.js');
 const { applyRoleHints, parseCinfoWords, splitCinfoWordBlocks } = require('./parseCinfo.js');
@@ -20,10 +21,18 @@ const WarBandits = require('../warBandits');
 
 const CONFIRM_PREFIX = 'PIImportConfirm:';
 const REJECT_PREFIX = 'PIImportReject:';
+const EDIT_PREFIX = 'PIImportEdit:';
+const EDIT_MODAL_PREFIX = 'PIImportEditModal:';
+const EDIT_ROSTER_FIELD = 'PIImportRosterNames';
 const TTL_MS = 5 * 60 * 1000;
 const MAX_CORROBORATION_QUERIES = 3;
 /** @type {Map<string, any>} */
 const pending = new Map();
+
+/** @param {unknown} value @param {number} limit */
+function truncateCharacters(value, limit) {
+    return Array.from(`${value || ''}`).slice(0, limit).join('');
+}
 
 /** @param {any} client @returns {any} */
 function importDependencies(client) {
@@ -68,7 +77,7 @@ function previewText(parsed) {
             `OCR /cinfo — ${parsed.tag || 'unknown'} — ${parsedMembers.length}/${declared} names read · ${
                 resolved.length}/${declared} linked`,
             `Established: ${parsed.establishedRaw || 'unread'}`,
-            `${pendingCount > 0 ? 'OCR roster' : 'Members'}: ${
+            `${parsed.manualRosterCorrected ? 'Corrected roster' : pendingCount > 0 ? 'OCR roster' : 'Members'}: ${
                 (pendingCount > 0 ? boundedRoster : boundedLinked).join(', ') || 'none'}`,
             pendingCount > 0 ? `Linked identities: ${boundedLinked.join(', ') || 'none'}` : '',
             pendingCount > 0 ?
@@ -95,14 +104,82 @@ function previewItems(items) {
     return `${items.length > 1 ? `Detected ${items.length} import blocks.\n` : ''}${sections.join('\n\n')}`;
 }
 
-/** @param {string} token */
-function actionRow(token) {
-    return new Discord.ActionRowBuilder().addComponents(
+/** @param {string} token @param {readonly any[]} items */
+function actionRows(token, items) {
+    const rows = [new Discord.ActionRowBuilder().addComponents(
         new Discord.ButtonBuilder().setCustomId(`${CONFIRM_PREFIX}${token}`)
             .setLabel('Confirm import').setStyle(Discord.ButtonStyle.Success),
         new Discord.ButtonBuilder().setCustomId(`${REJECT_PREFIX}${token}`)
             .setLabel('Reject').setStyle(Discord.ButtonStyle.Danger)
-    );
+    )];
+    const editable = items.map((item, index) => ({ item, index })).filter(({ item }) => {
+        if (!item.parsed || item.parsed.kind !== 'cinfo' || !Number.isSafeInteger(item.parsed.declaredCount) ||
+            item.parsed.declaredCount < 1 || item.parsed.declaredCount > 100) return false;
+        const value = item.parsed.members.map((/** @type {any} */ member) => member.name).join('\n');
+        return Array.from(value).length <= 4000;
+    });
+    for (let offset = 0; offset < editable.length; offset += 5) {
+        rows.push(new Discord.ActionRowBuilder().addComponents(...editable.slice(offset, offset + 5)
+            .map(({ item, index }) => new Discord.ButtonBuilder()
+                .setCustomId(`${EDIT_PREFIX}${token}:${index}`)
+                .setLabel(truncateCharacters(
+                    `Edit ${items.length > 1 ? `${index + 1}: ` : ''}${item.parsed.tag}`, 80))
+                .setStyle(Discord.ButtonStyle.Secondary))));
+    }
+    return Object.freeze(rows);
+}
+
+/** @param {string} token @param {number} index @param {any} item */
+function rosterEditModal(token, index, item) {
+    const value = item.parsed.members.map((/** @type {any} */ member) => member.name).join('\n');
+    const input = new Discord.TextInputBuilder()
+        .setCustomId(EDIT_ROSTER_FIELD)
+        .setLabel('One exact player name per line')
+        .setStyle(Discord.TextInputStyle.Paragraph)
+        .setRequired(true)
+        .setMinLength(1)
+        .setMaxLength(4000);
+    if (value) input.setValue(value);
+    return new Discord.ModalBuilder()
+        .setCustomId(`${EDIT_MODAL_PREFIX}${token}:${index}`)
+        .setTitle(truncateCharacters(`Edit /cinfo roster — ${item.parsed.tag}`, 45))
+        .addComponents(/** @type {any} */ (new Discord.ActionRowBuilder().addComponents(input)));
+}
+
+/** @param {unknown} value @param {number} declaredCount */
+function parseCorrectedRoster(value, declaredCount) {
+    if (typeof value !== 'string' || !Number.isSafeInteger(declaredCount) ||
+        declaredCount < 1 || declaredCount > 100) throw new TypeError('Corrected roster size is invalid.');
+    const names = value.split(/\r?\n/u).map(line => Layout.cleanText(line));
+    if (names.length !== declaredCount) {
+        throw new Error(`Enter exactly ${declaredCount} player names, one per line; received ${names.length}.`);
+    }
+    if (names.some(name => !name || Array.from(name).length > 128)) {
+        throw new Error('Every corrected player name must contain 1 to 128 characters.');
+    }
+    const keys = names.map(name => name.normalize('NFKC').toLocaleLowerCase('en'));
+    if (new Set(keys).size !== names.length) throw new Error('Corrected player names must be unique.');
+    return Object.freeze(names);
+}
+
+/** @param {any} parsed @param {readonly string[]} names */
+function applyCorrectedRoster(parsed, names) {
+    const roles = new Map((parsed.members || []).map((/** @type {any} */ member) => [
+        Layout.cleanText(member.name).normalize('NFKC').toLocaleLowerCase('en'), member.role
+    ]));
+    const { resolvedMembers: _resolved, unresolvedMembers: _unresolved, missingMemberCount: _missing,
+        importable: _importable, ...base } = parsed;
+    return Object.freeze({
+        ...base,
+        members: Object.freeze(names.map(name => Object.freeze({
+            name,
+            role: roles.get(name.normalize('NFKC').toLocaleLowerCase('en')) || 'unknown'
+        }))),
+        complete: true,
+        manualRosterCorrected: true,
+        errors: Object.freeze((parsed.errors || []).filter((/** @type {string} */ error) =>
+            !/^Roster count mismatch:|^Partial roster:/u.test(error)))
+    });
 }
 
 /** @param {unknown} value @returns {ReadonlyArray<string>} */
@@ -421,17 +498,37 @@ async function prepareImports(client, source, requests, requesterUserId, referen
     if (!Array.isArray(persistedCandidates)) {
         throw new TypeError('Identity candidate provider returned an invalid result.');
     }
-    const userWords = Object.freeze(persistedCandidates.map((/** @type {any} */ candidate) => candidate.name)
-        .filter((/** @type {any} */ name) => typeof name === 'string'));
+    const scopeBeforeResolution = Runtime.getScope(context);
+    const visualFile = scopeBeforeResolution ? Path.join(Runtime.getDataDirectory(context, scopeBeforeResolution),
+        'visual-alias-library.json') : null;
+    /** @type {readonly string[]} */
+    let learnedUserWords = Object.freeze([]);
+    if (visualFile) {
+        try {
+            const loadConfirmedWords = dependencies.confirmedOcrUserWords || VisualAliasLibrary.confirmedUserWords;
+            learnedUserWords = await loadConfirmedWords(visualFile);
+            if (!Array.isArray(learnedUserWords)) {
+                throw new TypeError('Confirmed OCR user-word provider returned an invalid result.');
+            }
+        }
+        catch (error) {
+            learnedUserWords = Object.freeze([]);
+            if (typeof client.log === 'function') {
+                client.log('PLAYER_INTELLIGENCE', `Confirmed OCR user words unavailable: ${
+                    sanitizeError(error)}`, 'warn');
+            }
+        }
+    }
+    const userWords = Object.freeze([...new Set([
+        ...persistedCandidates.map((/** @type {any} */ candidate) => candidate.name),
+        ...learnedUserWords
+    ].filter((/** @type {any} */ name) => typeof name === 'string'))]);
     /** @type {any[]} */
     const rawItems = [];
     for (let index = 0; index < requests.length; index += 1) {
         rawItems.push(...await parseAttachment(client, requests[index].kindHint, requests[index].attachment,
             reference, index, userWords));
     }
-    const scopeBeforeResolution = Runtime.getScope(context);
-    const visualFile = scopeBeforeResolution ? Path.join(Runtime.getDataDirectory(context, scopeBeforeResolution),
-        'visual-alias-library.json') : null;
     /** @type {readonly (readonly any[])[]} */
     let visualCandidates = Object.freeze(rawItems.map(() => Object.freeze([])));
     if (visualFile) {
@@ -534,7 +631,7 @@ async function prepareImports(client, source, requests, requesterUserId, referen
         expiresAt: createdAt + TTL_MS
     }));
     return Object.freeze({
-        content: preview, components: [actionRow(token)], allowedMentions: { parse: [] }
+        content: preview, components: actionRows(token, items), allowedMentions: { parse: [] }
     });
 }
 
@@ -674,12 +771,62 @@ async function recrossWarBandits(context, parsedItems, client) {
     }
 }
 
+/** @param {any} context @param {any} pendingItem @param {number} itemIndex
+ * @param {readonly string[]} names @param {any} client */
+async function resolveCorrectedItem(context, pendingItem, itemIndex, names, client) {
+    const dependencies = importDependencies(client);
+    const loadCandidates = dependencies.identityCandidates || Runtime.identityCandidates;
+    const persisted = await loadCandidates(context);
+    if (!Array.isArray(persisted)) throw new TypeError('Identity candidate provider returned an invalid result.');
+    const batch = pendingItem.items.flatMap((/** @type {any} */ entry) => {
+        if (entry.parsed.kind === 'f7') return entry.parsed.entries.filter((/** @type {any} */ value) => value.name)
+            .map((/** @type {any} */ value) => ({ ...value, battlemetricsPlayerId: null, caseFidelity: false }));
+        return (entry.parsed.resolvedMembers || []).map((/** @type {any} */ value) => ({
+            name: value.name,
+            steamId: value.steamId,
+            battlemetricsPlayerId: value.battlemetricsPlayerId,
+            caseFidelity: value.caseFidelity !== false
+        }));
+    });
+    const original = pendingItem.items[itemIndex];
+    const raw = applyCorrectedRoster(original.parsed, names);
+    let parsed = resolveCinfo(raw, Object.freeze([...persisted, ...batch]), dependencies.nameSimilarityOptions);
+    const corroborate = dependencies.corroborateCandidates || corroborateCandidateAliases;
+    /** @type {readonly any[]} */
+    let corroborated = Object.freeze([]);
+    try {
+        corroborated = await corroborate(context, [{ parsed }], client, dependencies);
+        if (!Array.isArray(corroborated)) {
+            throw new TypeError('Candidate corroboration returned an invalid result.');
+        }
+    }
+    catch (error) {
+        corroborated = Object.freeze([]);
+        if (typeof client.log === 'function') {
+            client.log('PLAYER_INTELLIGENCE', `Optional corrected-roster corroboration unavailable: ${
+                sanitizeError(error)}`, 'warn');
+        }
+    }
+    if (corroborated.length > 0) {
+        parsed = resolveCinfo(raw, Object.freeze([...persisted, ...batch, ...corroborated]),
+            dependencies.nameSimilarityOptions);
+    }
+    return Object.freeze({
+        ...original,
+        parsed,
+        confirmedCorrectionNames: Object.freeze([...names])
+    });
+}
+
 /** @param {{client:any,interaction:any}} value */
 async function handleButton({ client, interaction }) {
     const confirm = interaction.customId.startsWith(CONFIRM_PREFIX);
     const reject = interaction.customId.startsWith(REJECT_PREFIX);
-    if (!confirm && !reject) return false;
-    const token = interaction.customId.slice((confirm ? CONFIRM_PREFIX : REJECT_PREFIX).length);
+    const editMatch = new RegExp(`^${EDIT_PREFIX}([a-f0-9]{24}):(\\d{1,2})$`, 'u')
+        .exec(interaction.customId);
+    if (!confirm && !reject && !editMatch) return false;
+    const token = editMatch ? editMatch[1] :
+        interaction.customId.slice((confirm ? CONFIRM_PREFIX : REJECT_PREFIX).length);
     const item = pending.get(token);
     if (!item || item.expiresAt < Date.now()) {
         if (item) pending.delete(token);
@@ -691,6 +838,19 @@ async function handleButton({ client, interaction }) {
         await client.interactionReply(interaction, {
             content: 'Only the requester can confirm this import in its original channel.', ephemeral: true
         });
+        return true;
+    }
+    if (editMatch) {
+        if (!await client.validatePermissions(interaction)) return true;
+        const index = Number(editMatch[2]);
+        const target = item.items[index];
+        if (!Number.isSafeInteger(index) || !target || target.parsed.kind !== 'cinfo') {
+            await client.interactionReply(interaction, {
+                content: 'This roster is no longer editable. Nothing was changed.', ephemeral: true
+            });
+            return true;
+        }
+        await interaction.showModal(rosterEditModal(token, index, target));
         return true;
     }
     if (reject) {
@@ -739,19 +899,104 @@ async function handleButton({ client, interaction }) {
                 }
             }
         }
+        const correctedNames = item.items.flatMap((/** @type {any} */ entry) =>
+            entry.confirmedCorrectionNames || []);
+        if (item.visualFile && correctedNames.length > 0) {
+            try {
+                const dependencies = importDependencies(client);
+                const recordCorrections = dependencies.recordConfirmedOcrUserWords ||
+                    VisualAliasLibrary.recordConfirmedUserWords;
+                await recordCorrections(item.visualFile, correctedNames, new Date().toISOString());
+            }
+            catch (error) {
+                if (typeof client.log === 'function') {
+                    client.log('PLAYER_INTELLIGENCE', `Confirmed OCR lexicon update failed after commit: ${
+                        sanitizeError(error)}`, 'warn');
+                }
+            }
+        }
         void recrossWarBandits(context,
             item.items.map((/** @type {any} */ entry) => entry.parsed), client);
     }
     return true;
 }
 
+/** @param {{client:any,interaction:any}} value */
+async function handleModal({ client, interaction }) {
+    const match = new RegExp(`^${EDIT_MODAL_PREFIX}([a-f0-9]{24}):(\\d{1,2})$`, 'u')
+        .exec(interaction.customId);
+    if (!match) return false;
+    const token = match[1];
+    const index = Number(match[2]);
+    const item = pending.get(token);
+    if (!item || item.expiresAt < Date.now()) {
+        if (item) pending.delete(token);
+        await client.interactionReply(interaction, {
+            content: 'Import expired or already handled. Nothing was changed.', ephemeral: true
+        });
+        return true;
+    }
+    if ((item.userId !== null && `${interaction.user.id}` !== item.userId) ||
+        `${interaction.guildId}` !== item.guildId || `${interaction.channelId}` !== item.channelId) {
+        await client.interactionReply(interaction, {
+            content: 'Only the requester can edit this import in its original channel.', ephemeral: true
+        });
+        return true;
+    }
+    if (!await client.validatePermissions(interaction)) return true;
+    const target = item.items[index];
+    if (!Number.isSafeInteger(index) || !target || target.parsed.kind !== 'cinfo') {
+        await client.interactionReply(interaction, {
+            content: 'This roster is no longer editable. Nothing was changed.', ephemeral: true
+        });
+        return true;
+    }
+    const context = contextFor(client, interaction);
+    const scope = Runtime.getScope(context);
+    if (!scope || scope.serverKey !== item.serverKey || scope.wipeId !== item.wipeId) {
+        pending.delete(token);
+        await client.interactionReply(interaction, {
+            content: 'Active server or wipe changed. Nothing was committed.', ephemeral: true
+        });
+        return true;
+    }
+    try {
+        const names = parseCorrectedRoster(
+            interaction.fields.getTextInputValue(EDIT_ROSTER_FIELD), target.parsed.declaredCount);
+        const corrected = await resolveCorrectedItem(context, item, index, names, client);
+        const items = Object.freeze(item.items.map((/** @type {any} */ entry, /** @type {number} */ itemIndex) =>
+            itemIndex === index ? corrected : entry));
+        const preview = previewItems(items);
+        if (Array.from(preview).length > 1900) {
+            throw new Error('Corrected preview exceeds the Discord limit; split the upload into smaller batches.');
+        }
+        pending.set(token, Object.freeze({ ...item, items }));
+        await client.interactionUpdate(interaction, {
+            content: preview, components: actionRows(token, items),
+            embeds: [], allowedMentions: { parse: [] }
+        });
+    }
+    catch (error) {
+        await client.interactionReply(interaction, {
+            content: `Roster correction rejected safely: ${sanitizeError(error)} Preview unchanged.`,
+            ephemeral: true
+        });
+    }
+    return true;
+}
+
 module.exports = Object.freeze({
     CONFIRM_PREFIX,
+    EDIT_MODAL_PREFIX,
+    EDIT_PREFIX,
     REJECT_PREFIX,
+    applyCorrectedRoster,
     beginImport,
     handleMessage,
     handleButton,
+    handleModal,
     normalizeWebhookIds,
+    parseCorrectedRoster,
     previewItems,
     previewText,
     selectRecognizedResult

@@ -29,13 +29,16 @@ Each image is read from one bounded Rust-UI color/luminance mask and from the or
 selects the result, not a blind retry. Known persistent aliases are supplied through Tesseract's
 [`--user-words`](https://github.com/tesseract-ocr/tesseract/blob/main/doc/tesseract.1.asc) file;
 that temporary UTF-8 file is deleted after the process. The current English model is still insufficient for arbitrary
-Unicode; unresolved members are stored as pending slots rather than invented or sent through a manual correction form.
+Unicode; unresolved members are stored as pending slots rather than invented. A cinfo preview can be corrected through
+`Edit <tag>` by entering exactly one name per line; the edited roster is previewed again and remains uncommitted until
+the normal Confirm button is used.
 
 Resolved `/cinfo` name shapes and unambiguous F7 name/SteamID rows are stored independently from the code in
 `data/player-intelligence/<guild>/<battlemetricsServerId>/visual-alias-library.json`. The file is bounded, validated,
 written atomically, ignored by Git and survives bot restarts/upgrades as long as the `data/player-intelligence`
-directory is preserved. Schema 3 contains normalized binary word signatures, identity references, and a bounded
-glyph↔Unicode-grapheme journal; it never stores screenshot pixels. The glyph journal learns only from exact `/cinfo`
+directory is preserved. Schema 4 contains normalized binary word signatures, identity references, a bounded
+glyph↔Unicode-grapheme journal and up to 2,000 manually confirmed OCR user words; it never stores screenshot pixels.
+Schema 3 visual/glyph evidence is migrated intact. The glyph journal learns only from exact `/cinfo`
 spellings already resolved to a stable identity and only when foreground runs form an unambiguous segmentation.
 Connected/touching writing is skipped. Exact whole-word repeats may corroborate an existing identity; glyph and
 approximate shapes only retrieve/rank candidates and cannot create a definitive link by themselves. A schema 1 file
@@ -48,6 +51,9 @@ stacked `/cinfo` panels: repeated `ClanTag` anchors are split and validated inde
 For a complete roster, comma and final standalone `and` separators isolate one temporary image row per member before
 one additional bounded OCR pass. The result may correct punctuation ownership but is discarded if it changes the
 letters/numbers at any roster index or no longer matches the declared member count.
+If a roster remains incomplete, the bot first performs one distinct OCR read of only the roster field. A confirmed
+manual correction is then added to the persistent user-word lexicon and supplied to future Tesseract reads; it is not
+identity proof and cannot train a visual/glyph sample without an independently safe pixel boundary.
 
 ## Editable in-game raid alert
 

@@ -226,7 +226,7 @@ Test('resolved cinfo learns persistent grapheme shapes and recalls an alias from
     }], '2026-10-01T12:00:00.000Z');
 
     const document = await Visual.read(file);
-    Assert.equal(document.schemaVersion, 3);
+    Assert.equal(document.schemaVersion, 4);
     Assert.deepEqual(document.glyphSamples.map(sample => sample.grapheme), ['A', 'B']);
     const result = await Visual.candidatesForItems(file, [{
         visualSamples: [{
@@ -296,11 +296,17 @@ Test('pre-boundary visual journals are invalidated in memory without trusting sh
         }] }
     }], '2026-10-01T12:00:00.000Z');
     const legacy = JSON.parse(Fs.readFileSync(file, 'utf8'));
+    legacy.schemaVersion = 3;
+    delete legacy.confirmedUserWords;
+    Fs.writeFileSync(file, `${JSON.stringify(legacy)}\n`, 'utf8');
+    const trustedSchemaThree = await Visual.read(file);
+    Assert.equal(trustedSchemaThree.samples.length, 1);
+
     legacy.schemaVersion = 2;
     Fs.writeFileSync(file, `${JSON.stringify(legacy)}\n`, 'utf8');
 
     const migrated = await Visual.read(file);
-    Assert.equal(migrated.schemaVersion, 3);
+    Assert.equal(migrated.schemaVersion, 4);
     Assert.equal(migrated.samples.length, 0);
     Assert.deepEqual(migrated.glyphSamples, []);
 });

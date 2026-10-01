@@ -78,6 +78,7 @@ const plugins = Object.freeze([
         name: 'player-intelligence',
         handleCommand: context => PlayerIntelligence.handleCommand(withPlayerIntelligenceDependencies(context)),
         handleButton: context => PlayerIntelligenceImports.handleButton(context),
+        handleModal: context => PlayerIntelligenceImports.handleModal(context),
         handleMessage: context => PlayerIntelligenceImports.handleMessage(context),
         onBattlemetricsUpdated: context => PlayerIntelligence.onBattlemetricsUpdated(
             withPlayerIntelligenceDependencies(context))
@@ -218,6 +219,7 @@ module.exports = Object.freeze({
         }),
     handleCommand,
     handleButton: context => runFirstHandled('handleButton', context),
+    handleModal: context => runFirstHandled('handleModal', context),
     handleMessage: context => runFirstHandled('handleMessage', context),
     handleFcmAlarm: context => runFirstHandled('onFcmAlarm', context),
     isDiscordOptionEnabled: optionName => MapMarkerCapabilities.isDiscordOptionEnabled(optionName),

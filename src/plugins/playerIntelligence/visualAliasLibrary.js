@@ -11,8 +11,8 @@ const { isRustUiTextPixel } = require('./ocrImagePreprocess.js');
 
 /** @typedef {Readonly<{text:string,x:number,y:number,width:number,height:number,confidence:number|null}>} OcrWord */
 
-const SCHEMA_VERSION = 3;
-const LEGACY_SCHEMA_VERSIONS = Object.freeze([1, 2]);
+const SCHEMA_VERSION = 4;
+const LEGACY_SCHEMA_VERSIONS = Object.freeze([1, 2, 3]);
 const FEATURE_WIDTH = 96;
 const FEATURE_HEIGHT = 24;
 const FEATURE_BYTES = FEATURE_WIDTH * FEATURE_HEIGHT / 8;
@@ -21,6 +21,7 @@ const MAX_SAMPLES_PER_ALIAS = 4;
 const MAX_GLYPH_SAMPLES = 4096;
 const MAX_GLYPH_SAMPLES_PER_GRAPHEME = 12;
 const MAX_GLYPHS_PER_ALIAS = 64;
+const MAX_CONFIRMED_USER_WORDS = 2000;
 const APPROXIMATE_THRESHOLD = 0.72;
 const GLYPH_APPROXIMATE_THRESHOLD = 0.72;
 const sharedQueues = new Map();
@@ -143,6 +144,23 @@ function validateGlyphSample(input) {
 }
 
 /** @param {unknown} input */
+function validateConfirmedUserWord(input) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        throw new TypeError('Confirmed OCR user word is invalid.');
+    }
+    const value = /** @type {any} */ (input);
+    if (Object.keys(value).sort().join(',') !== 'confirmedAt,name') {
+        throw new TypeError('Confirmed OCR user word schema is invalid.');
+    }
+    const name = typeof value.name === 'string' ? value.name.normalize('NFC') : '';
+    if (!name || cleanName(name) !== name || Array.from(name).length > 128 ||
+        typeof value.confirmedAt !== 'string' || Number.isNaN(Date.parse(value.confirmedAt))) {
+        throw new TypeError('Confirmed OCR user word is invalid.');
+    }
+    return Object.freeze({ name, confirmedAt: new Date(value.confirmedAt).toISOString() });
+}
+
+/** @param {unknown} input */
 function validateDocument(input) {
     const value = /** @type {any} */ (input);
     if (!input || typeof input !== 'object' ||
@@ -180,14 +198,24 @@ function validateDocument(input) {
         }
         glyphCounts.set(sample.grapheme, count);
     }
+    const rawConfirmedUserWords = value.schemaVersion === SCHEMA_VERSION ? value.confirmedUserWords : [];
+    if (!Array.isArray(rawConfirmedUserWords) || rawConfirmedUserWords.length > MAX_CONFIRMED_USER_WORDS) {
+        throw new TypeError('Confirmed OCR user-word library schema is invalid.');
+    }
+    const confirmedUserWords = rawConfirmedUserWords.map(validateConfirmedUserWord);
+    if (new Set(confirmedUserWords.map((/** @type {any} */ item) => item.name)).size !==
+        confirmedUserWords.length) {
+        throw new TypeError('Confirmed OCR user-word library contains duplicates.');
+    }
     // Schema 1/2 samples predate proven roster boundaries. They remain valid JSON,
     // but cannot safely be reused because a missing member shifted positional indexes.
-    const trustedSamples = value.schemaVersion === SCHEMA_VERSION ? samples : [];
-    const trustedGlyphSamples = value.schemaVersion === SCHEMA_VERSION ? glyphSamples : [];
+    const trustedSamples = value.schemaVersion >= 3 ? samples : [];
+    const trustedGlyphSamples = value.schemaVersion >= 3 ? glyphSamples : [];
     return Object.freeze({
         schemaVersion: SCHEMA_VERSION,
         samples: Object.freeze(trustedSamples),
-        glyphSamples: Object.freeze(trustedGlyphSamples)
+        glyphSamples: Object.freeze(trustedGlyphSamples),
+        confirmedUserWords: Object.freeze(confirmedUserWords)
     });
 }
 
@@ -202,7 +230,8 @@ async function read(file) {
             return Object.freeze({
                 schemaVersion: SCHEMA_VERSION,
                 samples: Object.freeze([]),
-                glyphSamples: Object.freeze([])
+                glyphSamples: Object.freeze([]),
+                confirmedUserWords: Object.freeze([])
             });
         }
         if (error instanceof VisualAliasLibraryCorruptionError) throw error;
@@ -625,9 +654,45 @@ function recordResolved(file, items, observedAt) {
             await write(file, {
                 schemaVersion: SCHEMA_VERSION,
                 samples: bounded,
-                glyphSamples: boundedGlyphs
+                glyphSamples: boundedGlyphs,
+                confirmedUserWords: document.confirmedUserWords
             });
         }
+        return Object.freeze({ added, total: bounded.length });
+    });
+}
+
+/** @param {string} file */
+async function confirmedUserWords(file) {
+    const document = await serialized(file, () => read(file));
+    return Object.freeze(document.confirmedUserWords.map((/** @type {any} */ item) => item.name));
+}
+
+/** @param {string} file @param {readonly string[]} names @param {string} confirmedAt */
+function recordConfirmedUserWords(file, names, confirmedAt) {
+    if (!Array.isArray(names) || typeof confirmedAt !== 'string' || Number.isNaN(Date.parse(confirmedAt))) {
+        throw new TypeError('Confirmed OCR user-word update is invalid.');
+    }
+    const additions = [...new Set(names.map(name => cleanName(name).normalize('NFC')))]
+        .map(name => validateConfirmedUserWord({ name, confirmedAt }));
+    if (additions.length === 0) return Promise.resolve(Object.freeze({ added: 0, total: 0 }));
+    return serialized(file, async () => {
+        const document = await read(file);
+        const values = new Map(document.confirmedUserWords.map((/** @type {any} */ item) => [item.name, item]));
+        let added = 0;
+        for (const addition of additions) {
+            if (!values.has(addition.name)) added += 1;
+            values.set(addition.name, addition);
+        }
+        const bounded = [...values.values()].sort((left, right) =>
+            left.confirmedAt.localeCompare(right.confirmedAt) || left.name.localeCompare(right.name))
+            .slice(Math.max(0, values.size - MAX_CONFIRMED_USER_WORDS));
+        await write(file, {
+            schemaVersion: SCHEMA_VERSION,
+            samples: document.samples,
+            glyphSamples: document.glyphSamples,
+            confirmedUserWords: bounded
+        });
         return Object.freeze({ added, total: bounded.length });
     });
 }
@@ -640,10 +705,12 @@ module.exports = Object.freeze({
     MAX_GLYPH_SAMPLES,
     MAX_GLYPH_SAMPLES_PER_GRAPHEME,
     MAX_GLYPHS_PER_ALIAS,
+    MAX_CONFIRMED_USER_WORDS,
     MAX_SAMPLES,
     MAX_SAMPLES_PER_ALIAS,
     VisualAliasLibraryCorruptionError,
     candidatesForItems,
+    confirmedUserWords,
     extractCinfoSamples: extractVisualSamples,
     extractVisualSamples,
     featureFromBoxes,
@@ -652,8 +719,10 @@ module.exports = Object.freeze({
     matchGlyphSequence,
     matchFeature,
     read,
+    recordConfirmedUserWords,
     recordResolved,
     validateDocument,
+    validateConfirmedUserWord,
     validateFeature,
     validateGlyphSample
 });
