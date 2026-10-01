@@ -54,6 +54,9 @@ letters/numbers at any roster index or no longer matches the declared member cou
 If a roster remains incomplete, the bot first performs one distinct OCR read of only the roster field. A confirmed
 manual correction is then added to the persistent user-word lexicon and supplied to future Tesseract reads; it is not
 identity proof and cannot train a visual/glyph sample without an independently safe pixel boundary.
+If the first pass loses the `Members` or `Established` label, the bot separately rereads the relative count/date row
+with a numeric alphabet. A polluted multi-word tag is likewise reread from only the value area. All recovered fields
+pass the same strict validators; no absolute screen position is assumed.
 
 ## Editable in-game raid alert
 

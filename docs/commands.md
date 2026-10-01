@@ -187,6 +187,8 @@ Options | Description | Required
 > enter exactly one player name per line. The bot validates the declared count and uniqueness, reruns identity matching,
 > and shows another preview. Nothing is stored until Confirm; afterward those names enter the bounded per-server OCR
 > user-word lexicon for future captures, without becoming SteamID proof or unsafe glyph training data.
+> Missing `Members`/`Established` anchors and a polluted tag are reread from isolated rows derived from neighboring
+> semantic lines. Count/date reads use restricted numeric alphabets and every result is strictly revalidated.
 > Reimporting an already committed image does not silently duplicate it. Discord shows the effective previous version
 > and the proposed version, then offers `Replace previous` or `Keep existing`. Replacement preserves the observation's
 > logical counter position, rebuilds identities/clans/affinities from the new content, and may itself be replaced later.

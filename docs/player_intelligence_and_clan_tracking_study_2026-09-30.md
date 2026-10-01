@@ -216,6 +216,13 @@ s'il conserve tag/compteur et améliore la structure. Une date encore invalide r
 alphabet `0123456789/: `, puis passe le même validateur calendaire strict. Une panne de ce raffinement optionnel est
 un avertissement et ne peut pas annuler une transaction serveur déjà valide.
 
+Depuis la version 1.22.9, l'absence d'une ancre `Members` ou `Established` ne bloque plus ce raffinement. Le compteur
+est recadré entre les lignes voisines `ClanTag` et `Clan Members`, y compris lorsque la première OCR n'a produit aucun
+mot pour cette ligne ; la date est choisie relativement sous le roster. Un tag multi-mot suspect est relu dans sa
+seule zone de valeur. Les lectures compteur/date utilisent PSM 7 et un alphabet numérique restreint, puis les mêmes
+validateurs stricts. L'aperçu conserve aussi tous les noms OCR lus lorsque le compteur reste inconnu, distinctement
+des identités déjà liées. Aucune coordonnée d'écran fixe n'est introduite.
+
 Depuis la version 1.22.6, un roster complet reçoit aussi une lecture visuelle isolée par membre. Les virgules et le
 `and` final reconnus dans la ligne servent de séparateurs relatifs ; les fragments d'un pseudo coupé sur deux lignes
 sont recollés horizontalement, puis chaque membre occupe sa propre ligne d'une feuille temporaire noir-sur-blanc

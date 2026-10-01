@@ -55,6 +55,175 @@ function establishedBounds(image, block) {
     return Object.freeze({ left, top, width: right - left, height: bottom - top, line });
 }
 
+/** @param {any} image @param {any} line @param {RegExp|null} anchorExpression */
+function lineValueBounds(image, line, anchorExpression = null) {
+    if (!line || !Array.isArray(line.words) || line.words.length === 0) return null;
+    const height = Math.max(1, line.height);
+    let left = line.x;
+    if (anchorExpression) {
+        const anchor = line.words.find((/** @type {any} */ word) => anchorExpression.test(word.text));
+        if (!anchor) return null;
+        const colon = anchor.text.indexOf(':');
+        const valueFraction = colon === -1 ? 1 : Math.min(1, (colon + 1) /
+            Math.max(1, Array.from(anchor.text).length));
+        left = anchor.x + anchor.width * valueFraction;
+    }
+    left = Math.max(0, Math.floor(left - height * 0.2));
+    const recognizedRight = Math.max(...line.words.map((/** @type {any} */ word) => word.x + word.width));
+    const right = Math.min(image.bitmap.width,
+        Math.ceil(Math.max(recognizedRight + height, left + height * 2)));
+    const top = Math.max(0, Math.floor(line.y - height * 0.35));
+    const bottom = Math.min(image.bitmap.height, Math.ceil(line.y + line.height + height * 0.35));
+    if (right <= left || bottom <= top) return null;
+    return Object.freeze({ left, top, width: right - left, height: bottom - top, line });
+}
+
+/** @param {any} image @param {{words:unknown}} block */
+function tagValueBounds(image, block) {
+    const line = Layout.groupLines(block.words).find(candidate => /clan\s*tag\s*:/iu.test(candidate.text));
+    return lineValueBounds(image, line, /clan\s*tag/iu);
+}
+
+/** @param {any} image @param {any} before @param {any} after */
+function projectedBoundsBetween(image, before, after) {
+    const height = Math.max(1, Layout.median([before.height, after.height]));
+    const center = (before.center + after.center) / 2;
+    const left = Math.max(0, Math.floor(Math.min(before.x, after.x) - height * 0.25));
+    const right = Math.min(image.bitmap.width, Math.ceil(Math.max(before.x + before.width,
+        after.x + after.width) + height));
+    const top = Math.max(0, Math.floor(center - height * 0.85));
+    const bottom = Math.min(image.bitmap.height, Math.ceil(center + height * 0.85));
+    if (right <= left || bottom <= top) return null;
+    const line = Object.freeze({ words: Object.freeze([]), x: left, y: top, width: right - left,
+        height: bottom - top, center });
+    return Object.freeze({ left, top, width: right - left, height: bottom - top, line });
+}
+
+/** @param {any} image @param {any} line */
+function projectedBoundsAfter(image, line) {
+    const height = Math.max(1, line.height);
+    const top = Math.max(0, Math.floor(line.y + line.height + height * 0.05));
+    const bottom = Math.min(image.bitmap.height, Math.ceil(top + height * 1.7));
+    const left = Math.max(0, Math.floor(line.x - height * 0.25));
+    const right = Math.min(image.bitmap.width, Math.ceil(line.x + line.width + height));
+    if (right <= left || bottom <= top) return null;
+    const projected = Object.freeze({ words: Object.freeze([]), x: left, y: top, width: right - left,
+        height: bottom - top, center: (top + bottom) / 2 });
+    return Object.freeze({ left, top, width: right - left, height: bottom - top, line: projected });
+}
+
+/** @param {any} image @param {{words:unknown}} block */
+function missingCountBounds(image, block) {
+    const lines = Layout.groupLines(block.words);
+    const tagIndex = lines.findIndex(line => /clan\s*tag\s*:/iu.test(line.text));
+    const rosterIndex = lines.findIndex(line => /clan\s+members\s*:/iu.test(line.text));
+    if (tagIndex === -1 || rosterIndex <= tagIndex) return null;
+    const candidates = lines.slice(tagIndex + 1, rosterIndex);
+    if (candidates.length === 0) return projectedBoundsBetween(image, lines[tagIndex], lines[rosterIndex]);
+    const line = [...candidates].sort((left, right) => {
+        const digitDelta = (right.text.match(/\d/gu) || []).length - (left.text.match(/\d/gu) || []).length;
+        return digitDelta || right.center - left.center;
+    })[0];
+    return lineValueBounds(image, line);
+}
+
+/** @param {string} text */
+function numericFieldScore(text) {
+    return (text.match(/\d/gu) || []).length * 2 + (text.match(/[\/:]/gu) || []).length * 3;
+}
+
+/** @param {any} image @param {{words:unknown}} block */
+function missingEstablishedBounds(image, block) {
+    const anchored = establishedBounds(image, block);
+    if (anchored) return anchored;
+    const lines = Layout.groupLines(block.words);
+    const rosterIndex = lines.findIndex(line => /clan\s+members\s*:/iu.test(line.text));
+    if (rosterIndex === -1) return null;
+    const candidates = lines.slice(rosterIndex + 1);
+    if (candidates.length === 0) return projectedBoundsAfter(image, lines[rosterIndex]);
+    const plausible = candidates.filter(line => /[\/:]/u.test(line.text) || /establ/iu.test(line.text) ||
+        (line.text.match(/\d/gu) || []).length >= 8);
+    if (plausible.length === 0) return projectedBoundsAfter(image, candidates.at(-1));
+    const line = [...plausible].sort((left, right) =>
+        numericFieldScore(right.text) - numericFieldScore(left.text) || right.center - left.center)[0];
+    return lineValueBounds(image, line);
+}
+
+/** @param {{words:unknown}} block @param {any} bounds @param {string} text @param {any} dependencies */
+function replaceFieldLine(block, bounds, text, dependencies) {
+    const wordKey = (/** @type {any} */ word) =>
+        `${word.text}\0${word.x}\0${word.y}\0${word.width}\0${word.height}`;
+    const targetWords = new Set(bounds.line.words.map(wordKey));
+    const replacement = Object.freeze({ text, x: bounds.line.x, y: bounds.line.y,
+        width: bounds.line.width, height: bounds.line.height, confidence: null });
+    const words = Object.freeze([
+        ...Layout.normalizeWords(block.words).filter(word => !targetWords.has(wordKey(word))), replacement
+    ]);
+    return Object.freeze({ words, parsed: parseCinfoWords(words, dependencies.cinfoOptions) });
+}
+
+/** @param {any} image @param {any} bounds @param {Function} recognize @param {any} ocrOptions
+ * @param {any} dependencies @param {any} JimpImpl @param {string} preprocessName @param {any} recognizeOptions */
+async function readIsolatedField(image, bounds, recognize, ocrOptions, dependencies, JimpImpl,
+    preprocessName, recognizeOptions) {
+    const crop = image.clone().crop(bounds.left, bounds.top, bounds.width, bounds.height);
+    const cropBuffer = await crop.getBufferAsync(JimpImpl.MIME_PNG || Jimp.MIME_PNG);
+    const preprocess = dependencies[preprocessName] || OcrImagePreprocess.createTextMask;
+    const processed = await preprocess(cropBuffer.toString('base64'), {
+        JimpImpl, scale: 4, minForegroundRatio: 0.001, maxForegroundRatio: 0.85
+    });
+    const words = await recognize(processed.imageBase64, {
+        ...ocrOptions, psm: 7, timeoutMs: Math.min(20000, Number(ocrOptions.timeoutMs) || 20000),
+        ...recognizeOptions
+    });
+    return Layout.cleanText(Array.isArray(words) ? words.map(word => `${word.text || ''}`).join(' ') : '');
+}
+
+/** @param {any} image @param {any} block @param {Function} recognize @param {any} ocrOptions
+ * @param {any} dependencies @param {any} JimpImpl */
+async function refineMissingFields(image, block, recognize, ocrOptions, dependencies, JimpImpl) {
+    let selected = block;
+    const tagLooksPolluted = /\s/u.test(`${selected.parsed.tag || ''}`);
+    if (tagLooksPolluted && (!Number.isSafeInteger(selected.parsed.declaredCount) ||
+        !selected.parsed.establishedAtUtc)) {
+        const bounds = tagValueBounds(image, selected);
+        if (bounds) {
+            const raw = await readIsolatedField(image, bounds, recognize, ocrOptions, dependencies, JimpImpl,
+                'preprocessTagImage', {});
+            const tag = Layout.cleanText(raw.replace(/^clan\s*tag\s*:\s*/iu, ''));
+            if (tag && tag.length <= 32 && !/^(?:members?|established)\s*:/iu.test(tag)) {
+                selected = replaceFieldLine(selected, bounds, `ClanTag: ${tag}`, dependencies);
+            }
+        }
+    }
+    if (!Number.isSafeInteger(selected.parsed.declaredCount)) {
+        const bounds = missingCountBounds(image, selected);
+        if (bounds) {
+            const raw = await readIsolatedField(image, bounds, recognize, ocrOptions, dependencies, JimpImpl,
+                'preprocessCountImage', { userWords: [], characterWhitelist: '0123456789' });
+            const matches = raw.match(/\d{1,4}/gu) || [];
+            const count = matches.length === 1 ? Number(matches[0]) : null;
+            if (typeof count === 'number' && Number.isSafeInteger(count) && count >= 1 && count <= 1000) {
+                selected = replaceFieldLine(selected, bounds, `Members: ${count}`, dependencies);
+            }
+        }
+    }
+    if (!selected.parsed.establishedAtUtc &&
+        !Layout.groupLines(selected.words).some(line => /established\s*:/iu.test(line.text))) {
+        const bounds = missingEstablishedBounds(image, selected);
+        if (bounds) {
+            const raw = await readIsolatedField(image, bounds, recognize, ocrOptions, dependencies, JimpImpl,
+                'preprocessDateImage', { userWords: [], characterWhitelist: '0123456789/: ' });
+            const match = /(\d{2}\/\d{2}\/\d{4})\s*(\d{2}:\d{2}:\d{2})/u.exec(raw);
+            const establishedRaw = match ? `${match[1]} ${match[2]}` : '';
+            if (parseEstablished(establishedRaw)) {
+                selected = replaceFieldLine(selected, bounds, `Established: ${establishedRaw}`, dependencies);
+            }
+        }
+    }
+    return selected;
+}
+
 /** @param {any} image @param {{words:unknown}} block */
 function rosterBounds(image, block) {
     const lines = Layout.groupLines(block.words);
@@ -347,38 +516,41 @@ async function refineCinfoPanels(imageBase64, blocks, recognize, ocrOptions, dep
     const rosterReasons = [];
     for (const block of blocks) {
         try {
-            let selected = block;
+            let selected = await refineMissingFields(image, block, recognize, ocrOptions, dependencies, JimpImpl);
             if (!block.parsed.complete || !block.parsed.establishedAtUtc) {
                 const bounds = panelBounds(image, block);
                 if (!bounds) {
-                    refined.push(block);
-                    failed += 1;
-                    reasons.push('semantic panel bounds unavailable');
-                    continue;
+                    if (!selected.parsed.complete || !selected.parsed.establishedAtUtc) {
+                        refined.push(selected);
+                        failed += 1;
+                        reasons.push('semantic panel bounds unavailable');
+                        continue;
+                    }
                 }
-                const crop = image.clone().crop(bounds.left, bounds.top, bounds.width, bounds.height);
-                const cropBuffer = await crop.getBufferAsync(JimpImpl.MIME_PNG || Jimp.MIME_PNG);
-                const processed = await preprocess(cropBuffer.toString('base64'), {
-                    JimpImpl,
-                    scale: 3,
-                    minForegroundRatio: 0.001,
-                    maxForegroundRatio: 0.7
-                });
-                const timeoutMs = Number.isFinite(Number(dependencies.panelOcrTimeoutMs)) ?
-                    Math.min(30000, Math.max(1000, Number(dependencies.panelOcrTimeoutMs))) :
-                    Math.min(30000, Number(ocrOptions.timeoutMs) || 30000);
-                const words = mapCropWords(await recognize(processed.imageBase64, {
-                    ...ocrOptions,
-                    psm: 6,
-                    timeoutMs
-                }), processed.scale, bounds);
-                const candidates = splitCinfoWordBlocks(words).map(candidateWords => Object.freeze({
-                    words: candidateWords,
-                    parsed: parseCinfoWords(candidateWords, dependencies.cinfoOptions)
-                }));
-                const candidate = candidates.length === 1 ? candidates[0] : null;
-                if (candidate && samePanel(block, candidate) && blockQuality(candidate) > blockQuality(block)) {
-                    selected = candidate;
+                if (bounds && (!selected.parsed.complete || !selected.parsed.establishedAtUtc)) {
+                    const crop = image.clone().crop(bounds.left, bounds.top, bounds.width, bounds.height);
+                    const cropBuffer = await crop.getBufferAsync(JimpImpl.MIME_PNG || Jimp.MIME_PNG);
+                    const processed = await preprocess(cropBuffer.toString('base64'), {
+                        JimpImpl,
+                        scale: 3,
+                        minForegroundRatio: 0.001,
+                        maxForegroundRatio: 0.7
+                    });
+                    const timeoutMs = Number.isFinite(Number(dependencies.panelOcrTimeoutMs)) ?
+                        Math.min(30000, Math.max(1000, Number(dependencies.panelOcrTimeoutMs))) :
+                        Math.min(30000, Number(ocrOptions.timeoutMs) || 30000);
+                    const words = mapCropWords(await recognize(processed.imageBase64, {
+                        ...ocrOptions,
+                        psm: 6,
+                        timeoutMs
+                    }), processed.scale, bounds);
+                    const candidates = splitCinfoWordBlocks(words).map(candidateWords => Object.freeze({
+                        words: candidateWords,
+                        parsed: parseCinfoWords(candidateWords, dependencies.cinfoOptions)
+                    }));
+                    const candidate = candidates.length === 1 ? candidates[0] : null;
+                    if (candidate && samePanel(selected, candidate) &&
+                        blockQuality(candidate) > blockQuality(selected)) selected = candidate;
                 }
                 selected = await refineEstablished(image, selected, recognize, ocrOptions, dependencies, JimpImpl);
             }
@@ -421,13 +593,18 @@ module.exports = Object.freeze({
     blockQuality,
     createIsolatedRosterSheet,
     establishedBounds,
+    lineValueBounds,
     mapCropWords,
+    missingCountBounds,
+    missingEstablishedBounds,
     panelBounds,
     refineCinfoPanels,
     refineEstablished,
     refineIncompleteRoster,
+    refineMissingFields,
     refineRosterMembers,
     rosterBounds,
     rosterMemberFragments,
-    samePanel
+    samePanel,
+    tagValueBounds
 });

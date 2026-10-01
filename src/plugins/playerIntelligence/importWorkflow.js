@@ -72,17 +72,19 @@ function previewText(parsed) {
         const boundedLinked = resolved.slice().sort((/** @type {any} */ left, /** @type {any} */ right) =>
             (left.memberIndex ?? 0) - (right.memberIndex ?? 0)).slice(0, 20).map(display);
         if (resolved.length > boundedLinked.length) boundedLinked.push(`+${resolved.length - boundedLinked.length}`);
-        const pendingCount = Array.isArray(parsed.unresolvedMembers) ? parsed.unresolvedMembers.length +
-            (parsed.missingMemberCount || 0) : 0;
+        const resolutionGap = Math.max(0, parsedMembers.length - resolved.length);
+        const pendingCount = Math.max(resolutionGap, Array.isArray(parsed.unresolvedMembers) ?
+            parsed.unresolvedMembers.length + (parsed.missingMemberCount || 0) : 0);
+        const showOcrRoster = pendingCount > 0 || !Number.isSafeInteger(parsed.declaredCount);
         const declared = parsed.declaredCount || '?';
         return [
             `OCR /cinfo — ${parsed.tag || 'unknown'} — ${parsedMembers.length}/${declared} names read · ${
                 resolved.length}/${declared} linked`,
             `Established: ${parsed.establishedRaw || 'unread'}`,
-            `${parsed.manualRosterCorrected ? 'Corrected roster' : pendingCount > 0 ? 'OCR roster' : 'Members'}: ${
-                (pendingCount > 0 ? boundedRoster : boundedLinked).join(', ') || 'none'}`,
-            pendingCount > 0 ? `Linked identities: ${boundedLinked.join(', ') || 'none'}` : '',
-            pendingCount > 0 ?
+            `${parsed.manualRosterCorrected ? 'Corrected roster' : showOcrRoster ? 'OCR roster' : 'Members'}: ${
+                (showOcrRoster ? boundedRoster : boundedLinked).join(', ') || 'none'}`,
+            showOcrRoster ? `Linked identities: ${boundedLinked.join(', ') || 'none'}` : '',
+            showOcrRoster ?
                 `Pending identities: ${pendingCount}. They stay excluded until automatically matched.` : '',
             parsed.errors.length > 0 ? `Warnings: ${parsed.errors.join(' ')}` : 'Ready to commit.'
         ].filter(Boolean).join('\n').slice(0, 1900);

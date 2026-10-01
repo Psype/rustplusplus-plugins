@@ -252,6 +252,59 @@ Test('invalid cinfo dates receive a constrained numeric field read', async () =>
     Assert.equal(result.warning, null);
 });
 
+Test('missing cinfo anchors recover tag, count and date from isolated neighboring rows', async () => {
+    const image = await new Promise((resolve, reject) => new Jimp(620, 170, 0x5d514cff,
+        (error, value) => error ? reject(error) : resolve(value)));
+    const buffer = await image.getBufferAsync(Jimp.MIME_PNG);
+    const originalWords = [
+        word('ClanTag: Mernbe genx', 15),
+        word('Clan Members: n444shj, Jameskdw1704, spirit_monger19,', 65),
+        word('Tingtong, Sumdumsit and GingerMinx', 90),
+        word('Establ shed: 10/01/2026 19:33:49', 115)
+    ];
+    const original = Object.freeze({ words: originalWords, parsed: parseCinfoWords(originalWords) });
+    const calls = [];
+    const result = await CinfoPanelRefinement.refineCinfoPanels(buffer.toString('base64'), [original],
+        async (input, options) => {
+            calls.push({ input, options });
+            if (input === 'tag-mask') return [word('genx', 5)];
+            if (input === 'count-mask') return [word('6', 5)];
+            if (input === 'date-mask') return [word('10/01/2026 19:33:49', 5)];
+            throw new Error(`Unexpected OCR input ${input}`);
+        }, { timeoutMs: 45000 }, {
+            preprocessTagImage: async () => ({ imageBase64: 'tag-mask', scale: 1 }),
+            preprocessCountImage: async () => ({ imageBase64: 'count-mask', scale: 1 }),
+            preprocessDateImage: async () => ({ imageBase64: 'date-mask', scale: 1 })
+        });
+    Assert.deepEqual(calls.map(call => call.input), ['tag-mask', 'count-mask', 'date-mask']);
+    Assert.equal(calls.every(call => call.options.psm === 7 && call.options.timeoutMs === 20000), true);
+    Assert.equal(calls[1].options.characterWhitelist, '0123456789');
+    Assert.equal(calls[2].options.characterWhitelist, '0123456789/: ');
+    Assert.equal(result.blocks[0].parsed.tag, 'genx');
+    Assert.equal(result.blocks[0].parsed.declaredCount, 6);
+    Assert.equal(result.blocks[0].parsed.establishedRaw, '10/01/2026 19:33:49');
+    Assert.deepEqual(result.blocks[0].parsed.members.map(member => member.name), [
+        'n444shj', 'Jameskdw1704', 'spirit_monger19', 'Tingtong', 'Sumdumsit', 'GingerMinx'
+    ]);
+    Assert.equal(result.blocks[0].parsed.complete, true);
+    Assert.equal(result.warning, null);
+});
+
+Test('cinfo preview keeps every OCR name visible when the declared count is unread', () => {
+    const preview = ImportWorkflow.previewText({
+        kind: 'cinfo', tag: 'genx', declaredCount: null, establishedRaw: '',
+        members: ['n444shj', 'Jameskdw1704', 'spirit_monger19', 'Tingtong', 'Sumdumsit', 'GingerMinx']
+            .map(name => ({ name, role: 'member' })),
+        resolvedMembers: ['n444shj', 'Jameskdw1704', 'spirit_monger19']
+            .map((name, memberIndex) => ({ name, role: 'member', memberIndex })),
+        unresolvedMembers: [], missingMemberCount: 0,
+        errors: ['Members count not found.']
+    });
+    Assert.match(preview, /OCR roster: n444shj, Jameskdw1704, spirit_monger19, Tingtong, Sumdumsit, GingerMinx/);
+    Assert.match(preview, /Linked identities: n444shj, Jameskdw1704, spirit_monger19/);
+    Assert.match(preview, /Pending identities: 3/);
+});
+
 Test('cinfo roster punctuation is reread in comma-delimited member image rows', async () => {
     const image = await new Promise((resolve, reject) => new Jimp(440, 150, 0x5d514cff,
         (error, value) => error ? reject(error) : resolve(value)));
