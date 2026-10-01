@@ -167,7 +167,7 @@ Options | Description | Required
 > is independently capped while streaming because its final length may differ. It compares a bounded high-contrast
 > Rust-UI text mask with the original through serialized local Tesseract processes, then displays an
 > ephemeral preview. Only the
-> requester can confirm it for five minutes, on the same server and wipe. The event journal is committed before the
+> requester can edit or confirm it for thirty minutes, on the same server and wipe. The event journal is committed before the
 > Discord acknowledgement; a Discord failure cannot roll it back. Existing aliases from the event journal, trackers,
 > BattleMetrics, Rust+ and the same F7 upload feed a Unicode-aware, globally one-to-one roster resolver. Short names use
 > stricter collision margins. At most three provisional queries per batch may be corroborated through the existing
@@ -187,6 +187,9 @@ Options | Description | Required
 > enter exactly one player name per line. The bot validates the declared count and uniqueness, reruns identity matching,
 > and shows another preview. Nothing is stored until Confirm; afterward those names enter the bounded per-server OCR
 > user-word lexicon for future captures, without becoming SteamID proof or unsafe glyph training data.
+> Reimporting an already committed image does not silently duplicate it. Discord shows the effective previous version
+> and the proposed version, then offers `Replace previous` or `Keep existing`. Replacement preserves the observation's
+> logical counter position, rebuilds identities/clans/affinities from the new content, and may itself be replaced later.
 
 The bot also creates a private `intel-imports` channel. A message may contain 1–10 images and needs no caption: F7 and
 `/cinfo` are detected from semantic OCR anchors. Starting the message with `cinfo` or `f7` remains an optional strict
@@ -196,7 +199,7 @@ count and `Established` timestamp; its roster may remain partial. If a block lac
 cannot fit safely, nothing is offered for confirmation. The human sender alone can confirm. An approved Windows helper
 webhook can post the same messages when its ID is listed in `RPP_INTEL_IMPORT_WEBHOOK_IDS`; because a webhook has no
 human requester, any member with the configured bot role (or an administrator) may confirm it. Unapproved webhooks are
-ignored. All paths use the same validation, five-minute server/wipe binding and durable batch commit logic.
+ignored. All paths use the same validation, thirty-minute requester/channel/server/wipe binding and durable batch commit logic.
 
 Subcommand | Options | Description | Required
 ---------- | ------- | ----------- | --------

@@ -73,6 +73,10 @@ function createHarness(t) {
     return { client, command, directory, edits, updates, replies };
 }
 
+Test('Discord import decisions remain valid for thirty minutes', () => {
+    Assert.equal(ImportWorkflow.TTL_MS, 30 * 60 * 1000);
+});
+
 Test('Discord import previews first, binds confirmation to requester, then commits once', async t => {
     const value = createHarness(t);
     await ImportWorkflow.beginImport(value.client, value.command);
@@ -619,6 +623,10 @@ Test('dedicated channel auto-detects multiple attachments and multiple cinfo pan
     const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
     Assert.equal((await store.readAll()).filter(event => event.kind === 'clan_snapshot').length, 2);
 
+    const correctedCinfoWords = cinfoWords.map(entry => entry.text.startsWith('Clan Members: Nirks, Psype') ?
+        { ...entry, text: 'Clan Members: Nirks, CompletelyDifferent and tom.le.geek.2' } : entry);
+    value.client.playerIntelligenceImportDependencies.recognize = async image =>
+        image === 'multi' ? correctedCinfoWords : f7Words;
     const repeated = { ...message, id: 'message-multi-repeat' };
     Assert.equal(await ImportWorkflow.handleMessage({ client: value.client, message: repeated }), true);
     const repeatedCustomId = value.replies.at(-1).components[0].components[0].data.custom_id;
@@ -626,6 +634,100 @@ Test('dedicated channel auto-detects multiple attachments and multiple cinfo pan
         client: value.client,
         interaction: { ...confirmation, customId: repeatedCustomId }
     }), true);
-    Assert.match(value.updates.at(-1).content, /Every detected block was already imported/);
+    const replacement = value.updates.at(-1);
+    Assert.match(replacement.content, /Duplicate evidence detected/);
+    Assert.match(replacement.content, /Previous \/cinfo — zeub/);
+    Assert.match(replacement.content, /Proposed replacement/);
     Assert.equal((await store.readAll()).filter(event => event.kind === 'clan_snapshot').length, 2);
+    const replaceId = replacement.components[0].components[0].data.custom_id;
+    const keepId = replacement.components[0].components[1].data.custom_id;
+    Assert.match(replaceId, /^PIImportReplace:/u);
+    Assert.match(keepId, /^PIImportKeep:/u);
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { ...confirmation, customId: replaceId }
+    }), true);
+    Assert.match(value.updates.at(-1).content, /Import replaced \(3 previous blocks/);
+    const events = await store.readAll();
+    Assert.equal(events.filter(event => event.kind === 'clan_snapshot').length, 4,
+        'append-only journal retains superseded evidence for crash-safe recovery');
+    Assert.equal(events.filter(event => event.kind === 'events_superseded').length, 3);
+    const projection = Core.rebuild(events);
+    Assert.equal(projection.clans.snapshots.length, 2);
+    Assert.equal(projection.clans.tags.every(tag => tag.snapshotCount === 1), true);
+    const zeub = projection.clans.snapshots.find(snapshot => snapshot.tag === 'zeub');
+    Assert.equal(zeub.unresolvedMembers.some(member => member.observedText === 'CompletelyDifferent'), true);
+    Assert.equal(Core.effectiveEvents(events).some(event =>
+        event.kind === 'identity_observed' && event.subject.exactName === 'Psype'), false);
+
+    const correctedAgain = correctedCinfoWords.map(entry => entry.text.includes('CompletelyDifferent') ?
+        { ...entry, text: entry.text.replace('CompletelyDifferent', 'FinalName') } : entry);
+    value.client.playerIntelligenceImportDependencies.recognize = async image =>
+        image === 'multi' ? correctedAgain : f7Words;
+    Assert.equal(await ImportWorkflow.handleMessage({
+        client: value.client,
+        message: { ...message, id: 'message-multi-third' }
+    }), true);
+    const thirdConfirmId = value.replies.at(-1).components[0].components[0].data.custom_id;
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { ...confirmation, customId: thirdConfirmId }
+    }), true);
+    const thirdPreview = value.updates.at(-1);
+    Assert.match(thirdPreview.content, /Previous \/cinfo — zeub[\s\S]*CompletelyDifferent/u);
+    const thirdReplaceId = thirdPreview.components[0].components[0].data.custom_id;
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { ...confirmation, customId: thirdReplaceId }
+    }), true);
+    const finalEvents = await store.readAll();
+    const finalProjection = Core.rebuild(finalEvents);
+    Assert.equal(finalProjection.clans.snapshots.length, 2);
+    Assert.equal(finalProjection.clans.tags.every(tag => tag.snapshotCount === 1), true);
+    const finalZeub = finalProjection.clans.snapshots.find(snapshot => snapshot.tag === 'zeub');
+    Assert.equal(finalZeub.unresolvedMembers.some(member => member.observedText === 'FinalName'), true);
+    Assert.equal(finalZeub.unresolvedMembers.some(member => member.observedText === 'CompletelyDifferent'), false);
+
+    const staleReplacementIds = [];
+    for (const id of ['message-stale-a', 'message-stale-b']) {
+        Assert.equal(await ImportWorkflow.handleMessage({
+            client: value.client,
+            message: { ...message, id }
+        }), true);
+        const confirmId = value.replies.at(-1).components[0].components[0].data.custom_id;
+        Assert.equal(await ImportWorkflow.handleButton({
+            client: value.client,
+            interaction: { ...confirmation, customId: confirmId }
+        }), true);
+        staleReplacementIds.push(value.updates.at(-1).components[0].components[0].data.custom_id);
+    }
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { ...confirmation, customId: staleReplacementIds[0] }
+    }), true);
+    const afterFreshReplacement = await store.readAll();
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { ...confirmation, customId: staleReplacementIds[1] }
+    }), true);
+    Assert.match(value.updates.at(-1).content, /Existing import changed after preview/);
+    Assert.equal((await store.readAll()).length, afterFreshReplacement.length);
+
+    Assert.equal(await ImportWorkflow.handleMessage({
+        client: value.client,
+        message: { ...message, id: 'message-multi-keep' }
+    }), true);
+    const keepConfirmId = value.replies.at(-1).components[0].components[0].data.custom_id;
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { ...confirmation, customId: keepConfirmId }
+    }), true);
+    const keepPreview = value.updates.at(-1);
+    const keepExistingId = keepPreview.components[0].components[1].data.custom_id;
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { ...confirmation, customId: keepExistingId }
+    }), true);
+    Assert.match(value.updates.at(-1).content, /Existing import kept/);
+    Assert.equal((await store.readAll()).length, afterFreshReplacement.length);
 });

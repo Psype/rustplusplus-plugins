@@ -21,10 +21,12 @@ const WarBandits = require('../warBandits');
 
 const CONFIRM_PREFIX = 'PIImportConfirm:';
 const REJECT_PREFIX = 'PIImportReject:';
+const REPLACE_PREFIX = 'PIImportReplace:';
+const KEEP_PREFIX = 'PIImportKeep:';
 const EDIT_PREFIX = 'PIImportEdit:';
 const EDIT_MODAL_PREFIX = 'PIImportEditModal:';
 const EDIT_ROSTER_FIELD = 'PIImportRosterNames';
-const TTL_MS = 5 * 60 * 1000;
+const TTL_MS = 30 * 60 * 1000;
 const MAX_CORROBORATION_QUERIES = 3;
 /** @type {Map<string, any>} */
 const pending = new Map();
@@ -104,13 +106,45 @@ function previewItems(items) {
     return `${items.length > 1 ? `Detected ${items.length} import blocks.\n` : ''}${sections.join('\n\n')}`;
 }
 
-/** @param {string} token @param {readonly any[]} items */
-function actionRows(token, items) {
+/** @param {readonly any[]} events */
+function previousImportText(events) {
+    const snapshot = events.find(event => event.kind === 'clan_snapshot');
+    if (snapshot) {
+        const members = [
+            ...snapshot.payload.members.map((/** @type {any} */ member) => member.name || member.steamId || '?'),
+            ...(snapshot.payload.unresolvedMembers || []).map((/** @type {any} */ member) => member.observedText)
+        ];
+        return [`Previous /cinfo — ${snapshot.payload.tag} — ${members.length}/${
+            snapshot.payload.declaredMemberCount ?? '?'} names`,
+        `Established: ${snapshot.payload.establishedAt || 'unread'}`,
+        `Members: ${members.slice(0, 20).join(', ') || 'none'}${
+            members.length > 20 ? `, +${members.length - 20}` : ''}`].join('\n');
+    }
+    const identities = events.filter(event => event.kind === 'identity_observed');
+    return [`Previous F7 — ${identities.length} entries`, identities.slice(0, 20).map(event =>
+        `${event.subject.steamId || '?'} — ${event.subject.exactName || '[name hidden/unread]'}`).join('\n')]
+        .filter(Boolean).join('\n');
+}
+
+/** @param {readonly any[]} items @param {readonly any[]} existing */
+function replacementPreview(items, existing) {
+    const previous = existing.map((group, index) => `${existing.length > 1 ?
+        `[${index + 1}/${existing.length}] ` : ''}${previousImportText(group.events)}`).join('\n\n');
+    const footer = 'Choose Replace previous or Keep existing. Nothing has changed yet.';
+    const body = `Duplicate evidence detected.\n\n${previous}\n\nProposed replacement:\n${previewItems(items)}`;
+    const budget = Math.max(0, 1900 - Array.from(footer).length - 2);
+    return `${truncateCharacters(body, budget)}\n\n${footer}`;
+}
+
+/** @param {string} token @param {readonly any[]} items @param {'confirm'|'replace'} mode */
+function actionRows(token, items, mode = 'confirm') {
     const rows = [new Discord.ActionRowBuilder().addComponents(
-        new Discord.ButtonBuilder().setCustomId(`${CONFIRM_PREFIX}${token}`)
-            .setLabel('Confirm import').setStyle(Discord.ButtonStyle.Success),
-        new Discord.ButtonBuilder().setCustomId(`${REJECT_PREFIX}${token}`)
-            .setLabel('Reject').setStyle(Discord.ButtonStyle.Danger)
+        new Discord.ButtonBuilder().setCustomId(`${mode === 'replace' ? REPLACE_PREFIX : CONFIRM_PREFIX}${token}`)
+            .setLabel(mode === 'replace' ? 'Replace previous' : 'Confirm import')
+            .setStyle(mode === 'replace' ? Discord.ButtonStyle.Primary : Discord.ButtonStyle.Success),
+        new Discord.ButtonBuilder().setCustomId(`${mode === 'replace' ? KEEP_PREFIX : REJECT_PREFIX}${token}`)
+            .setLabel(mode === 'replace' ? 'Keep existing' : 'Reject')
+            .setStyle(mode === 'replace' ? Discord.ButtonStyle.Secondary : Discord.ButtonStyle.Danger)
     )];
     const editable = items.map((item, index) => ({ item, index })).filter(({ item }) => {
         if (!item.parsed || item.parsed.kind !== 'cinfo' || !Number.isSafeInteger(item.parsed.declaredCount) ||
@@ -822,11 +856,14 @@ async function resolveCorrectedItem(context, pendingItem, itemIndex, names, clie
 async function handleButton({ client, interaction }) {
     const confirm = interaction.customId.startsWith(CONFIRM_PREFIX);
     const reject = interaction.customId.startsWith(REJECT_PREFIX);
+    const replace = interaction.customId.startsWith(REPLACE_PREFIX);
+    const keep = interaction.customId.startsWith(KEEP_PREFIX);
     const editMatch = new RegExp(`^${EDIT_PREFIX}([a-f0-9]{24}):(\\d{1,2})$`, 'u')
         .exec(interaction.customId);
-    if (!confirm && !reject && !editMatch) return false;
+    if (!confirm && !reject && !replace && !keep && !editMatch) return false;
     const token = editMatch ? editMatch[1] :
-        interaction.customId.slice((confirm ? CONFIRM_PREFIX : REJECT_PREFIX).length);
+        interaction.customId.slice((confirm ? CONFIRM_PREFIX : reject ? REJECT_PREFIX :
+            replace ? REPLACE_PREFIX : KEEP_PREFIX).length);
     const item = pending.get(token);
     if (!item || item.expiresAt < Date.now()) {
         if (item) pending.delete(token);
@@ -858,6 +895,11 @@ async function handleButton({ client, interaction }) {
         await respondButton(client, interaction, 'Import rejected. Nothing was changed.');
         return true;
     }
+    if ((replace || keep) && !Array.isArray(item.duplicatePrompt)) {
+        pending.delete(token);
+        await respondButton(client, interaction, 'Replacement preview is no longer available. Nothing was changed.');
+        return true;
+    }
     if (!await client.validatePermissions(interaction)) return true;
     const context = contextFor(client, interaction);
     const scope = Runtime.getScope(context);
@@ -868,10 +910,17 @@ async function handleButton({ client, interaction }) {
     }
     let result;
     try {
-        result = await Runtime.commitParsedImports(context, item.items.map((/** @type {any} */ entry) => ({
+        const imports = item.items.map((/** @type {any} */ entry) => ({
             parsed: entry.parsed,
             metadata: { sha256: entry.sha256, reference: entry.reference }
-        })));
+        }));
+        result = await Runtime.commitParsedImports(context, imports, {
+            onDuplicate: replace ? 'replace' : keep ? 'skip' : 'prompt',
+            expectedDuplicates: replace ? item.duplicatePrompt.map((/** @type {any} */ group) => ({
+                hash: group.hash,
+                eventIds: group.events.map((/** @type {any} */ event) => event.eventId)
+            })) : undefined
+        });
     }
     catch (error) {
         pending.delete(token);
@@ -879,18 +928,33 @@ async function handleButton({ client, interaction }) {
             `Import failed safely: ${sanitizeError(error)} Nothing was committed.`);
         return true;
     }
+    if (confirm && result.duplicate) {
+        const updated = Object.freeze({ ...item, duplicatePrompt: result.existing });
+        pending.set(token, updated);
+        await client.interactionUpdate(interaction, {
+            content: replacementPreview(item.items, result.existing),
+            embeds: [], components: actionRows(token, item.items, 'replace'), allowedMentions: { parse: [] }
+        });
+        return true;
+    }
     pending.delete(token);
-    await respondButton(client, interaction, result.duplicate ?
-        'Every detected block was already imported; no duplicate event was added.' :
-        `Import committed (${result.imported} block${result.imported === 1 ? '' : 's'}, ${
-            result.appended} event${result.appended === 1 ? '' : 's'}${
-            result.duplicates > 0 ? `, ${result.duplicates} duplicate block(s) skipped` : ''}).`);
+    const message = replace ?
+        `Import replaced (${result.replaced} previous block${result.replaced === 1 ? '' : 's'}, ${
+            result.appended} event${result.appended === 1 ? '' : 's'} appended). The previous version is no longer active.` :
+        keep ? result.imported === 0 ? 'Existing import kept. Nothing was changed.' :
+            `Existing duplicate(s) kept; ${result.imported} new block(s) committed (${result.appended} events).` :
+            `Import committed (${result.imported} block${result.imported === 1 ? '' : 's'}, ${
+                result.appended} event${result.appended === 1 ? '' : 's'}).`;
+    await respondButton(client, interaction, message);
     if (!result.duplicate) {
+        const committedHashes = new Set(result.committedHashes || []);
+        const committedItems = item.items.filter((/** @type {any} */ entry) =>
+            committedHashes.has(`${entry.sha256}`.toLowerCase()));
         if (item.visualFile) {
             try {
                 const dependencies = importDependencies(client);
                 const recordVisual = dependencies.recordVisualAliases || VisualAliasLibrary.recordResolved;
-                await recordVisual(item.visualFile, item.items, new Date().toISOString());
+                await recordVisual(item.visualFile, committedItems, new Date().toISOString());
             }
             catch (error) {
                 if (typeof client.log === 'function') {
@@ -899,7 +963,7 @@ async function handleButton({ client, interaction }) {
                 }
             }
         }
-        const correctedNames = item.items.flatMap((/** @type {any} */ entry) =>
+        const correctedNames = committedItems.flatMap((/** @type {any} */ entry) =>
             entry.confirmedCorrectionNames || []);
         if (item.visualFile && correctedNames.length > 0) {
             try {
@@ -916,7 +980,7 @@ async function handleButton({ client, interaction }) {
             }
         }
         void recrossWarBandits(context,
-            item.items.map((/** @type {any} */ entry) => entry.parsed), client);
+            committedItems.map((/** @type {any} */ entry) => entry.parsed), client);
     }
     return true;
 }
@@ -966,13 +1030,13 @@ async function handleModal({ client, interaction }) {
         const corrected = await resolveCorrectedItem(context, item, index, names, client);
         const items = Object.freeze(item.items.map((/** @type {any} */ entry, /** @type {number} */ itemIndex) =>
             itemIndex === index ? corrected : entry));
-        const preview = previewItems(items);
+        const preview = item.duplicatePrompt ? replacementPreview(items, item.duplicatePrompt) : previewItems(items);
         if (Array.from(preview).length > 1900) {
             throw new Error('Corrected preview exceeds the Discord limit; split the upload into smaller batches.');
         }
         pending.set(token, Object.freeze({ ...item, items }));
         await client.interactionUpdate(interaction, {
-            content: preview, components: actionRows(token, items),
+            content: preview, components: actionRows(token, items, item.duplicatePrompt ? 'replace' : 'confirm'),
             embeds: [], allowedMentions: { parse: [] }
         });
     }
@@ -989,7 +1053,10 @@ module.exports = Object.freeze({
     CONFIRM_PREFIX,
     EDIT_MODAL_PREFIX,
     EDIT_PREFIX,
+    KEEP_PREFIX,
+    REPLACE_PREFIX,
     REJECT_PREFIX,
+    TTL_MS,
     applyCorrectedRoster,
     beginImport,
     handleMessage,
@@ -998,6 +1065,7 @@ module.exports = Object.freeze({
     normalizeWebhookIds,
     parseCorrectedRoster,
     previewItems,
+    replacementPreview,
     previewText,
     selectRecognizedResult
 });

@@ -142,6 +142,12 @@ Flux actuellement implémenté :
 6. confirmation humaine obligatoire ;
 7. commit du snapshot avant l'accusé de réception Discord. Une panne Discord après commit ne l'annule pas.
 
+La décision reste disponible trente minutes et demeure liée au demandeur, au canal, au serveur et au wipe. Si le hash
+existe déjà, aucune écriture n'a lieu au premier clic : Discord compare la version effective précédente et la proposition,
+puis exige `Replace previous` ou `Keep existing`. Le remplacement conserve l'heure et la position logique du constat,
+supprime l'ancienne interprétation de toutes les projections et reconstruit identités, clans, affinités et compteurs sans
+ajouter un snapshot visible. Il peut être répété ; un aperçu devenu obsolète échoue sans mutation.
+
 L'OCR doit conserver Unicode, casse, espaces et ponctuation. Il doit détecter les retours de ligne, les pseudos avec
 virgule et l'écart entre `Members: N` et le nombre de noms extraits. Une virgule ne peut pas être considérée comme un
 séparateur infaillible. Le CLI Tesseract local retourne le TSV et ses positions ; sa précision et son coût CPU/mémoire
@@ -539,8 +545,9 @@ précision temporelle et le hash de preuve.
 - Une instance de clan utilise un ID interne et la clé candidate
   `{serverKey, wipeId, tagExact, establishedAt?}`. Un même tag recréé pendant le wipe avec un autre `Established` est
   une nouvelle instance. Avec `clanId` natif, le conserver sans supposer sa persistance après wipe.
-- Chaque `/cinfo` confirmé crée un `clan_snapshot` daté : roster, compteur, rôles et complétude. Le roster précédent
-  n'est jamais réécrit.
+- Chaque nouvelle capture `/cinfo` confirmée crée un `clan_snapshot` daté : roster, compteur, rôles et complétude.
+  Une correction confirmée du même hash remplace toutefois son interprétation effective à la même place logique : elle
+  ne crée pas un constat ni un compteur supplémentaire, et ses liens sont entièrement reconstruits.
 - Un joueur peut rejoindre, quitter, changer de clan ou de rôle pendant un wipe. Deux snapshots complets bornent le
   changement entre `lastObservedPresentAt` et `firstObservedAbsentAt`; ils ne donnent pas son heure exacte. Un snapshot
   incomplet ajoute des présences mais ne permet jamais de conclure à un départ.
@@ -556,7 +563,8 @@ Pour l'affichage compact, l'affinité est un nombre de constats `/cinfo` confirm
 - `knownTagCount(tag)` : snapshots où la personne est membre de ce ClanTag ;
 - `playedWithCount(person)` : snapshots où les deux identités sont membres du même ClanTag.
 
-Un même hash importé deux fois ne compte qu'une fois. Deux captures réellement distinctes prises à des moments
+Un même hash importé deux fois ne compte qu'une fois. Son remplacement explicite modifie son contenu effectif sans
+modifier ce compteur. Deux captures réellement distinctes prises à des moments
 différents comptent chacune, même si le roster est inchangé. Ce `x` mesure donc les co-appartenances **observées**, pas
 un nombre de sessions de jeu. BattleMetrics co-presence ne l'incrémente jamais.
 
@@ -657,7 +665,8 @@ alimentent la projection centrale : aucune recollecte d'une paire SteamID/Battle
 - `!activity <...> [1mo|all]` : durée connue en ligne, `1mo` par défaut, plages `unknown` exclues ;
 - `!clan <tag>`, `!clanhistory <tag>` et `!clantop [1-10]` : observations confirmées locales ;
 - Discord seulement : `/intelimport cinfo image:<fichier>` et `/intelimport f7 image:<fichier>`, avec aperçu éphémère,
-  confirmation liée au demandeur/serveur/wipe pendant cinq minutes et commit idempotent par hash.
+  décision liée au demandeur/canal/serveur/wipe pendant trente minutes et prompt ancien/nouveau pour conserver ou
+  remplacer un hash déjà importé.
 
 L'historique détaillé des alias et les commandes manuelles de liaison/révocation restent différés : ces métadonnées
 existent dans le journal mais ne sont pas exposées dans le chat in-game.
@@ -691,8 +700,8 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
    déduplication/corruption, hook BattleMetrics global sans second poller et requêtes compactes.
 2. **Terminé fonctionnellement** : imports `/cinfo` et F7 par slash command ou dépôt de 1–10 images dans
    `intel-imports`, détection sémantique du type, découpage de plusieurs panneaux `/cinfo`, validation de l'image,
-   Tesseract local sérialisé, regroupement relatif, couleurs de rôles relatives, aperçu/confirmation et hash
-   idempotent par bloc. Le batch est validé entièrement avant son unique append durable ; les webhooks non autorisés
+   Tesseract local sérialisé, regroupement relatif, couleurs de rôles relatives, aperçu/confirmation et remplacement
+   explicite ancien/nouveau des hash déjà importés. Le batch est validé entièrement avant son unique append durable ; les webhooks non autorisés
    sont ignorés. Les snapshots partiels, le résolveur Unicode un-à-un, la réévaluation automatique et la corroboration
    WarBandits/Steam plafonnée à trois requêtes candidates par lot, le masque couleur agrandi, les user-words et la
    mémoire visuelle persistante sont également implémentés. Les rosters complets sont désormais redécoupés relativement
@@ -712,8 +721,8 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale finale après lecture de champ et correction confirmée du roster :
-`npm.cmd test` passe 192/192,
+QA locale finale après remplacement d'import, lecture de champ et correction confirmée du roster :
+`npm.cmd test` passe 193/193,
 dont le typage strict `tsc --noEmit`. Une
 couverture déterministe reproduit la mauvaise attribution `』Marley』`/`Swizzy`, vérifie le découpage relatif aux
 virgules, la fusion `n444shj, spirit_monger19`, le rejet des comptes/doublons manuels et l'absence d'apprentissage avant
@@ -788,4 +797,3 @@ SteamID64, pseudo et historique relationnel restent des données identifiantes ;
 [CNIL inclut pseudonymes et identifiants](https://www.cnil.fr/fr/identifier-les-donnees-personnelles). Limiter l'accès
 Discord, documenter la finalité et la rétention, permettre correction/suppression, séparer preuves brutes et
 projections, et ne pas publier les captures. Ne pas conserver le chat global complet lorsqu'un fait dérivé suffit.
-

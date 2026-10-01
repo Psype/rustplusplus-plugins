@@ -12,6 +12,7 @@ const EVENT_KINDS = Object.freeze([
     'identity_linked',
     'identity_link_revoked',
     'clan_snapshot',
+    'events_superseded',
     'presence_observed',
     'wipe_snapshot'
 ]);
@@ -161,6 +162,18 @@ function validateIdentityLinkRevoked(value) {
     assertString(payload.reason, 'identity_link_revoked payload.reason', 256);
 }
 
+/** @param {unknown} value */
+function validateEventsSuperseded(value) {
+    assertExactKeys(/** @type {object} */ (value), ['eventIds', 'reason'], 'events_superseded payload');
+    const payload = /** @type {{eventIds: unknown, reason: unknown}} */ (value);
+    if (!Array.isArray(payload.eventIds) || payload.eventIds.length < 1 || payload.eventIds.length > 1000 ||
+        new Set(payload.eventIds).size !== payload.eventIds.length ||
+        payload.eventIds.some(eventId => typeof eventId !== 'string' || !/^pi:[a-f0-9]{64}$/u.test(eventId))) {
+        throw new TypeError('events_superseded payload.eventIds must contain unique bounded event IDs.');
+    }
+    assertString(payload.reason, 'events_superseded payload.reason', 256);
+}
+
 /** @param {unknown} value @param {number} index */
 function validateClanMember(value, index) {
     const label = `clan_snapshot payload.members[${index}]`;
@@ -286,6 +299,7 @@ function validatePayload(kind, payload, scope) {
     if (kind === 'identity_linked') return validateIdentityLinked(payload);
     if (kind === 'identity_link_revoked') return validateIdentityLinkRevoked(payload);
     if (kind === 'clan_snapshot') return validateClanSnapshot(payload, scope);
+    if (kind === 'events_superseded') return validateEventsSuperseded(payload);
     if (kind === 'presence_observed') return validatePresence(payload);
     if (kind === 'wipe_snapshot') return validateWipeSnapshot(payload, scope);
     throw new TypeError('Unsupported player-intelligence event kind.');

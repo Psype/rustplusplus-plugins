@@ -1,4 +1,5 @@
 // @ts-check
+const Crypto = require('node:crypto');
 const Path = require('node:path');
 
 const Core = require('./index.js');
@@ -588,9 +589,11 @@ function validateParsedImport(parsed, metadata, scope) {
     }
 }
 
-/** @param {any} context @param {any} scope @param {any} parsed @param {any} metadata @param {string} recordedAt */
-function importEvents(context, scope, parsed, metadata, recordedAt) {
+/** @param {any} context @param {any} scope @param {any} parsed @param {any} metadata @param {string} recordedAt
+ * @param {string|null} revision */
+function importEvents(context, scope, parsed, metadata, recordedAt, revision = null) {
     const hash = `${metadata.sha256}`.toLowerCase();
+    const sourceBase = revision === null ? hash : `${hash}:revision:${revision}`;
     const observedAt = canonicalIso(metadata.observedAt) || recordedAt;
     const common = { guildId: context.guildId, observedAt, recordedAt,
         source: parsed.kind === 'cinfo' ? 'discord-cinfo' : 'discord-f7', confidence: 'verified',
@@ -600,7 +603,7 @@ function importEvents(context, scope, parsed, metadata, recordedAt) {
         parsed.entries.forEach((/** @type {any} */ entry, /** @type {number} */ index) =>
             events.push(identityEvent(scope, {
             steamId: entry.steamId, battlemetricsPlayerId: null, name: entry.name, caseFidelity: false
-        }, { ...common, sourceEventId: `${hash}:f7:${index}:${entry.steamId}` })));
+        }, { ...common, sourceEventId: `${sourceBase}:f7:${index}:${entry.steamId}` })));
     }
     else {
         const resolvedMembers = Array.isArray(parsed.resolvedMembers) ? parsed.resolvedMembers :
@@ -616,7 +619,7 @@ function importEvents(context, scope, parsed, metadata, recordedAt) {
             events.push(identityEvent(scope, {
             steamId: member.steamId, battlemetricsPlayerId: member.battlemetricsPlayerId,
             name: member.name, caseFidelity: member.caseFidelity !== false
-        }, { ...common, sourceEventId: `${hash}:cinfo-name:${index}` })));
+        }, { ...common, sourceEventId: `${sourceBase}:cinfo-name:${index}` })));
         events.push(baseEvent('clan_snapshot', scope,
             { steamId: null, battlemetricsPlayerId: null, exactName: null }, {
                 tag: parsed.tag,
@@ -639,13 +642,57 @@ function importEvents(context, scope, parsed, metadata, recordedAt) {
                         score: candidate.score
                     }))
                 }))
-            }, { ...common, sourceEventId: `${hash}:cinfo-snapshot` }));
+            }, { ...common, sourceEventId: `${sourceBase}:cinfo-snapshot` }));
     }
     return Object.freeze(events);
 }
 
-/** @param {any} context @param {readonly {parsed:any,metadata:any}[]} imports */
-async function commitParsedImports(context, imports) {
+/** @param {readonly any[]} events @param {string} recordedAt @param {any} parsed */
+function replacementRevision(events, recordedAt, parsed) {
+    return Crypto.createHash('sha256')
+        .update(events.map(event => event.eventId).sort().join('\n'))
+        .update('\0').update(recordedAt).update('\0').update(JSON.stringify(parsed))
+        .digest('hex').slice(0, 24);
+}
+
+/** @param {any} context @param {any} scope @param {any} metadata @param {string} recordedAt
+ * @param {string} revision @param {readonly any[]} previousEvents */
+function supersessionEvent(context, scope, metadata, recordedAt, revision, previousEvents) {
+    const hash = `${metadata.sha256}`.toLowerCase();
+    return baseEvent('events_superseded', scope,
+        { steamId: null, battlemetricsPlayerId: null, exactName: null }, {
+            eventIds: previousEvents.map(event => event.eventId).sort(),
+            reason: 'Confirmed Discord import replacement'
+        }, {
+            guildId: context.guildId,
+            observedAt: recordedAt,
+            recordedAt,
+            source: 'discord-import-replacement',
+            sourceEventId: `${hash}:supersede:${revision}`,
+            confidence: 'verified',
+            evidence: { hash, reference: metadata.reference || null, expiresAt: null }
+        });
+}
+
+/** @param {readonly any[]} groups */
+function expectedGroupMap(groups) {
+    if (!Array.isArray(groups)) throw new TypeError('Expected duplicate revisions must be an array.');
+    const result = new Map();
+    for (const group of groups) {
+        const hash = `${group && group.hash || ''}`.toLowerCase();
+        const eventIds = group && group.eventIds;
+        if (!/^[a-f0-9]{64}$/u.test(hash) || !Array.isArray(eventIds) || eventIds.length < 1 ||
+            eventIds.some(eventId => typeof eventId !== 'string' || !/^pi:[a-f0-9]{64}$/u.test(eventId))) {
+            throw new TypeError('Expected duplicate revision is invalid.');
+        }
+        result.set(hash, [...eventIds].sort());
+    }
+    return result;
+}
+
+/** @param {any} context @param {readonly {parsed:any,metadata:any}[]} imports
+ * @param {{onDuplicate?:'prompt'|'skip'|'replace',expectedDuplicates?:readonly any[]}} options */
+async function commitParsedImports(context, imports, options = {}) {
     if (!Array.isArray(imports) || imports.length < 1 || imports.length > 100) {
         throw new TypeError('Import batch must contain between 1 and 100 parsed observations.');
     }
@@ -654,27 +701,80 @@ async function commitParsedImports(context, imports) {
     imports.forEach(item => validateParsedImport(item && item.parsed, item && item.metadata, scope));
     const store = getStore(context, scope);
     const previous = await store.readAll();
+    const effective = Core.effectiveEvents(previous);
     const recordedAt = nowIso(getDependencies(context));
     const hashes = new Set(previous.filter((/** @type {any} */ event) => event.evidence)
         .map((/** @type {any} */ event) => event.evidence.hash.toLowerCase()));
+    const activeByHash = new Map();
+    for (const event of effective) {
+        if (!event.evidence) continue;
+        const hash = event.evidence.hash.toLowerCase();
+        const values = activeByHash.get(hash) || [];
+        values.push(event);
+        activeByHash.set(hash, values);
+    }
+    const onDuplicate = options.onDuplicate || 'prompt';
+    if (!['prompt', 'skip', 'replace'].includes(onDuplicate)) {
+        throw new TypeError('Duplicate import policy is unsupported.');
+    }
+    const duplicateImports = imports.filter(item => hashes.has(`${item.metadata.sha256}`.toLowerCase()));
+    const existing = Object.freeze(duplicateImports.map(item => {
+        const hash = `${item.metadata.sha256}`.toLowerCase();
+        const events = activeByHash.get(hash);
+        if (!events || events.length === 0) {
+            throw new Error('Duplicate evidence has no effective event revision.');
+        }
+        return Object.freeze({ hash, events: Object.freeze([...events]) });
+    }));
+    if (onDuplicate === 'prompt' && existing.length > 0) {
+        return Object.freeze({ appended: 0, duplicate: true, duplicates: existing.length,
+            existing, imported: 0, replaced: 0, committedHashes: Object.freeze([]) });
+    }
+    const expected = onDuplicate === 'replace' ? expectedGroupMap(options.expectedDuplicates || []) : new Map();
     const events = [];
     let duplicates = 0;
     let imported = 0;
+    let replaced = 0;
+    const committedHashes = [];
     for (const item of imports) {
         const hash = `${item.metadata.sha256}`.toLowerCase();
         if (hashes.has(hash)) {
-            duplicates += 1;
+            if (onDuplicate === 'skip') {
+                duplicates += 1;
+                continue;
+            }
+            const previousEvents = activeByHash.get(hash);
+            if (!previousEvents || previousEvents.length === 0) {
+                throw new Error('Duplicate evidence has no effective event revision.');
+            }
+            const expectedIds = expected.get(hash);
+            const currentIds = previousEvents.map((/** @type {any} */ event) => event.eventId).sort();
+            if (!expectedIds || expectedIds.length !== currentIds.length ||
+                currentIds.some((/** @type {string} */ eventId, /** @type {number} */ index) =>
+                    eventId !== expectedIds[index])) {
+                throw new Error('Existing import changed after preview; upload it again before replacing.');
+            }
+            const revision = replacementRevision(previousEvents, recordedAt, item.parsed);
+            const replacementMetadata = { ...item.metadata, observedAt: previousEvents[0].observedAt };
+            events.push(...importEvents(context, scope, item.parsed, replacementMetadata, recordedAt, revision));
+            events.push(supersessionEvent(context, scope, replacementMetadata, recordedAt, revision, previousEvents));
+            replaced += 1;
+            committedHashes.push(hash);
             continue;
         }
         hashes.add(hash);
         imported += 1;
+        committedHashes.push(hash);
         events.push(...importEvents(context, scope, item.parsed, item.metadata, recordedAt));
     }
     const results = events.length > 0 ? await store.appendMany(events) : [];
     return Object.freeze({
         appended: results.filter((/** @type {any} */ result) => result.appended).length,
-        duplicate: imported === 0,
+        duplicate: imported === 0 && replaced === 0,
+        committedHashes: Object.freeze(committedHashes),
         duplicates,
+        existing: Object.freeze([]),
+        replaced,
         imported
     });
 }
