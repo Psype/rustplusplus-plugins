@@ -291,6 +291,32 @@ Test('incomplete cinfo roster is committed only as a partial snapshot', async t 
     Assert.equal(snapshot.payload.unresolvedMembers.length, 2);
 });
 
+Test('cinfo preview separates OCR-read names from linked identities in roster order', () => {
+    const preview = ImportWorkflow.previewText({
+        kind: 'cinfo', tag: 'xD', declaredCount: 5,
+        members: [
+            { name: 'd.ve', role: 'member' },
+            { name: 'Nova', role: 'member' },
+            { name: 'Cockornut Tree', role: 'member' },
+            { name: 'Mr Tutel', role: 'member' },
+            { name: 'RangerMS', role: 'member' }
+        ],
+        resolvedMembers: [
+            { memberIndex: 2, name: 'Cockornut Tree', role: 'member' },
+            { memberIndex: 1, name: 'Nova', role: 'member' }
+        ],
+        unresolvedMembers: [
+            { observedText: 'd.ve' }, { observedText: 'Mr Tutel' }, { observedText: 'RangerMS' }
+        ],
+        missingMemberCount: 0,
+        establishedRaw: '09/30/2026 16:02:50',
+        errors: ['Partial roster: 2/5 member identities resolved.']
+    });
+    Assert.match(preview, /5\/5 names read · 2\/5 linked/);
+    Assert.match(preview, /OCR roster: d\.ve, Nova, Cockornut Tree, Mr Tutel, RangerMS/);
+    Assert.match(preview, /Linked identities: Nova, Cockornut Tree/);
+});
+
 Test('short-name collision resolves only after bounded SteamID corroboration', async t => {
     const value = createHarness(t);
     const firstSteamId = '76561197900000011';

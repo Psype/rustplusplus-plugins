@@ -50,15 +50,27 @@ function contextFor(client, interaction) {
 /** @param {any} parsed */
 function previewText(parsed) {
     if (parsed.kind === 'cinfo') {
-        const resolved = Array.isArray(parsed.resolvedMembers) ? parsed.resolvedMembers : parsed.members;
-        const members = resolved.map((/** @type {any} */ member) => `${member.name}${
-            ['leader', 'moderator'].includes(member.role) ? ` (${member.role})` : ''}`).join(', ');
+        const parsedMembers = Array.isArray(parsed.members) ? parsed.members : [];
+        const resolved = Array.isArray(parsed.resolvedMembers) ? parsed.resolvedMembers : parsedMembers;
+        const display = (/** @type {any} */ member) => `${member.name}${
+            ['leader', 'moderator'].includes(member.role) ? ` (${member.role})` : ''}`;
+        const boundedRoster = parsedMembers.slice(0, 20).map(display);
+        if (parsedMembers.length > boundedRoster.length) {
+            boundedRoster.push(`+${parsedMembers.length - boundedRoster.length}`);
+        }
+        const boundedLinked = resolved.slice().sort((/** @type {any} */ left, /** @type {any} */ right) =>
+            (left.memberIndex ?? 0) - (right.memberIndex ?? 0)).slice(0, 20).map(display);
+        if (resolved.length > boundedLinked.length) boundedLinked.push(`+${resolved.length - boundedLinked.length}`);
         const pendingCount = Array.isArray(parsed.unresolvedMembers) ? parsed.unresolvedMembers.length +
             (parsed.missingMemberCount || 0) : 0;
+        const declared = parsed.declaredCount || '?';
         return [
-            `OCR /cinfo — ${parsed.tag || 'unknown'} — ${resolved.length}/${parsed.declaredCount || '?'} linked`,
+            `OCR /cinfo — ${parsed.tag || 'unknown'} — ${parsedMembers.length}/${declared} names read · ${
+                resolved.length}/${declared} linked`,
             `Established: ${parsed.establishedRaw || 'unread'}`,
-            `Members: ${members || 'none'}`,
+            `${pendingCount > 0 ? 'OCR roster' : 'Members'}: ${
+                (pendingCount > 0 ? boundedRoster : boundedLinked).join(', ') || 'none'}`,
+            pendingCount > 0 ? `Linked identities: ${boundedLinked.join(', ') || 'none'}` : '',
             pendingCount > 0 ?
                 `Pending identities: ${pendingCount}. They stay excluded until automatically matched.` : '',
             parsed.errors.length > 0 ? `Warnings: ${parsed.errors.join(' ')}` : 'Ready to commit.'

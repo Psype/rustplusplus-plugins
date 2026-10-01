@@ -177,6 +177,12 @@ Le pipeline structuré reste sans coordonnées absolues :
    nettement séparé peut être lié automatiquement ; sinon conserver un slot provisoire avec ses hypothèses bornées et
    réévaluables. Le snapshot devient partiel sans perdre les membres déjà résolus et sans demander de correction.
 
+Depuis la version 1.22.5, l'aperçu Discord ne confond plus transcription et liaison : il affiche séparément le nombre
+de noms OCR lus et le nombre d'identités liées. Pour un roster partiel, la ligne `OCR roster` conserve les noms dans
+l'ordre observé, puis `Linked identities` liste uniquement les rattachements. Un nom simple comme `d.ve` peut donc être
+correctement transcrit tout en restant en attente d'une identité stable. Les boutons Confirm/Reject et le contrat de
+persistance ne changent pas.
+
 État implémenté au 1er octobre : le résolveur textuel partagé collecte les alias du journal, des trackers,
 BattleMetrics, de l'équipe Rust+ et des F7 du même lot. Il compare les graphèmes par Damerau-Levenshtein et bigrammes,
 conserve les écritures exactes, pénalise les changements de script et effectue une affectation globale un-à-un. Les
@@ -673,8 +679,8 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale finale après raffinement OCR par panneau, validation des frontières du roster et schema visuel 3 :
-`npm.cmd test` passe 186/186,
+QA locale finale après clarification de l'aperçu OCR/liaison :
+`npm.cmd test` passe 187/187,
 dont le typage strict `tsc --noEmit`. Une
 exécution antérieure avait reproduit le timeout FCM historique sous charge, puis son fichier était repassé 5/5
 isolément. Le sélecteur Windows, un webhook Discord réel et l'OCR de PNG originaux restent à valider interactivement ;
