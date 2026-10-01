@@ -163,7 +163,8 @@ Options | Description | Required
 > WarBandits `/cinfo` panel or `/intelimport f7 image:<file>` for Rust's F7 recent-player list. The command works only
 > in the configured private commands channel. It validates the Discord CDN origin, supported extension and declared
 > type, then trusts only the downloaded PNG/JPEG/WebP signature when Discord's two metadata hints disagree. Byte size
-> and decoded pixel count remain bounded before OCR. It runs one serialized local Tesseract process, then displays an
+> and decoded pixel count remain bounded before OCR. Discord's attachment size is only a preflight bound: the CDN body
+> is independently capped while streaming because its final length may differ. It runs one serialized local Tesseract process, then displays an
 > ephemeral preview. Only the
 > requester can confirm it for five minutes, on the same server and wipe. The event journal is committed before the
 > Discord acknowledgement; a Discord failure cannot roll it back. Ambiguous name/SteamID associations, inconsistent

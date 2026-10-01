@@ -18,6 +18,10 @@ To enable `/intelimport cinfo` and `/intelimport f7`, install
 The bot invokes `tesseract` locally and never downloads a model at runtime. If the executable is elsewhere, set
 `RPP_TESSERACT_PATH` to its absolute path before starting the bot.
 
+`Tesseract OCR unavailable: spawn tesseract ENOENT` means the service cannot find that executable. Verify
+`command -v tesseract` and `tesseract --list-langs` under the deployment environment; `eng` must be listed. An import
+rejected for this reason commits nothing and can be submitted again after installation.
+
 The private `intel-imports` channel is created automatically when the guild is set up again or the bot restarts. A
 manual message may contain 1 to 10 PNG/JPEG/WebP images. The bot detects F7 versus `/cinfo` from OCR anchors; an optional
 leading `cinfo` or `f7` acts as a strict hint for every attached image. One image may contain several vertically

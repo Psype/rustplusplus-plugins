@@ -40,8 +40,7 @@ function validateMetadata(attachment, options = {}) {
     if (!Number.isSafeInteger(record.size) || record.size <= 0 || record.size > maxBytes) {
         throw new Error(`Image size must be between 1 and ${maxBytes} bytes.`);
     }
-    return Object.freeze({ url: url.href, contentType, acceptedContentTypes,
-        declaredSize: Number(record.size) });
+    return Object.freeze({ url: url.href, contentType, acceptedContentTypes });
 }
 
 /** @param {Buffer} buffer */
@@ -110,7 +109,6 @@ async function downloadImage(attachment, dependencies = {}) {
         response = await fetchImpl(metadata.url, { signal: controller.signal, redirect: 'error' });
         if (!response || response.ok !== true) throw new Error(`Image download failed with HTTP ${response && response.status}.`);
         const buffer = await readLimitedBody(response, dependencies.maxBytes || MAX_BYTES);
-        if (buffer.length !== metadata.declaredSize) throw new Error('Downloaded image length does not match Discord metadata.');
         const mime = detectMime(buffer);
         if (!mime || !metadata.acceptedContentTypes.includes(mime)) {
             throw new Error('Image signature does not match the allowed Discord metadata.');

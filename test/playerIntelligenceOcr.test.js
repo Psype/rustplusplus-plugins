@@ -126,7 +126,7 @@ Test('Discord image boundary validates origin, signature, size and decoded dimen
     const attachment = {
         url: 'https://cdn.discordapp.com/attachments/1/2/f7.png?signature=test',
         contentType: 'image/png',
-        size: png.length
+        size: png.length + 17
     };
     const fakeResponse = {
         ok: true,
@@ -156,6 +156,14 @@ Test('Discord image boundary validates origin, signature, size and decoded dimen
     Assert.throws(() => ImageAttachment.validateMetadata({
         ...attachment, url: 'https://example.invalid/f7.png'
     }), /Discord CDN/);
+    Assert.throws(() => ImageAttachment.validateMetadata({
+        ...attachment, size: ImageAttachment.MAX_BYTES + 1
+    }), /Image size/);
+    await Assert.rejects(() => ImageAttachment.downloadImage({ ...attachment, size: 1 }, {
+        maxBytes: png.length - 1,
+        fetchImpl: async () => fakeResponse,
+        JimpImpl: { read: async () => ({ bitmap: { width: 1, height: 1 } }) }
+    }), /size limit/);
     await Assert.rejects(() => ImageAttachment.downloadImage(attachment, {
         fetchImpl: async () => ({ ...fakeResponse, arrayBuffer: async () => Buffer.from('not png') }),
         JimpImpl: { read: async () => ({ bitmap: { width: 1, height: 1 } }) }
