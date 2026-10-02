@@ -1,11 +1,14 @@
 // @ts-check
 const Layout = require('./ocrLayout.js');
+const F7IdentityValidation = require('./f7IdentityValidation.js');
 
 const STEAM_ID = /^7656119\d{10}$/;
 const UI_TEXT = /^(find|player|who|do|you|want|to|report|search|by|name|feedback|cancel)$/iu;
 
-/** @typedef {Readonly<{text:string,x:number,y:number,width:number,height:number,center:number}>} Box */
-/** @typedef {Readonly<{steamId:string,name:string|null,ambiguous:boolean,alternatives:readonly string[]}>} RawEntry */
+/** @typedef {Readonly<{text:string,x:number,y:number,width:number,height:number,center:number,
+ * idOcrCorrected?:boolean}>} Box */
+/** @typedef {Readonly<{steamId:string,name:string|null,ambiguous:boolean,alternatives:readonly string[],
+ * idOcrCorrected?:boolean}>} RawEntry */
 
 /** @param {unknown} value */
 function normalized(value) {
@@ -19,16 +22,19 @@ function digitCandidates(lines, typicalHeight) {
     /** @type {Box[]} */
     const partial = [];
     for (const line of lines) {
-        const numeric = line.words.filter(word => /^\d+$/u.test(word.text));
+        const numeric = line.words.filter(word => /^[0-9OoIl|SB.,:_-]+$/u.test(word.text));
         for (const cluster of Layout.clusterWordsByGap(numeric, typicalHeight * 0.5)) {
-            const text = cluster.map(word => word.text).join('');
+            const rawText = cluster.map(word => word.text).join('');
+            const normalizedId = F7IdentityValidation.normalizeSteamIdOcr(rawText);
+            const text = normalizedId ? normalizedId.steamId : rawText.replace(/\D/gu, '');
             const x = Math.min(...cluster.map(word => word.x));
             const right = Math.max(...cluster.map(word => word.x + word.width));
             const y = Math.min(...cluster.map(word => word.y));
             const bottom = Math.max(...cluster.map(word => word.y + word.height));
             const item = Object.freeze({ text, x, y, width: right - x, height: bottom - y,
                 center: (y + bottom) / 2 });
-            if (STEAM_ID.test(text)) candidates.push(item);
+            if (normalizedId && STEAM_ID.test(text)) candidates.push(Object.freeze({ ...item,
+                idOcrCorrected: normalizedId.corrections > 0 }));
             else if (/^7656\d{8,16}$/u.test(text)) partial.push(item);
         }
     }
@@ -41,7 +47,7 @@ function nameClusters(lines, typicalHeight) {
     const result = [];
     for (const line of lines) {
         const words = line.words.filter(word => !UI_TEXT.test(normalized(word.text)) &&
-            !STEAM_ID.test(word.text));
+            !F7IdentityValidation.normalizeSteamIdOcr(word.text));
         for (const cluster of Layout.clusterWordsByGap(words, typicalHeight)) {
             const text = Layout.cleanText(cluster.map(word => word.text).join(' '));
             if (!text || /^7656\d{8,16}$/u.test(text.replace(/\s+/g, ''))) continue;
@@ -105,6 +111,7 @@ function mergeEntries(entries) {
             name: ambiguous || names.length === 0 ? null : names[0],
             caseFidelity: false,
             ambiguous,
+            idOcrCorrected: observations.some(item => item.idOcrCorrected === true),
             alternatives: Object.freeze(ambiguous ? [...new Set([...names, ...alternatives])] : [])
         }));
     }
@@ -126,7 +133,7 @@ function parseF7Words(inputWords, options = {}) {
     const names = nameClusters(lines, typicalHeight);
     const entries = mergeEntries(ids.candidates.map(id => {
         const selection = selectName(id, names, typicalHeight);
-        return Object.freeze({ steamId: id.text, ...selection });
+        return Object.freeze({ steamId: id.text, idOcrCorrected: id.idOcrCorrected === true, ...selection });
     }));
     if (entries.length === 0) errors.push('No complete SteamID64 found.');
     if (ids.partial.length > 0) errors.push(`${ids.partial.length} partial SteamID candidate(s) rejected.`);

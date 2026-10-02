@@ -3,6 +3,7 @@ const Jimp = require('jimp');
 
 const Layout = require('./ocrLayout.js');
 const OcrImagePreprocess = require('./ocrImagePreprocess.js');
+const OcrCorrectionMemory = require('./ocrCorrectionMemory.js');
 const { parseCinfoWords, parseEstablished, splitCinfoWordBlocks } = require('./parseCinfo.js');
 
 const MAX_ISOLATED_ROSTER_MEMBERS = 32;
@@ -277,6 +278,42 @@ function alphanumericName(value) {
         .replace(/[^\p{L}\p{N}]/gu, '');
 }
 
+/** @param {any} image @param {any} word */
+function commaSeparatorBounds(image, word) {
+    const text = `${word.text || ''}`;
+    const units = Array.from(text);
+    const commaIndex = units.indexOf(',');
+    if (commaIndex === -1) return null;
+    const left = Math.max(0, Math.floor(word.x));
+    const right = Math.min(image.bitmap.width, Math.ceil(word.x + word.width));
+    const top = Math.max(0, Math.floor(word.y));
+    const bottom = Math.min(image.bitmap.height, Math.ceil(word.y + word.height));
+    if (right <= left || bottom <= top) return null;
+    if (units.length === 1) return Object.freeze({ left, right });
+    const active = [];
+    for (let x = left; x < right; x += 1) {
+        let foreground = false;
+        for (let y = top; y < bottom && !foreground; y += 1) {
+            const { r, g, b, a } = Jimp.intToRGBA(image.getPixelColor(x, y));
+            foreground = OcrImagePreprocess.isRustUiTextPixel(r, g, b, a);
+        }
+        active.push(foreground);
+    }
+    const runs = [];
+    let start = -1;
+    for (let index = 0; index <= active.length; index += 1) {
+        if (active[index] === true && start === -1) start = index;
+        if (active[index] !== true && start !== -1) {
+            runs.push({ left: left + start, right: left + index });
+            start = -1;
+        }
+    }
+    if (commaIndex === units.length - 1 && runs.length >= 2) return Object.freeze(runs.at(-1));
+    const fallbackLeft = word.x + word.width * commaIndex / units.length;
+    const fallbackRight = word.x + word.width * (commaIndex + 1) / units.length;
+    return Object.freeze({ left: fallbackLeft, right: fallbackRight });
+}
+
 /** @param {any} image @param {any} block */
 function rosterMemberFragments(image, block) {
     const count = block.parsed && block.parsed.declaredCount;
@@ -305,11 +342,9 @@ function rosterMemberFragments(image, block) {
             const commaCount = ([...word.text].filter(character => character === ',')).length;
             if (commaCount > 1) return null;
             if (commaCount === 1) {
-                const units = Array.from(word.text);
-                const commaIndex = units.indexOf(',');
-                const boundary = commaIndex === units.length - 1 ? word.x + word.width :
-                    word.x + word.width * (commaIndex + 0.5) / units.length;
-                separators.push({ kind: 'comma', left: boundary, right: boundary });
+                const separator = commaSeparatorBounds(image, word);
+                if (!separator) return null;
+                separators.push({ kind: 'comma', ...separator });
             }
             else if (/^and$/iu.test(word.text)) {
                 separators.push({ kind: 'and', left: word.x, right: word.x + word.width });
@@ -381,12 +416,27 @@ async function createIsolatedRosterSheet(image, fragments, JimpImpl) {
     }
     sheet.resize(width * scale, height * scale, JimpImpl.RESIZE_NEAREST_NEIGHBOR);
     const buffer = await sheet.getBufferAsync(JimpImpl.MIME_PNG || Jimp.MIME_PNG);
-    return Object.freeze({ imageBase64: buffer.toString('base64'), scale });
+    return Object.freeze({ imageBase64: buffer.toString('base64'), scale, rowHeight });
 }
 
 /** @param {unknown} value */
 function cleanIsolatedMember(value) {
     return Layout.cleanText(value).replace(/^\s*,+\s*|\s*,+\s*$/gu, '');
+}
+
+/** @param {readonly any[]} words @param {{scale:number,rowHeight:number}} sheet @param {number} count */
+function isolatedMemberNames(words, sheet, count) {
+    const names = Array(count).fill(null);
+    for (const line of Layout.groupLines(words)) {
+        const center = line.y + line.height / 2;
+        const index = Math.floor(center / (sheet.rowHeight * sheet.scale));
+        const name = cleanIsolatedMember(line.text);
+        if (!Number.isSafeInteger(index) || index < 0 || index >= count || !name || names[index] !== null) {
+            return null;
+        }
+        names[index] = name;
+    }
+    return names.every(Boolean) ? Object.freeze(names) : null;
 }
 
 /** @param {any} image @param {any} block @param {Function} recognize @param {any} ocrOptions
@@ -399,11 +449,17 @@ async function refineRosterMembers(image, block, recognize, ocrOptions, dependen
         Math.min(30000, Math.max(1000, Number(dependencies.rosterOcrTimeoutMs))) :
         Math.min(30000, Number(ocrOptions.timeoutMs) || 30000);
     const words = await recognize(sheet.imageBase64, { ...ocrOptions, psm: 6, timeoutMs });
-    const names = Layout.groupLines(words).map(line => cleanIsolatedMember(line.text));
-    if (names.length !== block.parsed.members.length || names.some(name => !name || name.length > 128) ||
+    const readNames = isolatedMemberNames(words, sheet, block.parsed.members.length);
+    if (!readNames) return block;
+    const confirmedUserWords = Array.isArray(ocrOptions.confirmedUserWords) ? ocrOptions.confirmedUserWords : [];
+    const names = readNames.map((name, index) => OcrCorrectionMemory.confirmedNameHint(name,
+        confirmedUserWords) || OcrCorrectionMemory.confirmedNameHint(block.parsed.members[index].name,
+        confirmedUserWords) || name);
+    if (names.some(name => !name || name.length > 128) ||
         new Set(names.map(name => name.normalize('NFKC').toLocaleLowerCase('en'))).size !== names.length) return block;
     const sameBaseNames = names.every((name, index) => alphanumericName(name) ===
-        alphanumericName(block.parsed.members[index].name));
+        alphanumericName(block.parsed.members[index].name) ||
+        OcrCorrectionMemory.confirmedNameHint(block.parsed.members[index].name, confirmedUserWords) === name);
     if (!sameBaseNames) return block;
     const members = Object.freeze(names.map((name, index) => Object.freeze({
         ...block.parsed.members[index],
@@ -603,8 +659,10 @@ module.exports = Object.freeze({
     refineIncompleteRoster,
     refineMissingFields,
     refineRosterMembers,
+    isolatedMemberNames,
     rosterBounds,
     rosterMemberFragments,
+    commaSeparatorBounds,
     samePanel,
     tagValueBounds
 });

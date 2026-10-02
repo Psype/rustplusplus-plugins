@@ -582,7 +582,8 @@ function recordResolved(file, items, observedAt) {
         const resolved = new Map(item.parsed.kind === 'cinfo' ?
             (item.parsed.resolvedMembers || []).map((/** @type {any} */ member) => [member.memberIndex, member]) :
             (item.parsed.entries || []).map((/** @type {any} */ entry, /** @type {number} */ index) =>
-                [index, entry.ambiguous || !entry.name ? null : entry]));
+                [Number.isSafeInteger(entry.visualMemberIndex) ? entry.visualMemberIndex : index,
+                    entry.ambiguous || !entry.name ? null : entry]));
         for (const visual of item.visualSamples || []) {
             if (visual.boundaryProof !== true) continue;
             const member = resolved.get(visual.memberIndex);
@@ -665,7 +666,8 @@ function recordResolved(file, items, observedAt) {
 /** @param {string} file */
 async function confirmedUserWords(file) {
     const document = await serialized(file, () => read(file));
-    return Object.freeze(document.confirmedUserWords.map((/** @type {any} */ item) => item.name));
+    return Object.freeze([...document.confirmedUserWords].reverse()
+        .map((/** @type {any} */ item) => item.name));
 }
 
 /** @param {string} file @param {readonly string[]} names @param {string} confirmedAt */

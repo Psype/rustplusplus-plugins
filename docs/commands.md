@@ -167,7 +167,7 @@ Options | Description | Required
 > is independently capped while streaming because its final length may differ. It compares a bounded high-contrast
 > Rust-UI text mask with the original through serialized local Tesseract processes, then displays an
 > ephemeral preview. Only the
-> requester can edit or confirm it for thirty minutes, on the same server and wipe. The event journal is committed before the
+> requester can edit or confirm it for thirty minutes, on the same server. The event journal is committed before the
 > Discord acknowledgement; a Discord failure cannot roll it back. Existing aliases from the event journal, trackers,
 > BattleMetrics, Rust+ and the same F7 upload feed a Unicode-aware, globally one-to-one roster resolver. Short names use
 > stricter collision margins. At most three provisional queries per batch may be corroborated through the existing
@@ -175,27 +175,34 @@ Options | Description | Required
 > Persistent known aliases are passed to Tesseract as UTF-8 user words. Confirmed name shapes are also retained in a
 > bounded per-server data sidecar: exact repeats may corroborate, while approximate visual matches only rank candidates
 > and visual collisions remain ambiguous. No screenshot pixels are kept by this dictionary.
+> F7 uses a separate muted-neutral mask for the dim gray SteamID64 rows when the normal passes find none. At most two
+> common OCR substitutions may be repaired inside a 17-character candidate, which must remain inside the valid Steam
+> individual-account range. The displayed uppercase name may contain OCR errors, but the pair is kept only when it is
+> sufficiently similar to the public Steam persona or an alias already tied to that same SteamID. A mismatched or
+> unverifiable row is reported and excluded; no Steam credential or Web API key is used.
 > Ambiguous name/SteamID associations and truncated IDs are never guessed. A structurally valid `/cinfo` with uncertain
 > or missing members is offered as a partial snapshot: pending identities stay out of aliases and affinity counts until
 > later evidence resolves them automatically. A complete SteamID with a hidden name is retained without an alias. Set
 > `RPP_TESSERACT_PATH` when the executable is not available as `tesseract`; production Linux therefore
 > needs the local `tesseract-ocr` package and English model, with no runtime model download.
 > A complete `/cinfo` roster also receives one bounded OCR pass over temporary member rows split relatively at commas
-> and the final standalone `and`. It can correct which pseudo owns decorative punctuation, but it is rejected if it
-> changes any member's letters/numbers or the declared roster count.
+> and the final standalone `and`. OCR output is assigned to its original sheet slot by vertical row, so a missing line
+> cannot shift Marley onto Swizzy. Delimiter pixels are excluded from the member signature. It can correct decorative
+> punctuation only from a uniquely confirmed name/template; member count, indexes and roles remain fixed.
 > A still-incomplete roster receives one separate roster-field-only read. If any cinfo field remains wrong, use
 > `Edit <tag>`: line 1 is the exact ClanTag, line 2 is `Established` as `MM/DD/YYYY HH:mm:ss` GMT, and every remaining
 > line is one exact player name. The bot validates all three sections, recomputes the inferred wipe when the date
 > changes, reruns identity matching and shows another preview. Nothing is stored until Confirm; afterward only the
-> confirmed player names enter the bounded OCR user-word lexicon, without becoming SteamID proof or glyph evidence.
+> confirmed player names enter the bounded OCR user-word lexicon. A changed name with a proven member boundary also
+> creates a persistent image→text correction template in `ocr-correction-memory.json`; it changes transcription only,
+> never SteamID, identity or role proof. Exact visual repeats apply automatically after restart. Approximate repeats
+> require a unique score ≥0.985 with a ≥0.03 margin; collisions and short-name fuzzy matches fail closed.
 > Missing `Members`/`Established` anchors and a polluted tag are reread from isolated rows derived from neighboring
 > semantic lines. Count/date reads use restricted numeric alphabets and every result is strictly revalidated.
-> No caption or `captured_at` is required for an older `/cinfo`: the bot infers its regular Tuesday/Friday 14:00 GMT
-> wipe from `Established` and shows that wipe before confirmation. Forced wipes and intermediate observed boundaries
-> are deliberately ignored. Upload blocks from different inferred regular wipes separately. `Established` remains the
-> clan creation time, not the roster capture time; the upload time is not used as the historical capture time.
-> Optional `captured_at` accepts `YYYY-MM-DD HH:mm` in GMT or a full ISO timestamp with an explicit UTC offset when an
-> exact observation time is useful.
+> No capture date is read or required for `/cinfo`. Every detected panel independently infers its regular
+> Tuesday/Friday 14:00 GMT wipe from its own `Established`; one image may therefore contain and commit blocks assigned
+> to different wipes. Forced wipes, intermediate observed boundaries, the Discord upload time and message captions are
+> deliberately ignored. `Established` is parsed strictly as `MM/DD/YYYY HH:mm:ss` GMT.
 > Reimporting an already committed image does not silently duplicate it. Discord shows the effective previous version
 > and the proposed version, then offers `Replace previous` or `Keep existing`. Replacement preserves the logical
 > counter position unless corrected `Established` data moves it to another regular wipe, rebuilds identities/clans/
@@ -204,17 +211,16 @@ Options | Description | Required
 The bot also creates a private `intel-imports` channel. A message may contain 1–10 images and needs no caption: F7 and
 `/cinfo` are detected from semantic OCR anchors. Starting the message with `cinfo` or `f7` remains an optional strict
 hint for all attachments. Repeated `ClanTag` anchors allow several stacked `/cinfo` panels in one image; every panel is
-validated separately and the whole preview is confirmed as one batch. A `/cinfo` block needs a valid tag, declared
+validated separately, receives its own Established-derived wipe, and the whole preview is confirmed as one batch. A `/cinfo` block needs a valid tag, declared
 count and `Established` timestamp; its roster may remain partial. If a block lacks that structure or the complete preview
 cannot fit safely, nothing is offered for confirmation. The human sender alone can confirm. An approved Windows helper
 webhook can post the same messages when its ID is listed in `RPP_INTEL_IMPORT_WEBHOOK_IDS`; because a webhook has no
 human requester, any member with the configured bot role (or an administrator) may confirm it. Unapproved webhooks are
-ignored. All paths use the same validation, thirty-minute requester/channel/server/wipe binding and durable batch commit logic.
+ignored. All paths use the same validation, thirty-minute requester/channel/server binding and durable batch commit logic.
 
 Subcommand | Options | Description | Required
 ---------- | ------- | ----------- | --------
 `cinfo` | `image` | Original `/cinfo` PNG, JPEG, or WebP. | `True`
-`cinfo` | `captured_at` | Historical capture time: `YYYY-MM-DD HH:mm` in GMT or ISO with offset. | `False`
 `f7` | `image` | Original F7 PNG, JPEG, or WebP. | `True`
 
 

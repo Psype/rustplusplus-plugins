@@ -35,6 +35,8 @@ Test('Rust UI preprocessing isolates every observed text color and rejects the b
     Assert.equal(Preprocess.isRustUiTextPixel(98, 191, 54), true);
     Assert.equal(Preprocess.isRustUiTextPixel(47, 166, 226), true);
     Assert.equal(Preprocess.isRustUiTextPixel(135, 61, 36), false);
+    Assert.equal(Preprocess.isRustUiTextPixel(125, 125, 125), false);
+    Assert.equal(Preprocess.isRustF7TextPixel(125, 125, 125), true);
 
     const image = await newImage(20, 10, 0x873d24ff);
     for (let x = 2; x < 18; x += 1) image.setPixelColor(0xffffffff, x, 5);
@@ -149,6 +151,27 @@ Test('F7 name shapes seed the persistent library with their exact SteamID and no
     Assert.equal(sample.name, 'RW');
     Assert.equal(sample.steamId, '76561197976022895');
     Assert.equal(sample.caseFidelity, false);
+});
+
+Test('rejecting an F7 row never shifts a later visual sample onto the wrong SteamID', async t => {
+    const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-visual-f7-index-'));
+    t.after(() => Fs.rmSync(directory, { recursive: true, force: true }));
+    const file = Path.join(directory, 'visual-alias-library.json');
+    const firstShape = feature(0x21);
+    const secondShape = feature(0x42);
+    await Visual.recordResolved(file, [{
+        parsed: { kind: 'f7', entries: [{
+            name: 'Second', steamId: '76561198052859299', ambiguous: false, visualMemberIndex: 1
+        }] },
+        visualSamples: [
+            { memberIndex: 0, observedText: 'Rejected', boundaryProof: true, feature: firstShape },
+            { memberIndex: 1, observedText: 'SECOND', boundaryProof: true, feature: secondShape }
+        ]
+    }], '2026-10-02T12:00:00.000Z');
+    const samples = (await Visual.read(file)).samples;
+    Assert.equal(samples.length, 1);
+    Assert.equal(samples[0].steamId, '76561198052859299');
+    Assert.equal(samples[0].feature.digest, secondShape.digest);
 });
 
 Test('partial cinfo rosters cannot emit or persist position-based visual samples', async t => {

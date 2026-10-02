@@ -8,6 +8,7 @@ const Scrape = require('../../util/scrape.js');
 const ImageAttachment = require('./imageAttachment.js');
 const CinfoPanelRefinement = require('./cinfoPanelRefinement.js');
 const CinfoRoles = require('./cinfoRoles.js');
+const F7IdentityValidation = require('./f7IdentityValidation.js');
 const Layout = require('./ocrLayout.js');
 const OcrImagePreprocess = require('./ocrImagePreprocess.js');
 const { detectImportKind } = require('./detectImportKind.js');
@@ -17,6 +18,7 @@ const { resolveCinfo } = require('./resolveCinfo.js');
 const Runtime = require('./runtime.js');
 const TesseractOcr = require('./tesseractOcr.js');
 const VisualAliasLibrary = require('./visualAliasLibrary.js');
+const OcrCorrectionMemory = require('./ocrCorrectionMemory.js');
 const WarBandits = require('../warBandits');
 
 const CONFIRM_PREFIX = 'PIImportConfirm:';
@@ -117,37 +119,27 @@ function timedPreview(items, timingText) {
 /** @param {any} context @param {readonly {parsed:any}[]} items @param {any} scope
  * @param {string|null} captureTime */
 async function resolveImportTiming(context, items, scope, captureTime) {
-    let importScope = captureTime === null ? scope : await Runtime.resolveHistoricalScope(context, captureTime);
-    let inferredFromEstablished = false;
-    if (captureTime === null && items.every(item => item.parsed.kind === 'cinfo')) {
-        const inferredScopes = items.map(item => Runtime.resolveEstablishedScope(context,
-            item.parsed.establishedAtUtc));
-        const wipeStarts = [...new Set(inferredScopes.map(value => value.wipeStart))];
-        if (wipeStarts.length !== 1) {
-            throw new Error('Detected cinfo blocks belong to different inferred wipes; upload each wipe separately.');
+    void captureTime;
+    const itemTimings = items.map(item => {
+        if (item.parsed.kind !== 'cinfo') {
+            return Object.freeze({ wipeId: scope.wipeId, wipeStart: scope.wipeStart, observedAt: null,
+                historical: false });
         }
-        if (inferredScopes[0].wipeId !== scope.wipeId ||
-            items.some(item => item.parsed.manualMetadataCorrected === true)) {
-            const observedAt = items.map(item => item.parsed.establishedAtUtc).sort().at(-1);
-            importScope = Object.freeze({ ...inferredScopes[0], observedAt });
-            inferredFromEstablished = true;
-        }
-    }
-    const historical = captureTime !== null || inferredFromEstablished;
-    if (historical && items.some(item => item.parsed.establishedAtUtc < importScope.wipeStart ||
-        item.parsed.establishedAtUtc > importScope.observedAt)) {
-        throw new Error('Clan Established time must fall between the selected wipe start and capture time.');
-    }
-    const timingText = inferredFromEstablished ?
-        `Wipe inferred from Established: ${importScope.wipeStart} | capture time not used` :
-        captureTime === null ? null : `Historical capture: ${importScope.observedAt} | wipe: ${importScope.wipeStart}`;
+        const inferred = Runtime.resolveEstablishedScope(context, item.parsed.establishedAtUtc);
+        return Object.freeze({ wipeId: inferred.wipeId, wipeStart: inferred.wipeStart,
+            observedAt: item.parsed.establishedAtUtc, historical: true });
+    });
+    const cinfoTimings = items.map((item, index) => ({ item, timing: itemTimings[index] }))
+        .filter(value => value.item.parsed.kind === 'cinfo');
+    const timingText = cinfoTimings.length === 0 ? null : cinfoTimings.length === 1 ?
+        `Wipe inferred from Established: ${cinfoTimings[0].timing.wipeStart} | capture time not used` :
+        `Wipes inferred independently from Established: ${cinfoTimings.map(value => `${value.item.parsed.tag}=${
+            value.timing.wipeStart}`).join('; ')}`;
     return Object.freeze({
         activeWipeId: scope.wipeId,
-        wipeId: importScope.wipeId,
-        wipeStart: importScope.wipeStart,
-        observedAt: historical ? importScope.observedAt : null,
-        historical,
-        inferredFromEstablished,
+        itemTimings: Object.freeze(itemTimings),
+        historical: itemTimings.every(value => value.historical),
+        requiresActiveWipe: itemTimings.some(value => !value.historical),
         timingText
     });
 }
@@ -259,16 +251,14 @@ function parseCorrectedCinfo(value, declaredCount) {
 
 /** @param {any} parsed @param {readonly string[]} names */
 function applyCorrectedRoster(parsed, names) {
-    const roles = new Map((parsed.members || []).map((/** @type {any} */ member) => [
-        Layout.cleanText(member.name).normalize('NFKC').toLocaleLowerCase('en'), member.role
-    ]));
+    const sourceMembers = Array.isArray(parsed.members) ? parsed.members : [];
     const { resolvedMembers: _resolved, unresolvedMembers: _unresolved, missingMemberCount: _missing,
         importable: _importable, ...base } = parsed;
     return Object.freeze({
         ...base,
-        members: Object.freeze(names.map(name => Object.freeze({
+        members: Object.freeze(names.map((name, index) => Object.freeze({
             name,
-            role: roles.get(name.normalize('NFKC').toLocaleLowerCase('en')) || 'unknown'
+            role: sourceMembers[index] && sourceMembers[index].role || 'unknown'
         }))),
         complete: true,
         manualRosterCorrected: true,
@@ -392,8 +382,10 @@ function selectRecognizedResult(recognized) {
  * @param {string} reference
  * @param {number} attachmentIndex
  * @param {readonly string[]} [userWords]
+ * @param {readonly string[]} [confirmedUserWords]
  */
-async function parseAttachment(client, kindHint, attachment, reference, attachmentIndex, userWords = []) {
+async function parseAttachment(client, kindHint, attachment, reference, attachmentIndex, userWords = [],
+    confirmedUserWords = []) {
     const dependencies = importDependencies(client);
     const image = await (dependencies.downloadImage || ImageAttachment.downloadImage)(attachment, dependencies);
     const recognize = dependencies.recognize || TesseractOcr.recognize;
@@ -402,7 +394,8 @@ async function parseAttachment(client, kindHint, attachment, reference, attachme
         language: dependencies.language || 'eng',
         psm: kindHint === 'cinfo' ? 6 : 11,
         timeoutMs: dependencies.ocrTimeoutMs,
-        userWords
+        userWords,
+        confirmedUserWords
     };
     /** @type {{label:string,result:any,quality:number}[]} */
     const recognized = [];
@@ -432,6 +425,25 @@ async function parseAttachment(client, kindHint, attachment, reference, attachme
     }
     catch (error) {
         failures.push(error);
+    }
+    const f7DetectedWithoutIds = recognized.some(value => value.result.kind === 'f7') &&
+        recognized.every(value => value.result.kind !== 'f7' || value.result.blocks[0].parsed.entries.length === 0);
+    if (f7DetectedWithoutIds && dependencies.disableF7MutedTextPass !== true) {
+        try {
+            const preprocessF7 = dependencies.preprocessF7Image || OcrImagePreprocess.createF7TextMask;
+            const processed = await preprocessF7(image.imageBase64, dependencies);
+            const words = normalizeWordScale(await recognize(processed.imageBase64,
+                { ...ocrOptions, psm: 11 }), processed.scale);
+            const result = parseRecognizedWords(words, 'f7', dependencies);
+            recognized.push({ label: 'f7-muted-text', result, quality: recognitionQuality(result) });
+        }
+        catch (error) {
+            failures.push(error);
+            if (typeof client.log === 'function') {
+                client.log('PLAYER_INTELLIGENCE', `Optional F7 muted SteamID pass failed: ${
+                    sanitizeError(error)}`, 'warn');
+            }
+        }
     }
     if (recognized.length === 0) {
         const reason = failures.at(-1);
@@ -612,6 +624,8 @@ async function prepareImports(client, source, requests, requesterUserId, referen
     const scopeBeforeResolution = Runtime.getScope(context);
     const visualFile = scopeBeforeResolution ? Path.join(Runtime.getDataDirectory(context, scopeBeforeResolution),
         'visual-alias-library.json') : null;
+    const correctionFile = scopeBeforeResolution ? Path.join(Runtime.getDataDirectory(context, scopeBeforeResolution),
+        'ocr-correction-memory.json') : null;
     /** @type {readonly string[]} */
     let learnedUserWords = Object.freeze([]);
     if (visualFile) {
@@ -630,15 +644,61 @@ async function prepareImports(client, source, requests, requesterUserId, referen
             }
         }
     }
+    /** @type {readonly string[]} */
+    let correctionUserWords = Object.freeze([]);
+    if (correctionFile) {
+        try {
+            const loadCorrectionWords = dependencies.confirmedOcrCorrectionWords ||
+                OcrCorrectionMemory.confirmedWords;
+            correctionUserWords = await loadCorrectionWords(correctionFile);
+            if (!Array.isArray(correctionUserWords)) {
+                throw new TypeError('OCR correction-word provider returned an invalid result.');
+            }
+        }
+        catch (error) {
+            correctionUserWords = Object.freeze([]);
+            if (typeof client.log === 'function') {
+                client.log('PLAYER_INTELLIGENCE', `OCR correction words unavailable: ${
+                    sanitizeError(error)}`, 'warn');
+            }
+        }
+    }
     const userWords = Object.freeze([...new Set([
-        ...persistedCandidates.map((/** @type {any} */ candidate) => candidate.name),
-        ...learnedUserWords
+        ...correctionUserWords,
+        ...learnedUserWords,
+        ...persistedCandidates.map((/** @type {any} */ candidate) => candidate.name)
     ].filter((/** @type {any} */ name) => typeof name === 'string'))]);
     /** @type {any[]} */
-    const rawItems = [];
+    let rawItems = [];
     for (let index = 0; index < requests.length; index += 1) {
         rawItems.push(...await parseAttachment(client, requests[index].kindHint, requests[index].attachment,
-            reference, index, userWords));
+            reference, index, userWords, learnedUserWords));
+    }
+    if (correctionFile) {
+        try {
+            const correctItems = dependencies.applyOcrCorrections || OcrCorrectionMemory.apply;
+            const corrected = await correctItems(correctionFile, rawItems, learnedUserWords);
+            if (!Array.isArray(corrected) || corrected.length !== rawItems.length) {
+                throw new TypeError('OCR correction provider returned an invalid result.');
+            }
+            rawItems = [...corrected];
+        }
+        catch (error) {
+            if (typeof client.log === 'function') {
+                client.log('PLAYER_INTELLIGENCE', `Optional OCR correction memory unavailable: ${
+                    sanitizeError(error)}`, 'warn');
+            }
+        }
+    }
+    if (rawItems.some(item => item.parsed.kind === 'f7') && dependencies.disableF7ProfileVerification !== true) {
+        const verifyF7 = dependencies.verifyF7Identities || F7IdentityValidation.verify;
+        const steamProfileName = dependencies.steamProfileName ||
+            ((/** @type {string} */ steamId) => Scrape.scrapeSteamProfileName(client, steamId));
+        const verified = await verifyF7(rawItems, persistedCandidates, steamProfileName);
+        if (!Array.isArray(verified) || verified.length !== rawItems.length) {
+            throw new TypeError('F7 identity verifier returned an invalid result.');
+        }
+        rawItems = [...verified];
     }
     /** @type {readonly (readonly any[])[]} */
     let visualCandidates = Object.freeze(rawItems.map(() => Object.freeze([])));
@@ -743,6 +803,7 @@ async function prepareImports(client, source, requests, requesterUserId, referen
         ...timing,
         captureTime,
         visualFile,
+        correctionFile,
         items: Object.freeze(items),
         createdAt,
         expiresAt: createdAt + TTL_MS
@@ -765,8 +826,7 @@ async function beginImport(client, interaction) {
     }
     const kind = interaction.options.getSubcommand();
     const attachment = interaction.options.getAttachment('image', true);
-    const captureTime = kind === 'cinfo' && typeof interaction.options.getString === 'function' ?
-        interaction.options.getString('captured_at', false) : null;
+    const captureTime = null;
     try {
         const payload = await prepareImports(client, interaction, [{ kindHint: kind, attachment }],
             `${interaction.user.id}`, `discord-interaction:${interaction.id}`, captureTime);
@@ -849,7 +909,7 @@ async function respondButton(client, interaction, content) {
 /** @param {any} scope @param {any} item */
 function pendingScopeMatches(scope, item) {
     return Boolean(scope && scope.serverKey === item.serverKey &&
-        (item.historical === true || scope.wipeId === item.activeWipeId));
+        (item.requiresActiveWipe !== true || scope.wipeId === item.activeWipeId));
 }
 
 /** @param {any} context @param {readonly any[]} parsedItems @param {any} client */
@@ -1010,13 +1070,16 @@ async function handleButton({ client, interaction }) {
     }
     let result;
     try {
-        const imports = item.items.map((/** @type {any} */ entry) => ({
+        const imports = item.items.map((/** @type {any} */ entry, /** @type {number} */ index) => ({
             parsed: entry.parsed,
             metadata: {
                 sha256: entry.sha256,
                 reference: entry.reference,
-                ...(item.observedAt ? { observedAt: item.observedAt, wipeId: item.wipeId,
-                    wipeStart: item.wipeStart } : {})
+                ...(item.itemTimings[index].observedAt ? {
+                    observedAt: item.itemTimings[index].observedAt,
+                    wipeId: item.itemTimings[index].wipeId,
+                    wipeStart: item.itemTimings[index].wipeStart
+                } : {})
             }
         }));
         result = await Runtime.commitParsedImports(context, imports, {
@@ -1080,6 +1143,20 @@ async function handleButton({ client, interaction }) {
             catch (error) {
                 if (typeof client.log === 'function') {
                     client.log('PLAYER_INTELLIGENCE', `Confirmed OCR lexicon update failed after commit: ${
+                        sanitizeError(error)}`, 'warn');
+                }
+            }
+        }
+        if (item.correctionFile && correctedNames.length > 0) {
+            try {
+                const dependencies = importDependencies(client);
+                const recordCorrections = dependencies.recordOcrCorrections ||
+                    OcrCorrectionMemory.recordConfirmed;
+                await recordCorrections(item.correctionFile, committedItems, new Date().toISOString());
+            }
+            catch (error) {
+                if (typeof client.log === 'function') {
+                    client.log('PLAYER_INTELLIGENCE', `OCR correction memory update failed after commit: ${
                         sanitizeError(error)}`, 'warn');
                 }
             }

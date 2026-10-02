@@ -7,6 +7,7 @@ const { detectImportKind } = require('../src/plugins/playerIntelligence/detectIm
 const ImageAttachment = require('../src/plugins/playerIntelligence/imageAttachment.js');
 const TesseractOcr = require('../src/plugins/playerIntelligence/tesseractOcr.js');
 const CinfoRoles = require('../src/plugins/playerIntelligence/cinfoRoles.js');
+const F7IdentityValidation = require('../src/plugins/playerIntelligence/f7IdentityValidation.js');
 
 function word(text, x, y, width = Math.max(8, text.length * 7), height = 14) {
     return { text, x, y, width, height, confidence: 95 };
@@ -94,6 +95,41 @@ Test('F7 OCR parser associates relative rows, retains complete ID-only rows and 
     ]);
     Assert.deepEqual(result.rejectedPartialIds, ['7656119796121162']);
     Assert.equal(result.entries.every(entry => entry.caseFidelity === false), true);
+});
+
+Test('F7 SteamID OCR repairs at most two common glyph substitutions and validates account range', () => {
+    const result = parseF7Words([
+        word('FIND PLAYER', 10, 10), word('RW', 100, 100),
+        word('76561197976O22895', 100, 122, 150)
+    ]);
+    Assert.equal(result.complete, true, result.errors.join(' '));
+    Assert.equal(result.entries[0].steamId, '76561197976022895');
+    Assert.equal(result.entries[0].idOcrCorrected, true);
+    Assert.equal(F7IdentityValidation.normalizeSteamIdOcr('7656119OOOOOOOOOO'), null);
+    Assert.equal(F7IdentityValidation.isValidSteamId64('76561197900000001'), false);
+});
+
+Test('F7 names tolerate OCR case/glyph errors only when the same SteamID profile corroborates them', async () => {
+    const items = [{ parsed: {
+        kind: 'f7', complete: true, rejectedPartialIds: [], errors: [], entries: [
+            { steamId: '76561198052859299', name: 'SUMDUMS1T', ambiguous: false },
+            { steamId: '76561197976022895', name: null, ambiguous: false },
+            { steamId: '76561199194234434', name: 'WRONG PERSON', ambiguous: false }
+        ]
+    } }];
+    const profiles = new Map([
+        ['76561198052859299', 'Sumdumsit'],
+        ['76561197976022895', 'Rw'],
+        ['76561199194234434', 'tom.le.geek.2']
+    ]);
+    const [verified] = await F7IdentityValidation.verify(items, [], async id => profiles.get(id));
+    Assert.deepEqual(verified.parsed.entries.map(entry => [entry.steamId, entry.name]), [
+        ['76561198052859299', 'Sumdumsit'],
+        ['76561197976022895', 'Rw']
+    ]);
+    Assert.equal(verified.parsed.entries[0].verificationScore >= 0.72, true);
+    Assert.equal(verified.parsed.rejectedIdentityRows.length, 1);
+    Assert.match(verified.parsed.errors.at(-1), /does not match Steam/);
 });
 
 Test('F7 OCR parser never chooses between conflicting names for one SteamID', () => {

@@ -22,7 +22,9 @@ The bot invokes `tesseract` locally and never downloads a model at runtime. If t
 `command -v tesseract` and `tesseract --list-langs` under the deployment environment; `eng` must be listed. An import
 rejected for this reason commits nothing and can be submitted again after installation.
 
-Name reconciliation does not require Steam credentials or a Steam Web API key. On an uncertain `/cinfo`, the bot can
+Name reconciliation does not require Steam credentials or a Steam Web API key. F7 imports read bounded public Steam
+persona names to validate each OCR-derived name/SteamID pair; a mismatched or unavailable row is excluded and shown as
+an import warning. On an uncertain `/cinfo`, the bot can
 make at most three candidate queries per batch through the existing rate-limited WarBandits provider and the bounded
 public Steam profile-name reader. Provider failure is non-blocking and never turns an ambiguous candidate into a match.
 Each image is read from one bounded Rust-UI color/luminance mask and from the original image; semantic completeness
@@ -44,26 +46,30 @@ Connected/touching writing is skipped. Exact whole-word repeats may corroborate 
 approximate shapes only retrieve/rank candidates and cannot create a definitive link by themselves. A schema 1 file
 is read compatibly, while a corrupt sidecar is preserved and disabled instead of silently reset.
 
+Human transcription corrections with proven comma/`and` member boundaries are stored separately in
+`data/player-intelligence/<guild>/<battlemetricsServerId>/ocr-correction-memory.json`. This bounded schema-1 sidecar
+stores normalized binary member signatures and corrected Unicode names, never raw pixels or identities. It is written
+only after Confirm/Replace, atomically, and survives restart/update with the same data directory. Exact repeats correct
+the same member slot automatically; high-similarity repeats require a unique conservative winner. Conflicts, short-name
+fuzzy matches, Reject and expired previews do not train or auto-correct.
+
 The private `intel-imports` channel is created automatically when the guild is set up again or the bot restarts. A
 manual message may contain 1 to 10 PNG/JPEG/WebP images. The bot detects F7 versus `/cinfo` from OCR anchors; an optional
 leading `cinfo` or `f7` acts as a strict hint for every attached image. One image may contain several vertically
 stacked `/cinfo` panels: repeated `ClanTag` anchors are split and validated independently, without fixed coordinates.
 For a complete roster, comma and final standalone `and` separators isolate one temporary image row per member before
-one additional bounded OCR pass. The result may correct punctuation ownership but is discarded if it changes the
-letters/numbers at any roster index or no longer matches the declared member count.
+one additional bounded OCR pass. Comma pixels are excluded, and OCR lines are assigned by their sheet row rather than
+array order, preventing a missing row from shifting later members. A changed spelling is accepted only through a unique
+confirmed name/template; otherwise the prior member remains unchanged.
 If a roster remains incomplete, the bot first performs one distinct OCR read of only the roster field. A confirmed
 manual correction is then added to the persistent user-word lexicon and supplied to future Tesseract reads; it is not
 identity proof and cannot train a visual/glyph sample without an independently safe pixel boundary.
 If the first pass loses the `Members` or `Established` label, the bot separately rereads the relative count/date row
 with a numeric alphabet. A polluted multi-word tag is likewise reread from only the value area. All recovered fields
 pass the same strict validators; no absolute screen position is assumed.
-For an old `/cinfo`, no historical caption is required. With only `cinfo`, or with no caption when auto-detection is
-unambiguous, the bot infers the Tuesday/Friday 14:00 GMT regular wipe from `Established`; forced wipes and intermediate
-observed boundaries are deliberately ignored. The preview exposes the inferred wipe. Blocks inferred into different
-regular wipes must be uploaded separately. Upload time is not treated as capture time.
-Optional `/intelimport cinfo image:<file> captured_at:"YYYY-MM-DD HH:mm"` and caption
-`cinfo YYYY-MM-DD HH:mm` remain available when exact ordering matters. The short form is GMT; full ISO requires an
-explicit UTC offset.
+For `/cinfo`, capture/upload dates are ignored. Every panel independently infers the Tuesday/Friday 14:00 GMT regular
+wipe from its own `Established`; forced wipes and intermediate observed boundaries are deliberately ignored. One image
+may contain panels assigned to different wipes, and the preview exposes each assignment before the grouped Confirm.
 
 ## Editable in-game raid alert
 

@@ -20,6 +20,19 @@ function isRustUiTextPixel(r, g, b, a = 255) {
     return neutral || yellow || green || cyan;
 }
 
+/**
+ * F7 SteamID64 text is deliberately dimmer than normal Rust UI labels.
+ * Keep this relaxed neutral threshold isolated from cinfo/name preprocessing.
+ * @param {number} r @param {number} g @param {number} b @param {number} [a]
+ */
+function isRustF7TextPixel(r, g, b, a = 255) {
+    if (isRustUiTextPixel(r, g, b, a)) return true;
+    if (a < 96) return false;
+    const maximum = Math.max(r, g, b);
+    const minimum = Math.min(r, g, b);
+    return maximum >= 105 && maximum - minimum <= 38 && minimum >= maximum * 0.72;
+}
+
 /** @param {unknown} value @param {string} label */
 function positiveInteger(value, label) {
     const number = Number(value);
@@ -32,7 +45,7 @@ function positiveInteger(value, label) {
  * not a retry of the same image.
  * @param {string} imageBase64
  * @param {{JimpImpl?:any,maxPixels?:number,scale?:number,minForegroundRatio?:number,
- * maxForegroundRatio?:number}} [options]
+ * maxForegroundRatio?:number,pixelMode?:'default'|'f7'}} [options]
  */
 async function createTextMask(imageBase64, options = {}) {
     if (typeof imageBase64 !== 'string' || imageBase64.length === 0) {
@@ -55,10 +68,11 @@ async function createTextMask(imageBase64, options = {}) {
             error ? reject(error) : resolve(value));
     });
     let foreground = 0;
+    const pixelPredicate = options.pixelMode === 'f7' ? isRustF7TextPixel : isRustUiTextPixel;
     for (let y = 0; y < height; y += 1) {
         for (let x = 0; x < width; x += 1) {
             const { r, g, b, a } = JimpImpl.intToRGBA(image.getPixelColor(x, y));
-            if (!isRustUiTextPixel(r, g, b, a)) continue;
+            if (!pixelPredicate(r, g, b, a)) continue;
             mask.setPixelColor(0x000000ff, x, y);
             foreground += 1;
         }
@@ -85,9 +99,17 @@ async function createTextMask(imageBase64, options = {}) {
     });
 }
 
+/** @param {string} imageBase64 @param {any} [options] */
+function createF7TextMask(imageBase64, options = {}) {
+    return createTextMask(imageBase64, { ...options, pixelMode: 'f7', maxForegroundRatio:
+        options.maxForegroundRatio === undefined ? 0.55 : options.maxForegroundRatio });
+}
+
 module.exports = Object.freeze({
     DEFAULT_MAX_PIXELS,
     DEFAULT_SCALE,
+    createF7TextMask,
     createTextMask,
+    isRustF7TextPixel,
     isRustUiTextPixel
 });

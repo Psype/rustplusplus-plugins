@@ -10,6 +10,7 @@ const Jimp = require('jimp');
 const Core = require('../src/plugins/playerIntelligence');
 const CinfoPanelRefinement = require('../src/plugins/playerIntelligence/cinfoPanelRefinement.js');
 const ImportWorkflow = require('../src/plugins/playerIntelligence/importWorkflow.js');
+const OcrCorrectionMemory = require('../src/plugins/playerIntelligence/ocrCorrectionMemory.js');
 const { parseCinfoWords } = require('../src/plugins/playerIntelligence/parseCinfo.js');
 const VisualAliasLibrary = require('../src/plugins/playerIntelligence/visualAliasLibrary.js');
 
@@ -111,7 +112,7 @@ Test('Discord import previews first, binds confirmation to requester, then commi
     Assert.equal((await store.readAll()).length, 4);
 });
 
-Test('dated cinfo import binds the observation to its prior scheduled wipe', async t => {
+Test('cinfo ignores an optional capture label and binds only from Established', async t => {
     const value = createHarness(t);
     const command = {
         ...value.command,
@@ -123,7 +124,7 @@ Test('dated cinfo import binds the observation to its prior scheduled wipe', asy
     };
     await ImportWorkflow.beginImport(value.client, command);
     Assert.match(value.edits[0].content,
-        /Historical capture: 2026-09-29T21:15:00\.000Z \| wipe: 2026-09-29T14:00:00\.000Z/);
+        /Wipe inferred from Established: 2026-09-29T14:00:00\.000Z \| capture time not used/);
     const customId = value.edits[0].components[0].components[0].data.custom_id;
     Assert.equal(await ImportWorkflow.handleButton({
         client: value.client,
@@ -132,11 +133,11 @@ Test('dated cinfo import binds the observation to its prior scheduled wipe', asy
     const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
     const events = await store.readAll();
     Assert.equal(events.length, 4);
-    Assert.equal(events.every(event => event.observedAt === '2026-09-29T21:15:00.000Z'), true);
+    Assert.equal(events.every(event => event.observedAt === '2026-09-29T14:58:27.000Z'), true);
     Assert.equal(events.every(event => event.scope.wipeId === 'wipe:2026-09-29T14:00:00.000Z'), true);
 });
 
-Test('dated cinfo rejects a capture earlier than its clan creation time', async t => {
+Test('a capture label earlier than Established cannot override Established inference', async t => {
     const value = createHarness(t);
     await ImportWorkflow.beginImport(value.client, {
         ...value.command,
@@ -146,9 +147,36 @@ Test('dated cinfo rejects a capture earlier than its clan creation time', async 
             getString: () => '2026-09-29 14:30'
         }
     });
-    Assert.match(value.edits[0].content, /Established time must fall between the selected wipe start and capture time/);
+    Assert.match(value.edits[0].content,
+        /Wipe inferred from Established: 2026-09-29T14:00:00\.000Z \| capture time not used/);
     const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
     Assert.equal((await store.readAll()).length, 0);
+});
+
+Test('each cinfo block independently derives its wipe from its own Established value', async t => {
+    const value = createHarness(t);
+    value.client.playerIntelligenceImportDependencies.recognize = async () => [
+        word('ClanTag: 667', 20), word('Members: 1', 45),
+        word('Clan Members: Nirks', 70), word('Established: 09/04/2026 13:58:58', 95),
+        word('ClanTag: 69', 160), word('Members: 1', 185),
+        word('Clan Members: Psype', 210), word('Established: 09/06/2026 17:50:16', 235)
+    ];
+    await ImportWorkflow.beginImport(value.client, value.command);
+    Assert.match(value.edits[0].content,
+        /Wipes inferred independently from Established: 667=2026-09-01T14:00:00\.000Z; 69=2026-09-04T14:00:00\.000Z/);
+    const customId = value.edits[0].components[0].components[0].data.custom_id;
+    await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { customId, guildId: 'guild', channelId: 'commands', user: { id: 'requester' } }
+    });
+    const events = await new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') })
+        .readAll();
+    const snapshots = events.filter(event => event.kind === 'clan_snapshot')
+        .sort((left, right) => left.payload.tag.localeCompare(right.payload.tag));
+    Assert.deepEqual(snapshots.map(event => [event.payload.tag, event.scope.wipeId, event.observedAt]), [
+        ['667', 'wipe:2026-09-01T14:00:00.000Z', '2026-09-04T13:58:58.000Z'],
+        ['69', 'wipe:2026-09-04T14:00:00.000Z', '2026-09-06T17:50:16.000Z']
+    ]);
 });
 
 Test('OCR compares one text-mask pass with raw semantics and feeds persistent aliases as user words', async t => {
@@ -176,6 +204,38 @@ Test('OCR compares one text-mask pass with raw semantics and feeds persistent al
     Assert.deepEqual(calls.map(call => call.image), ['masked', 'raw']);
     Assert.equal(calls.every(call => call.options.userWords.includes('Nirks') &&
         call.options.userWords.includes('tom.le.geek.2')), true);
+});
+
+Test('F7 adds one dedicated muted-neutral pass when normal OCR misses every SteamID', async t => {
+    const value = createHarness(t);
+    const calls = [];
+    value.client.playerIntelligenceImportDependencies.downloadImage = async () => ({
+        imageBase64: 'raw-f7', sha256: 'e'.repeat(64)
+    });
+    value.client.playerIntelligenceImportDependencies.preprocessImage = async () => ({
+        imageBase64: 'normal-mask', scale: 2
+    });
+    value.client.playerIntelligenceImportDependencies.preprocessF7Image = async () => ({
+        imageBase64: 'muted-mask', scale: 2
+    });
+    value.client.playerIntelligenceImportDependencies.extractVisualSamples = async () => [[]];
+    value.client.playerIntelligenceImportDependencies.identityCandidates = async () => [];
+    value.client.playerIntelligenceImportDependencies.steamProfileName = async () => 'Rw';
+    value.client.playerIntelligenceImportDependencies.recognize = async image => {
+        calls.push(image);
+        return image === 'muted-mask' ? [
+            { ...word('FIND PLAYER', 20), x: 20 },
+            { ...word('RW', 200), x: 100 },
+            { ...word('76561197976022895', 244), x: 100, width: 300 }
+        ] : [{ ...word('FIND PLAYER', 20), x: 20 }];
+    };
+    await ImportWorkflow.beginImport(value.client, {
+        ...value.command,
+        options: { getSubcommand: () => 'f7', getAttachment: () => ({ id: 'f7' }) }
+    });
+    Assert.deepEqual(calls, ['normal-mask', 'raw-f7', 'muted-mask']);
+    Assert.match(value.edits[0].content, /OCR F7 — 1 complete SteamID64/);
+    Assert.match(value.edits[0].content, /76561197976022895 — Rw/);
 });
 
 Test('cinfo selection takes the safest panel independently from each OCR variant', () => {
@@ -366,7 +426,7 @@ Test('cinfo roster punctuation is reread in comma-delimited member image rows', 
         positioned('Established:', 10, 100, 80), positioned('09/29/2026', 95, 100, 80),
         positioned('14:00:08', 180, 100, 58)
     ];
-    const originalNames = ['Rw', 'Elliott', 'Marley', '』Swizzy 』',
+    const originalNames = ['Rw', 'Elliott', '1 Marley 4', 'Swizzy',
         'Jeffrey Kirkstein The 3rd', 'U Got Kirkified'];
     const original = Object.freeze({
         words: Object.freeze(words),
@@ -376,6 +436,8 @@ Test('cinfo roster punctuation is reread in comma-delimited member image rows', 
             members: Object.freeze(originalNames.map(name => Object.freeze({ name, role: 'member' })))
         })
     });
+    const isolatedNames = ['Rw', 'Elliott', '1 Marley 4', 'Swizzy',
+        'Jeffrey Kirkstein The 3rd', 'U Got Kirkified'];
     const refinedNames = ['Rw', 'Elliott', '』 Marley 』', 'Swizzy',
         'Jeffrey Kirkstein The 3rd', 'U Got Kirkified'];
     let calls = 0;
@@ -383,8 +445,8 @@ Test('cinfo roster punctuation is reread in comma-delimited member image rows', 
         async (_image, options) => {
             calls += 1;
             Assert.equal(options.psm, 6);
-            return refinedNames.map((text, index) => positioned(text, 10, index * 80));
-        }, { timeoutMs: 45000 });
+            return isolatedNames.map((text, index) => positioned(text, 10, index * 128 + 32));
+        }, { timeoutMs: 45000, confirmedUserWords: ['』 Marley 』'] });
     Assert.equal(calls, 1);
     Assert.deepEqual(result.blocks[0].parsed.members.map(member => member.name), refinedNames);
     Assert.equal(result.blocks[0].memberBoxes.length, 6);
@@ -582,6 +644,61 @@ Test('manual cinfo correction validates tag, date and roster before confirmation
     Assert.equal(futureUserWords.includes('n444shj'), true);
 });
 
+Test('manual cinfo spelling correction preserves the color-derived role at the same roster slot', () => {
+    const parsed = {
+        kind: 'cinfo', declaredCount: 2, complete: true, errors: [],
+        members: [{ name: '1 Marley 4', role: 'moderator' }, { name: 'Swizzy', role: 'member' }]
+    };
+    const corrected = ImportWorkflow.applyCorrectedRoster(parsed, ['』 Marley 』', 'Swizzy']);
+    Assert.deepEqual(corrected.members.map(member => [member.name, member.role]), [
+        ['』 Marley 』', 'moderator'], ['Swizzy', 'member']
+    ]);
+});
+
+Test('only Confirm persists a manual image-to-name correction in the restart-safe sidecar', async t => {
+    const value = createHarness(t);
+    const bits = Buffer.alloc(VisualAliasLibrary.FEATURE_WIDTH * VisualAliasLibrary.FEATURE_HEIGHT / 8, 0x2a);
+    const aspectRatio = 4;
+    const feature = Object.freeze({
+        width: VisualAliasLibrary.FEATURE_WIDTH,
+        height: VisualAliasLibrary.FEATURE_HEIGHT,
+        bits: bits.toString('base64'),
+        aspectRatio,
+        digest: Crypto.createHash('sha256').update(bits)
+            .update(`:${aspectRatio.toFixed(3)}`, 'utf8').digest('hex')
+    });
+    value.client.playerIntelligenceImportDependencies.extractCinfoVisualSamples = async () => [[{
+        memberIndex: 0, observedText: 'Nirks', boundaryProof: true, feature
+    }]];
+    await ImportWorkflow.beginImport(value.client, value.command);
+    const editId = value.edits[0].components[1].components[0].data.custom_id;
+    let modal;
+    await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { customId: editId, guildId: 'guild', channelId: 'commands',
+            user: { id: 'requester' }, showModal: async value => { modal = value; } }
+    });
+    await ImportWorkflow.handleModal({
+        client: value.client,
+        interaction: {
+            customId: modal.data.custom_id, guildId: 'guild', channelId: 'commands',
+            user: { id: 'requester' }, deferUpdate: async () => {},
+            fields: { getTextInputValue: () =>
+                'zeub\n09/29/2026 14:58:27\nNírks\nPsype\ntom.le.geek.2' }
+        }
+    });
+    const file = Path.join(value.directory, 'guild', '42', 'ocr-correction-memory.json');
+    Assert.equal((await OcrCorrectionMemory.read(file)).templates.length, 0);
+    const confirmId = value.edits.at(-1).components[0].components[0].data.custom_id;
+    await ImportWorkflow.handleButton({ client: value.client, interaction: {
+        customId: confirmId, guildId: 'guild', channelId: 'commands', user: { id: 'requester' }
+    } });
+    const templates = (await OcrCorrectionMemory.read(file)).templates;
+    Assert.equal(templates.length, 1);
+    Assert.equal(templates[0].observedText, 'Nirks');
+    Assert.equal(templates[0].correctedText, 'Nírks');
+});
+
 Test('cinfo preview separates OCR-read names from linked identities in roster order', () => {
     const preview = ImportWorkflow.previewText({
         kind: 'cinfo', tag: 'xD', declaredCount: 5,
@@ -715,6 +832,8 @@ Test('dedicated channel auto-detects multiple attachments and multiple cinfo pan
     });
     value.client.playerIntelligenceImportDependencies.recognize = async image =>
         image === 'multi' ? cinfoWords : f7Words;
+    value.client.playerIntelligenceImportDependencies.steamProfileName = async steamId =>
+        steamId === '76561197976022895' ? 'Rw' : null;
     const message = {
         guildId: 'guild', channelId: 'intel-imports', id: 'message-multi', content: '', webhookId: null,
         author: { id: 'requester', bot: false },

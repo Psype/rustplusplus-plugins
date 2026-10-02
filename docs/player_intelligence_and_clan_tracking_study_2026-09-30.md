@@ -179,8 +179,10 @@ Le pipeline structuré reste sans coordonnées absolues :
 5. rendre une valeur définitive uniquement si les passes indépendantes convergent et si les contraintes du panneau
    sont satisfaites. Une divergence produit un slot provisoire ou non résolu, modifiable seulement par le fallback
    utilisateur explicite avant confirmation ;
-6. pour F7, OCRiser prioritairement le SteamID64 par consensus numérique puis obtenir le pseudo canonique via les
-   sources Steam/WarBandits déjà bornées. Le pseudo F7 en majuscules n'est jamais la source canonique ;
+6. pour F7, une passe dédiée conserve le gris atténué des SteamID lorsque les passes normales n'en lisent aucun. Deux
+   substitutions OCR usuelles maximum sont réparables dans un candidat de 17 chiffres, puis sa plage SteamID64 et la
+   proximité du pseudo majuscule avec le persona Steam/alias du même ID sont exigées. Une ligne incompatible est
+   affichée puis exclue ; le persona exact devient le nom canonique, sans credential Steam ni clé Web API ;
 7. pour `/cinfo`, classer les alias déjà connus par similarité textuelle, visuelle et contextuelle. Un candidat unique
    nettement séparé peut être lié automatiquement ; sinon conserver un slot provisoire avec ses hypothèses bornées et
    réévaluables. Le snapshot devient partiel sans perdre les membres déjà résolus ; l'édition reste facultative.
@@ -227,10 +229,12 @@ Depuis la version 1.22.6, un roster complet reçoit aussi une lecture visuelle i
 `and` final reconnus dans la ligne servent de séparateurs relatifs ; les fragments d'un pseudo coupé sur deux lignes
 sont recollés horizontalement, puis chaque membre occupe sa propre ligne d'une feuille temporaire noir-sur-blanc
 agrandie 4x et plafonnée à 8 Mi pixels avant allocation. Une seule exécution PSM 6 traite cette feuille par panneau,
-au lieu d'un processus par pseudo. Le résultat
-n'est accepté que si le nombre de lignes et leur unicité correspondent au compteur et si, à chaque index, les lettres
-et chiffres Unicode normalisés restent identiques. Cette passe peut donc rattacher les décorations `』` au crop de
-`Marley` plutôt qu'à `Swizzy`, mais elle refuse un échange de noms ou une lettre inventée. Si les séparateurs ne
+au lieu d'un processus par pseudo. Depuis 1.22.13, les pixels de virgule sont exclus et chaque ligne OCR est remappée
+au slot vertical de la feuille plutôt qu'associée par ordre de sortie. Le résultat n'est accepté que si chaque slot est
+présent une fois, si l'unicité correspond au compteur et si, à chaque index, les lettres/chiffres restent identiques ou
+qu'une correction humaine persistante unique explique précisément l'écart. Cette passe peut donc rattacher les
+décorations `』` au crop de `Marley` plutôt qu'à `Swizzy`, mais elle refuse un échange de noms ou une lettre inventée.
+Si les séparateurs ne
 produisent pas exactement le compteur attendu, le roster précédent est conservé. Aucune coordonnée écran fixe ni
 pixel de cette feuille temporaire n'est persisté.
 
@@ -280,6 +284,17 @@ canonique seulement, les lignes corrigées sont écrites atomiquement puis injec
 des captures suivantes. Elles ne constituent ni une preuve SteamID, ni une autorisation d'apprendre les pixels ou les
 glyphes du crop ambigu. Les échantillons visuels/glyphes fiables du schema 3 migrent sans être invalidés.
 
+La version 1.22.13 ajoute une mémoire de transcription distincte de la preuve d'identité dans
+`ocr-correction-memory.json`. Après Confirm/Replace seulement, le cut de membre à frontière prouvée est relié au nom
+Unicode corrigé, même sans SteamID. Au prochain import, un digest exact unique corrige ce même slot avant la résolution
+d'identité ; l'approximation exige 0,985 et 0,03 de marge, et reste interdite aux noms courts. Les conflits ne corrigent
+rien. Les corrections textuelles historiques peuvent réparer le cas périphérique séparé `1 Marley 4` → `』 Marley 』`,
+mais jamais le vrai pseudo attaché `1Marley4`. Les virgules sont exclues des signatures et les lignes de la feuille OCR
+sont réaffectées à leur slot vertical : une ligne absente ne décale plus Marley sur Swizzy. Le sidecar est borné à
+2 000 templates/quatre par nom, atomique, validé et préservé s'il est corrompu ; il ne contient aucun pixel brut.
+
+Le benchmark synthétique 1.22.13 mesure la recherche chaude de six membres dans 2 000 corrections à 0,325 ms de
+médiane (maximum 0,626 ms), contre 37,602 ms de médiane avant cache/index, sans OCR supplémentaire.
 Le benchmark synthétique dédié de la version 1.22.3 rappelle la cible parmi 2 000 alias, 104 variantes de glyphes et
 une séquence de huit graphèmes en 20,797 ms de médiane. Le benchmark global 200 joueurs ne régresse pas entre les
 mesures immédiatement avant/après (chargement initial 41,702→39,357 ms, poll silencieux 0,044→0,030 ms, dix
@@ -295,11 +310,13 @@ tag/compteur, les lectures numériques indépendantes restantes et le moteur mul
 
 Les exemples F7 réels ajoutés le 1er octobre combinent décorations autour d'un nom latin, lettres volontairement
 espacées, `İ` turc, caractères cyrilliques, coréens et chaînes visuellement ambiguës mélangeant potentiellement
-plusieurs alphabets. Ils confirment que le pseudo F7 ne doit même pas être une cible de transcription autoritaire. Le
-pipeline doit détecter la ligne, effectuer plusieurs lectures numériques indépendantes du SteamID64 gris, exiger leur
-égalité et valider sa plage SteamID avant toute résolution. Le nom retourné ensuite par Steam/WarBandits est une
-observation fournisseur datée liée à cet ID, pas une affirmation que la graphie visible sur la capture a été lue. La
-chaîne visuelle peut seulement servir de signal de conflit non persistant.
+plusieurs alphabets. Le pseudo F7 n'est donc pas canonique. Depuis 1.22.13, une variante visuelle dédiée est déclenchée
+uniquement lorsque les passes normales reconnaissent F7 sans aucun SteamID ; elle conserve le gris atténué et agrandit
+l'image dans la même limite de pixels. Le parseur accepte au plus deux substitutions OCR usuelles dans un candidat de
+17 caractères, puis valide sa plage SteamID64. Le nom majuscule reste un contrôle : la ligne n'est conservée que si sa
+similarité avec le persona Steam ou un alias déjà lié au même ID dépasse le seuil renforcé selon sa longueur. Le nom
+canonique fournisseur remplace alors la casse OCR ; une incompatibilité ou une vérification indisponible exclut la
+ligne avec avertissement. Aucun avatar n'est comparé visuellement et aucun credential Steam n'est requis.
 
 Ces identités exactes enrichissent ensuite un dictionnaire de candidats commun à F7, `/cinfo`, chat et clans. Le roster
 peut être reconnu de façon contrainte en comparant chaque segment visuel aux alias déjà connus et, si utile, à leur
@@ -540,28 +557,24 @@ font partie d'aucune projection.
 Les DTO validés aux frontières sont profondément immuables. La déduplication utilise une clé déterministe incluant
 source, scope, ID/horodatage source et type d'événement.
 
-`observedAt` est le temps du constat, distinct de l'import. Pour une capture envoyée immédiatement, prendre l'heure du
-message Discord après confirmation. Pour un lot ancien, exiger le temps ou le wipe dans la prévisualisation ; ne jamais
-rattacher silencieusement une vieille image au wipe courant. À la confirmation, figer `wipeId`, `observedAt`, la
-précision temporelle et le hash de preuve.
+Décision de déploiement 1.22.13 : aucune date de capture n'est utilisée. Pour ce serveur, chaque panneau `/cinfo` est
+traité comme une capture indépendante ; son propre `Established` détermine son wipe régulier et sert d'ancre temporelle
+persistée. Plusieurs panneaux d'une même image peuvent donc viser des wipes différents sans rejet global. Le hash de
+preuve et la date d'import restent distincts.
 
 Toutes les captures `/cinfo` déposées sont supposées provenir du serveur actuellement configuré ; aucun sélecteur de
 serveur n'est nécessaire. Elles peuvent appartenir au wipe courant ou à un wipe antérieur. Le champ `Established`
-représente exclusivement la création de cette instance du clan : il peut corroborer le wipe candidat, puisqu'un clan
-est créé à l'intérieur de ce wipe, mais ne constitue jamais l'heure du constat du roster et ne remplace pas
-`observedAt`.
+représente la création de cette instance du clan ; conformément à la décision ci-dessus, il est aussi l'unique ancre
+disponible pour le backfill et remplit `observedAt` dans cette source.
 
-L'heure `Established` affichée par WarBandits, les dates de capture et les frontières de wipe sont interprétées
+L'heure `Established` affichée par WarBandits et les frontières de wipe sont interprétées
 directement en GMT/UTC. Par exemple, le 29 septembre 2026, le wipe régulier est à 14:00 GMT : `Established: 14:58`
 signifie donc une création du clan 58 minutes après le wipe. Aucune conversion en heure française n'est appliquée.
 
-Depuis la version 1.22.11, aucune date de capture n'est nécessaire pour le backfill. Sans `captured_at` ni date dans la
-légende, le moteur déduit depuis `Established` la dernière frontière régulière mardi/vendredi 14:00 GMT et l'affiche
-avant confirmation. Il ignore volontairement les forced wipes et les frontières intermédiaires observées. L'heure
-d'upload n'est pas utilisée comme heure historique de capture ; le dernier `Established` du lot sert seulement d'ancre
-technique déterministe. Des blocs rattachés à des wipes réguliers différents doivent être envoyés séparément.
-`captured_at` sur `/intelimport cinfo`, ou la légende `cinfo YYYY-MM-DD HH:mm`, restent optionnels si l'ordre exact des
-constats est utile. La forme courte est GMT et un ISO explicite doit porter son offset.
+Depuis la version 1.22.13, le moteur déduit pour chaque bloc, indépendamment, la dernière frontière régulière
+mardi/vendredi 14:00 GMT à partir de son `Established` et l'affiche avant confirmation. Il ignore les forced wipes, les
+frontières intermédiaires, les légendes, l'heure d'upload et toute date de capture. Des blocs visant plusieurs wipes
+peuvent être envoyés et confirmés ensemble.
 
 ## Wipes, clans et associations de joueurs
 
@@ -570,7 +583,7 @@ constats est utile. La forme courte est GMT et un ISO explicite doit porter son 
 - Uniquement sur le serveur actuellement configuré **WarBandits EU 5x NoBPs**, les wipes réguliers ont lieu chaque
   mardi et vendredi à 14:00 GMT. Cette cadence ne doit jamais être généralisée à un autre serveur WarBandits. Pour le
   backfill `/cinfo`, les forced wipes et autres frontières intermédiaires sont ignorés : le scope est toujours la
-  dernière frontière régulière à ou avant `Established` ou l'heure explicite. Tous les calculs restent en GMT.
+  dernière frontière régulière à ou avant le `Established` propre à chaque bloc. Tous les calculs restent en GMT.
 - Une instance de clan utilise un ID interne et la clé candidate
   `{serverKey, wipeId, tagExact, establishedAt?}`. Un même tag recréé pendant le wipe avec un autre `Established` est
   une nouvelle instance. Avec `clanId` natif, le conserver sans supposer sa persistance après wipe.
