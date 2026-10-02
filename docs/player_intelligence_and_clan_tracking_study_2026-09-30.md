@@ -313,10 +313,15 @@ espacées, `İ` turc, caractères cyrilliques, coréens et chaînes visuellement
 plusieurs alphabets. Le pseudo F7 n'est donc pas canonique. Depuis 1.22.13, une variante visuelle dédiée est déclenchée
 uniquement lorsque les passes normales reconnaissent F7 sans aucun SteamID ; elle conserve le gris atténué et agrandit
 l'image dans la même limite de pixels. Le parseur accepte au plus deux substitutions OCR usuelles dans un candidat de
-17 caractères, puis valide sa plage SteamID64. Le nom majuscule reste un contrôle : la ligne n'est conservée que si sa
-similarité avec le persona Steam ou un alias déjà lié au même ID dépasse le seuil renforcé selon sa longueur. Le nom
-canonique fournisseur remplace alors la casse OCR ; une incompatibilité ou une vérification indisponible exclut la
-ligne avec avertissement. Aucun avatar n'est comparé visuellement et aucun credential Steam n'est requis.
+17 caractères, puis valide sa plage SteamID64. Le nom majuscule reste normalement un contrôle : la ligne est conservée
+si sa similarité avec le persona Steam ou un alias déjà lié au même ID dépasse le seuil renforcé selon sa longueur.
+Depuis 1.22.14, l'échec extrême observé `KASANE TETO` → `of a` ne fait plus perdre un ID lu exactement : pour une ligne
+géométriquement non ambiguë, si les 17 chiffres n'ont subi aucune substitution et que leur confiance OCR atteint 80,
+le persona Steam public remplace la mauvaise transcription. L'aperçu marque la paire `[Steam-recovered]` et expose le
+texte rejeté avant confirmation. Ce repli reste interdit pour tout SteamID réparé, afin qu'une erreur chiffre→chiffre
+ne soit pas masquée par un compte Steam différent. Une vérification indisponible exclut toujours la ligne. Après
+confirmation, la forme visuelle peut apprendre le persona canonique, jamais `of a` comme alias. Aucun avatar n'est
+comparé visuellement et aucun credential Steam n'est requis.
 
 Ces identités exactes enrichissent ensuite un dictionnaire de candidats commun à F7, `/cinfo`, chat et clans. Le roster
 peut être reconnu de façon contrainte en comparant chaque segment visuel aux alias déjà connus et, si utile, à leur

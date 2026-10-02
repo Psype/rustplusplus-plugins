@@ -5,6 +5,7 @@ const STEAM_ID_MIN = 76561197960265728n;
 const STEAM_ID_MAX = 76561202255233023n;
 const MAX_PROFILE_LOOKUPS = 100;
 const PROFILE_CONCURRENCY = 4;
+const EXACT_ID_PROFILE_MIN_CONFIDENCE = 80;
 
 /** @param {unknown} value */
 function cleanName(value) {
@@ -102,6 +103,7 @@ async function verify(items, knownCandidates, profileName) {
         if (!item.parsed || item.parsed.kind !== 'f7') return item;
         const accepted = [];
         const rejected = [];
+        const recovered = [];
         for (let entryIndex = 0; entryIndex < item.parsed.entries.length; entryIndex += 1) {
             const entry = item.parsed.entries[entryIndex];
             const visualMemberIndex = Number.isSafeInteger(entry.visualMemberIndex) ?
@@ -127,6 +129,19 @@ async function verify(items, knownCandidates, profileName) {
                 ({ name, observed, score: similarity(observed, name) })))
                 .sort((left, right) => right.score - left.score || left.name.localeCompare(right.name));
             if (ranked[0].score < requiredNameScore(ranked[0].observed)) {
+                const profile = cleanName(profiles.get(entry.steamId));
+                const exactHighConfidenceId = entry.idOcrCorrected !== true &&
+                    typeof entry.idOcrConfidence === 'number' &&
+                    entry.idOcrConfidence >= EXACT_ID_PROFILE_MIN_CONFIDENCE;
+                if (profile && exactHighConfidenceId && entry.ambiguous !== true && entry.name) {
+                    const score = similarity(entry.name, profile);
+                    accepted.push(Object.freeze({ ...entry, visualMemberIndex,
+                        ocrObservedName: entry.name, name: profile, caseFidelity: true,
+                        ambiguous: false, alternatives: Object.freeze([]), profileNameRecovered: true,
+                        verificationScore: Number(score.toFixed(6)) }));
+                    recovered.push(`${entry.steamId}: OCR "${entry.name}" -> Steam "${profile}"`);
+                    continue;
+                }
                 rejected.push(`${entry.steamId}: OCR "${ranked[0].observed}" does not match Steam "${
                     ranked[0].name}"`);
                 continue;
@@ -140,6 +155,8 @@ async function verify(items, knownCandidates, profileName) {
             !['No complete SteamID64 found.', 'At least one name association is ambiguous.'].includes(error))];
         if (rejected.length > 0) errors.push(`${rejected.length} F7 row(s) rejected by Steam validation: ${
             rejected.slice(0, 3).join('; ')}${rejected.length > 3 ? '; …' : ''}.`);
+        if (recovered.length > 0) errors.push(`${recovered.length} F7 name(s) recovered from an exact high-confidence ` +
+            `SteamID: ${recovered.slice(0, 3).join('; ')}${recovered.length > 3 ? '; ...' : ''}.`);
         if (accepted.length === 0) errors.push('No Steam-verified F7 row remains.');
         return Object.freeze({ ...item, parsed: Object.freeze({ ...item.parsed,
             entries: Object.freeze(accepted), rejectedIdentityRows: Object.freeze(rejected),
@@ -148,6 +165,7 @@ async function verify(items, knownCandidates, profileName) {
 }
 
 module.exports = Object.freeze({
+    EXACT_ID_PROFILE_MIN_CONFIDENCE,
     MAX_PROFILE_LOOKUPS,
     PROFILE_CONCURRENCY,
     STEAM_ID_MAX,

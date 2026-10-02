@@ -105,6 +105,7 @@ Test('F7 SteamID OCR repairs at most two common glyph substitutions and validate
     Assert.equal(result.complete, true, result.errors.join(' '));
     Assert.equal(result.entries[0].steamId, '76561197976022895');
     Assert.equal(result.entries[0].idOcrCorrected, true);
+    Assert.equal(result.entries[0].idOcrConfidence, 95);
     Assert.equal(F7IdentityValidation.normalizeSteamIdOcr('7656119OOOOOOOOOO'), null);
     Assert.equal(F7IdentityValidation.isValidSteamId64('76561197900000001'), false);
 });
@@ -130,6 +131,40 @@ Test('F7 names tolerate OCR case/glyph errors only when the same SteamID profile
     Assert.equal(verified.parsed.entries[0].verificationScore >= 0.72, true);
     Assert.equal(verified.parsed.rejectedIdentityRows.length, 1);
     Assert.match(verified.parsed.errors.at(-1), /does not match Steam/);
+});
+
+Test('F7 recovers a bad all-caps name read from Steam only behind an exact high-confidence ID', async () => {
+    const exactSteamId = '76561198875390964';
+    const correctedSteamId = '76561198052859299';
+    const lowConfidenceSteamId = '76561198081740226';
+    const items = [{ parsed: {
+        kind: 'f7', complete: true, rejectedPartialIds: [], errors: [], entries: [
+            { steamId: exactSteamId, name: 'of a', ambiguous: false,
+                idOcrCorrected: false, idOcrConfidence: 95 },
+            { steamId: correctedSteamId, name: 'wrong', ambiguous: false,
+                idOcrCorrected: true, idOcrConfidence: 95 },
+            { steamId: lowConfidenceSteamId, name: 'also wrong', ambiguous: false,
+                idOcrCorrected: false, idOcrConfidence: 79 }
+        ]
+    } }];
+    const profiles = new Map([
+        [exactSteamId, 'Kasane Teto'],
+        [correctedSteamId, 'Sumdumsit'],
+        [lowConfidenceSteamId, 'Arlheston']
+    ]);
+
+    const [verified] = await F7IdentityValidation.verify(items, [], async id => profiles.get(id));
+
+    Assert.deepEqual(verified.parsed.entries.map(entry => [entry.steamId, entry.name]), [
+        [exactSteamId, 'Kasane Teto']
+    ]);
+    Assert.equal(verified.parsed.entries[0].profileNameRecovered, true);
+    Assert.equal(verified.parsed.entries[0].ocrObservedName, 'of a');
+    Assert.deepEqual(verified.parsed.rejectedIdentityRows, [
+        `${correctedSteamId}: OCR "wrong" does not match Steam "Sumdumsit"`,
+        `${lowConfidenceSteamId}: OCR "also wrong" does not match Steam "Arlheston"`
+    ]);
+    Assert.match(verified.parsed.errors.join(' '), /recovered from an exact high-confidence SteamID/);
 });
 
 Test('F7 OCR parser never chooses between conflicting names for one SteamID', () => {

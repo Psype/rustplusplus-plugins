@@ -177,9 +177,12 @@ Options | Description | Required
 > and visual collisions remain ambiguous. No screenshot pixels are kept by this dictionary.
 > F7 uses a separate muted-neutral mask for the dim gray SteamID64 rows when the normal passes find none. At most two
 > common OCR substitutions may be repaired inside a 17-character candidate, which must remain inside the valid Steam
-> individual-account range. The displayed uppercase name may contain OCR errors, but the pair is kept only when it is
-> sufficiently similar to the public Steam persona or an alias already tied to that same SteamID. A mismatched or
-> unverifiable row is reported and excluded; no Steam credential or Web API key is used.
+> individual-account range. The displayed uppercase name may contain OCR errors. A similar public Steam persona or
+> alias already tied to the ID confirms the pair normally. When the all-caps F7 font is transcribed too badly for that
+> comparison, an unambiguous row may still use the canonical Steam persona only if all 17 ID digits were read directly
+> with OCR confidence of at least 80; the preview marks it `[Steam-recovered]` and reports the discarded OCR text.
+> This fallback is forbidden for an ID reconstructed through OCR substitutions. Unverifiable rows are excluded, and no
+> Steam credential or Web API key is used.
 > Ambiguous name/SteamID associations and truncated IDs are never guessed. A structurally valid `/cinfo` with uncertain
 > or missing members is offered as a partial snapshot: pending identities stay out of aliases and affinity counts until
 > later evidence resolves them automatically. A complete SteamID with a hidden name is retained without an alias. Set

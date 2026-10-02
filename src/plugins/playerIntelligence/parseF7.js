@@ -6,9 +6,9 @@ const STEAM_ID = /^7656119\d{10}$/;
 const UI_TEXT = /^(find|player|who|do|you|want|to|report|search|by|name|feedback|cancel)$/iu;
 
 /** @typedef {Readonly<{text:string,x:number,y:number,width:number,height:number,center:number,
- * idOcrCorrected?:boolean}>} Box */
+ * confidence?:number|null,idOcrCorrected?:boolean}>} Box */
 /** @typedef {Readonly<{steamId:string,name:string|null,ambiguous:boolean,alternatives:readonly string[],
- * idOcrCorrected?:boolean}>} RawEntry */
+ * idOcrCorrected?:boolean,idOcrConfidence?:number|null,nameGeometryScore?:number|null}>} RawEntry */
 
 /** @param {unknown} value */
 function normalized(value) {
@@ -31,8 +31,10 @@ function digitCandidates(lines, typicalHeight) {
             const right = Math.max(...cluster.map(word => word.x + word.width));
             const y = Math.min(...cluster.map(word => word.y));
             const bottom = Math.max(...cluster.map(word => word.y + word.height));
+            const confidences = cluster.map(word => word.confidence).filter((value) => value !== null);
             const item = Object.freeze({ text, x, y, width: right - x, height: bottom - y,
-                center: (y + bottom) / 2 });
+                center: (y + bottom) / 2,
+                confidence: confidences.length > 0 ? Math.min(...confidences) : null });
             if (normalizedId && STEAM_ID.test(text)) candidates.push(Object.freeze({ ...item,
                 idOcrCorrected: normalizedId.corrections > 0 }));
             else if (/^7656\d{8,16}$/u.test(text)) partial.push(item);
@@ -76,18 +78,22 @@ function selectName(id, names, typicalHeight) {
     }).filter(candidate => candidate.vertical >= typicalHeight * 0.25 &&
         candidate.vertical <= typicalHeight * 3 && candidate.horizontal <= typicalHeight * 4)
         .sort((left, right) => left.score - right.score || left.name.x - right.name.x);
-    if (candidates.length === 0) return Object.freeze({ name: null, ambiguous: false, alternatives: [] });
+    if (candidates.length === 0) return Object.freeze({
+        name: null, ambiguous: false, alternatives: [], nameGeometryScore: null
+    });
     if (candidates.length > 1 && candidates[1].score - candidates[0].score <= 0.35) {
         return Object.freeze({
             name: null,
             ambiguous: true,
-            alternatives: Object.freeze(candidates.slice(0, 3).map(candidate => candidate.name.text))
+            alternatives: Object.freeze(candidates.slice(0, 3).map(candidate => candidate.name.text)),
+            nameGeometryScore: null
         });
     }
     return Object.freeze({
         name: candidates[0].name.text,
         ambiguous: false,
-        alternatives: Object.freeze([])
+        alternatives: Object.freeze([]),
+        nameGeometryScore: Number(candidates[0].score.toFixed(6))
     });
 }
 
@@ -106,12 +112,23 @@ function mergeEntries(entries) {
             .map(item => [normalized(item.name), item.name])).values()];
         const alternatives = [...new Set(observations.flatMap(item => item.alternatives || []))];
         const ambiguous = observations.some(item => item.ambiguous) || names.length > 1;
+        const exactIdReads = observations.filter(item => item.idOcrCorrected !== true);
+        const confidenceSource = exactIdReads.length > 0 ? exactIdReads : observations;
+        const idConfidences = confidenceSource.flatMap(item =>
+            typeof item.idOcrConfidence === 'number' && Number.isFinite(item.idOcrConfidence) ?
+                [item.idOcrConfidence] : []);
+        const geometryScores = observations.filter(item => item.name && !item.ambiguous)
+            .flatMap(item => typeof item.nameGeometryScore === 'number' &&
+                Number.isFinite(item.nameGeometryScore) ? [item.nameGeometryScore] : []);
         merged.push(Object.freeze({
             steamId,
             name: ambiguous || names.length === 0 ? null : names[0],
             caseFidelity: false,
             ambiguous,
-            idOcrCorrected: observations.some(item => item.idOcrCorrected === true),
+            idOcrCorrected: exactIdReads.length === 0 &&
+                observations.some(item => item.idOcrCorrected === true),
+            idOcrConfidence: idConfidences.length > 0 ? Math.max(...idConfidences) : null,
+            nameGeometryScore: ambiguous || geometryScores.length === 0 ? null : Math.min(...geometryScores),
             alternatives: Object.freeze(ambiguous ? [...new Set([...names, ...alternatives])] : [])
         }));
     }
@@ -133,7 +150,8 @@ function parseF7Words(inputWords, options = {}) {
     const names = nameClusters(lines, typicalHeight);
     const entries = mergeEntries(ids.candidates.map(id => {
         const selection = selectName(id, names, typicalHeight);
-        return Object.freeze({ steamId: id.text, idOcrCorrected: id.idOcrCorrected === true, ...selection });
+        return Object.freeze({ steamId: id.text, idOcrCorrected: id.idOcrCorrected === true,
+            idOcrConfidence: id.confidence, ...selection });
     }));
     if (entries.length === 0) errors.push('No complete SteamID64 found.');
     if (ids.partial.length > 0) errors.push(`${ids.partial.length} partial SteamID candidate(s) rejected.`);

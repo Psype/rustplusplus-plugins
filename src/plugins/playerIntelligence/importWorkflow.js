@@ -94,7 +94,8 @@ function previewText(parsed) {
     }
     const idOnly = parsed.entries.filter((/** @type {any} */ entry) => !entry.name).length;
     const pairs = parsed.entries.slice(0, 20).map((/** @type {any} */ entry) =>
-        `${entry.steamId} — ${entry.name || '[name hidden/unread]'}`).join('\n');
+        `${entry.steamId} — ${entry.name || '[name hidden/unread]'}${
+            entry.profileNameRecovered ? ' [Steam-recovered]' : ''}`).join('\n');
     return [
         `OCR F7 — ${parsed.entries.length} complete SteamID64 (${idOnly} without a safe name)`,
         pairs,

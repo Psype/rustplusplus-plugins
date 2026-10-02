@@ -174,6 +174,25 @@ Test('rejecting an F7 row never shifts a later visual sample onto the wrong Stea
     Assert.equal(samples[0].feature.digest, secondShape.digest);
 });
 
+Test('an exact-ID Steam recovery learns the canonical visual alias, never the bad OCR text', async t => {
+    const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-visual-f7-steam-recovery-'));
+    t.after(() => Fs.rmSync(directory, { recursive: true, force: true }));
+    const file = Path.join(directory, 'visual-alias-library.json');
+    await Visual.recordResolved(file, [{
+        parsed: { kind: 'f7', entries: [{
+            name: 'Kasane Teto', steamId: '76561198875390964', ambiguous: false,
+            visualMemberIndex: 0, profileNameRecovered: true, ocrObservedName: 'of a'
+        }] },
+        visualSamples: [{ memberIndex: 0, observedText: 'of a', boundaryProof: true, feature: feature(0x63) }]
+    }], '2026-10-02T13:49:00.000Z');
+
+    const samples = (await Visual.read(file)).samples;
+    Assert.equal(samples.length, 1);
+    Assert.equal(samples[0].name, 'Kasane Teto');
+    Assert.equal(samples[0].steamId, '76561198875390964');
+    Assert.equal(samples.some(sample => sample.name === 'of a'), false);
+});
+
 Test('partial cinfo rosters cannot emit or persist position-based visual samples', async t => {
     const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-visual-partial-'));
     t.after(() => Fs.rmSync(directory, { recursive: true, force: true }));
