@@ -865,8 +865,10 @@ async function commitParsedImports(context, imports, options = {}) {
                 throw new Error('Existing import changed after preview; upload it again before replacing.');
             }
             const revision = replacementRevision(previousEvents, recordedAt, item.parsed);
-            const replacementMetadata = { ...item.metadata, observedAt: previousEvents[0].observedAt };
-            const replacementScope = scopeForReplacement(scope, previousEvents);
+            const replacementMetadata = { ...item.metadata,
+                observedAt: canonicalIso(item.metadata.observedAt) || previousEvents[0].observedAt };
+            const replacementScope = item.metadata.observedAt ? scopeForImport(scope, item.metadata) :
+                scopeForReplacement(scope, previousEvents);
             events.push(...importEvents(context, replacementScope, item.parsed, replacementMetadata, recordedAt,
                 revision));
             events.push(supersessionEvent(context, replacementScope, replacementMetadata, recordedAt, revision,

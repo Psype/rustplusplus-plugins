@@ -11,7 +11,7 @@ const CinfoRoles = require('./cinfoRoles.js');
 const Layout = require('./ocrLayout.js');
 const OcrImagePreprocess = require('./ocrImagePreprocess.js');
 const { detectImportKind } = require('./detectImportKind.js');
-const { applyRoleHints, parseCinfoWords, splitCinfoWordBlocks } = require('./parseCinfo.js');
+const { applyRoleHints, parseCinfoWords, parseEstablished, splitCinfoWordBlocks } = require('./parseCinfo.js');
 const { parseF7Words } = require('./parseF7.js');
 const { resolveCinfo } = require('./resolveCinfo.js');
 const Runtime = require('./runtime.js');
@@ -78,7 +78,8 @@ function previewText(parsed) {
         const showOcrRoster = pendingCount > 0 || !Number.isSafeInteger(parsed.declaredCount);
         const declared = parsed.declaredCount || '?';
         return [
-            `OCR /cinfo — ${parsed.tag || 'unknown'} — ${parsedMembers.length}/${declared} names read · ${
+            `${parsed.manualMetadataCorrected ? 'Corrected' : 'OCR'} /cinfo — ${parsed.tag || 'unknown'} — ${
+                parsedMembers.length}/${declared} names read · ${
                 resolved.length}/${declared} linked`,
             `Established: ${parsed.establishedRaw || 'unread'}`,
             `${parsed.manualRosterCorrected ? 'Corrected roster' : showOcrRoster ? 'OCR roster' : 'Members'}: ${
@@ -111,6 +112,44 @@ function previewItems(items) {
 /** @param {readonly {parsed:any}[]} items @param {string|null} timingText */
 function timedPreview(items, timingText) {
     return `${timingText ? `${timingText}\n` : ''}${previewItems(items)}`;
+}
+
+/** @param {any} context @param {readonly {parsed:any}[]} items @param {any} scope
+ * @param {string|null} captureTime */
+async function resolveImportTiming(context, items, scope, captureTime) {
+    let importScope = captureTime === null ? scope : await Runtime.resolveHistoricalScope(context, captureTime);
+    let inferredFromEstablished = false;
+    if (captureTime === null && items.every(item => item.parsed.kind === 'cinfo')) {
+        const inferredScopes = items.map(item => Runtime.resolveEstablishedScope(context,
+            item.parsed.establishedAtUtc));
+        const wipeStarts = [...new Set(inferredScopes.map(value => value.wipeStart))];
+        if (wipeStarts.length !== 1) {
+            throw new Error('Detected cinfo blocks belong to different inferred wipes; upload each wipe separately.');
+        }
+        if (inferredScopes[0].wipeId !== scope.wipeId ||
+            items.some(item => item.parsed.manualMetadataCorrected === true)) {
+            const observedAt = items.map(item => item.parsed.establishedAtUtc).sort().at(-1);
+            importScope = Object.freeze({ ...inferredScopes[0], observedAt });
+            inferredFromEstablished = true;
+        }
+    }
+    const historical = captureTime !== null || inferredFromEstablished;
+    if (historical && items.some(item => item.parsed.establishedAtUtc < importScope.wipeStart ||
+        item.parsed.establishedAtUtc > importScope.observedAt)) {
+        throw new Error('Clan Established time must fall between the selected wipe start and capture time.');
+    }
+    const timingText = inferredFromEstablished ?
+        `Wipe inferred from Established: ${importScope.wipeStart} | capture time not used` :
+        captureTime === null ? null : `Historical capture: ${importScope.observedAt} | wipe: ${importScope.wipeStart}`;
+    return Object.freeze({
+        activeWipeId: scope.wipeId,
+        wipeId: importScope.wipeId,
+        wipeStart: importScope.wipeStart,
+        observedAt: historical ? importScope.observedAt : null,
+        historical,
+        inferredFromEstablished,
+        timingText
+    });
 }
 
 /** @param {readonly any[]} events */
@@ -172,10 +211,11 @@ function actionRows(token, items, mode = 'confirm') {
 
 /** @param {string} token @param {number} index @param {any} item */
 function rosterEditModal(token, index, item) {
-    const value = item.parsed.members.map((/** @type {any} */ member) => member.name).join('\n');
+    const value = [item.parsed.tag, item.parsed.establishedRaw,
+        ...item.parsed.members.map((/** @type {any} */ member) => member.name)].join('\n');
     const input = new Discord.TextInputBuilder()
         .setCustomId(EDIT_ROSTER_FIELD)
-        .setLabel('One exact player name per line')
+        .setLabel('Tag, date, then one player per line')
         .setStyle(Discord.TextInputStyle.Paragraph)
         .setRequired(true)
         .setMinLength(1)
@@ -183,7 +223,7 @@ function rosterEditModal(token, index, item) {
     if (value) input.setValue(value);
     return new Discord.ModalBuilder()
         .setCustomId(`${EDIT_MODAL_PREFIX}${token}:${index}`)
-        .setTitle(truncateCharacters(`Edit /cinfo roster — ${item.parsed.tag}`, 45))
+        .setTitle(truncateCharacters(`Edit /cinfo — ${item.parsed.tag}`, 45))
         .addComponents(/** @type {any} */ (new Discord.ActionRowBuilder().addComponents(input)));
 }
 
@@ -203,6 +243,20 @@ function parseCorrectedRoster(value, declaredCount) {
     return Object.freeze(names);
 }
 
+/** @param {unknown} value @param {number} declaredCount */
+function parseCorrectedCinfo(value, declaredCount) {
+    if (typeof value !== 'string') throw new TypeError('Corrected cinfo must be text.');
+    const lines = value.split(/\r?\n/u);
+    if (lines.length < 3) throw new Error('Enter ClanTag on line 1, Established on line 2, then one player per line.');
+    const tag = Layout.cleanText(lines[0]);
+    if (!tag || Array.from(tag).length > 32) throw new Error('ClanTag must contain 1 to 32 characters.');
+    const establishedRaw = Layout.cleanText(lines[1]);
+    const establishedAtUtc = parseEstablished(establishedRaw);
+    if (!establishedAtUtc) throw new Error('Established must use MM/DD/YYYY HH:mm:ss in GMT.');
+    const names = parseCorrectedRoster(lines.slice(2).join('\n'), declaredCount);
+    return Object.freeze({ tag, establishedRaw, establishedAtUtc, names });
+}
+
 /** @param {any} parsed @param {readonly string[]} names */
 function applyCorrectedRoster(parsed, names) {
     const roles = new Map((parsed.members || []).map((/** @type {any} */ member) => [
@@ -220,6 +274,22 @@ function applyCorrectedRoster(parsed, names) {
         manualRosterCorrected: true,
         errors: Object.freeze((parsed.errors || []).filter((/** @type {string} */ error) =>
             !/^Roster count mismatch:|^Partial roster:/u.test(error)))
+    });
+}
+
+/** @param {any} parsed
+ * @param {{tag:string,establishedRaw:string,establishedAtUtc:string,names:readonly string[]}} corrected */
+function applyCorrectedCinfo(parsed, corrected) {
+    const roster = applyCorrectedRoster(parsed, corrected.names);
+    return Object.freeze({
+        ...roster,
+        tag: corrected.tag,
+        establishedRaw: corrected.establishedRaw,
+        establishedAtUtc: corrected.establishedAtUtc,
+        manualMetadataCorrected: true,
+        errors: Object.freeze((roster.errors || []).filter((/** @type {string} */ error) =>
+            !/^(?:ClanTag anchor not found\.|ClanTag is empty or too long\.|Established anchor not found\.|Established timestamp is invalid\.)$/u
+                .test(error)))
     });
 }
 
@@ -654,30 +724,8 @@ async function prepareImports(client, source, requests, requesterUserId, referen
     if (captureTime !== null && items.some(item => item.parsed.kind !== 'cinfo')) {
         throw new Error('Historical capture time is supported only for cinfo imports.');
     }
-    let importScope = captureTime === null ? scope : await Runtime.resolveHistoricalScope(context, captureTime);
-    let inferredFromEstablished = false;
-    if (captureTime === null && items.every(item => item.parsed.kind === 'cinfo')) {
-        const inferredScopes = items.map(item => Runtime.resolveEstablishedScope(context,
-            item.parsed.establishedAtUtc));
-        const wipeStarts = [...new Set(inferredScopes.map(value => value.wipeStart))];
-        if (wipeStarts.length !== 1) {
-            throw new Error('Detected cinfo blocks belong to different inferred wipes; upload each wipe separately.');
-        }
-        if (inferredScopes[0].wipeId !== scope.wipeId) {
-            const observedAt = items.map(item => item.parsed.establishedAtUtc).sort().at(-1);
-            importScope = Object.freeze({ ...inferredScopes[0], observedAt });
-            inferredFromEstablished = true;
-        }
-    }
-    const historical = captureTime !== null || inferredFromEstablished;
-    if (historical && items.some(item => item.parsed.establishedAtUtc < importScope.wipeStart ||
-        item.parsed.establishedAtUtc > importScope.observedAt)) {
-        throw new Error('Clan Established time must fall between the selected wipe start and capture time.');
-    }
-    const timingText = inferredFromEstablished ?
-        `Wipe inferred from Established: ${importScope.wipeStart} | capture time not used` :
-        captureTime === null ? null : `Historical capture: ${importScope.observedAt} | wipe: ${importScope.wipeStart}`;
-    const preview = timedPreview(items, timingText);
+    const timing = await resolveImportTiming(context, items, scope, captureTime);
+    const preview = timedPreview(items, timing.timingText);
     if (Array.from(preview).length > 1900) {
         return Object.freeze({
             content: `Detected ${items.length} import blocks, but the confirmation preview is too long. ` +
@@ -692,13 +740,8 @@ async function prepareImports(client, source, requests, requesterUserId, referen
         channelId: `${source.channelId}`,
         userId: requesterUserId,
         serverKey: scope.serverKey,
-        activeWipeId: scope.wipeId,
-        wipeId: importScope.wipeId,
-        wipeStart: importScope.wipeStart,
-        observedAt: historical ? importScope.observedAt : null,
-        historical,
-        inferredFromEstablished,
-        timingText,
+        ...timing,
+        captureTime,
         visualFile,
         items: Object.freeze(items),
         createdAt,
@@ -862,8 +905,9 @@ async function recrossWarBandits(context, parsedItems, client) {
 }
 
 /** @param {any} context @param {any} pendingItem @param {number} itemIndex
- * @param {readonly string[]} names @param {any} client */
-async function resolveCorrectedItem(context, pendingItem, itemIndex, names, client) {
+ * @param {{tag:string,establishedRaw:string,establishedAtUtc:string,names:readonly string[]}} corrected
+ * @param {any} client */
+async function resolveCorrectedItem(context, pendingItem, itemIndex, corrected, client) {
     const dependencies = importDependencies(client);
     const loadCandidates = dependencies.identityCandidates || Runtime.identityCandidates;
     const persisted = await loadCandidates(context);
@@ -879,7 +923,7 @@ async function resolveCorrectedItem(context, pendingItem, itemIndex, names, clie
         }));
     });
     const original = pendingItem.items[itemIndex];
-    const raw = applyCorrectedRoster(original.parsed, names);
+    const raw = applyCorrectedCinfo(original.parsed, corrected);
     let parsed = resolveCinfo(raw, Object.freeze([...persisted, ...batch]), dependencies.nameSimilarityOptions);
     const corroborate = dependencies.corroborateCandidates || corroborateCandidateAliases;
     /** @type {readonly any[]} */
@@ -904,7 +948,7 @@ async function resolveCorrectedItem(context, pendingItem, itemIndex, names, clie
     return Object.freeze({
         ...original,
         parsed,
-        confirmedCorrectionNames: Object.freeze([...names])
+        confirmedCorrectionNames: Object.freeze([...corrected.names])
     });
 }
 
@@ -939,7 +983,7 @@ async function handleButton({ client, interaction }) {
         const target = item.items[index];
         if (!Number.isSafeInteger(index) || !target || target.parsed.kind !== 'cinfo') {
             await client.interactionReply(interaction, {
-                content: 'This roster is no longer editable. Nothing was changed.', ephemeral: true
+                content: 'This cinfo block is no longer editable. Nothing was changed.', ephemeral: true
             });
             return true;
         }
@@ -1072,7 +1116,7 @@ async function handleModal({ client, interaction }) {
     const target = item.items[index];
     if (!Number.isSafeInteger(index) || !target || target.parsed.kind !== 'cinfo') {
         await client.interactionReply(interaction, {
-            content: 'This roster is no longer editable. Nothing was changed.', ephemeral: true
+            content: 'This cinfo block is no longer editable. Nothing was changed.', ephemeral: true
         });
         return true;
     }
@@ -1085,29 +1129,30 @@ async function handleModal({ client, interaction }) {
         });
         return true;
     }
-    let names;
+    let correctedForm;
     try {
-        names = parseCorrectedRoster(
+        correctedForm = parseCorrectedCinfo(
             interaction.fields.getTextInputValue(EDIT_ROSTER_FIELD), target.parsed.declaredCount);
     }
     catch (error) {
         await client.interactionReply(interaction, {
-            content: `Roster correction rejected safely: ${sanitizeError(error)} Preview unchanged.`,
+            content: `Cinfo correction rejected safely: ${sanitizeError(error)} Preview unchanged.`,
             ephemeral: true
         });
         return true;
     }
     await interaction.deferUpdate();
     try {
-        const corrected = await resolveCorrectedItem(context, item, index, names, client);
+        const corrected = await resolveCorrectedItem(context, item, index, correctedForm, client);
         const items = Object.freeze(item.items.map((/** @type {any} */ entry, /** @type {number} */ itemIndex) =>
             itemIndex === index ? corrected : entry));
+        const timing = await resolveImportTiming(context, items, scope, item.captureTime ?? null);
         const preview = item.duplicatePrompt ? replacementPreview(items, item.duplicatePrompt) :
-            timedPreview(items, item.timingText || null);
+            timedPreview(items, timing.timingText || null);
         if (Array.from(preview).length > 1900) {
             throw new Error('Corrected preview exceeds the Discord limit; split the upload into smaller batches.');
         }
-        pending.set(token, Object.freeze({ ...item, items }));
+        pending.set(token, Object.freeze({ ...item, ...timing, items }));
         await client.interactionEditReply(interaction, {
             content: preview, components: actionRows(token, items, item.duplicatePrompt ? 'replace' : 'confirm'),
             embeds: [], allowedMentions: { parse: [] }
@@ -1117,7 +1162,7 @@ async function handleModal({ client, interaction }) {
         const preview = item.duplicatePrompt ? replacementPreview(item.items, item.duplicatePrompt) :
             timedPreview(item.items, item.timingText || null);
         await client.interactionEditReply(interaction, {
-            content: `${preview}\nRoster correction rejected safely: ${sanitizeError(error)} Preview unchanged.`
+            content: `${preview}\nCinfo correction rejected safely: ${sanitizeError(error)} Preview unchanged.`
                 .slice(0, 1900),
             components: actionRows(token, item.items, item.duplicatePrompt ? 'replace' : 'confirm'),
             embeds: [], allowedMentions: { parse: [] }
@@ -1134,12 +1179,14 @@ module.exports = Object.freeze({
     REPLACE_PREFIX,
     REJECT_PREFIX,
     TTL_MS,
+    applyCorrectedCinfo,
     applyCorrectedRoster,
     beginImport,
     handleMessage,
     handleButton,
     handleModal,
     normalizeWebhookIds,
+    parseCorrectedCinfo,
     parseCorrectedRoster,
     previewItems,
     replacementPreview,

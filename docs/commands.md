@@ -183,10 +183,11 @@ Options | Description | Required
 > A complete `/cinfo` roster also receives one bounded OCR pass over temporary member rows split relatively at commas
 > and the final standalone `and`. It can correct which pseudo owns decorative punctuation, but it is rejected if it
 > changes any member's letters/numbers or the declared roster count.
-> A still-incomplete roster receives one separate roster-field-only read. If it remains wrong, use `Edit <tag>` and
-> enter exactly one player name per line. The bot validates the declared count and uniqueness, reruns identity matching,
-> and shows another preview. Nothing is stored until Confirm; afterward those names enter the bounded per-server OCR
-> user-word lexicon for future captures, without becoming SteamID proof or unsafe glyph training data.
+> A still-incomplete roster receives one separate roster-field-only read. If any cinfo field remains wrong, use
+> `Edit <tag>`: line 1 is the exact ClanTag, line 2 is `Established` as `MM/DD/YYYY HH:mm:ss` GMT, and every remaining
+> line is one exact player name. The bot validates all three sections, recomputes the inferred wipe when the date
+> changes, reruns identity matching and shows another preview. Nothing is stored until Confirm; afterward only the
+> confirmed player names enter the bounded OCR user-word lexicon, without becoming SteamID proof or glyph evidence.
 > Missing `Members`/`Established` anchors and a polluted tag are reread from isolated rows derived from neighboring
 > semantic lines. Count/date reads use restricted numeric alphabets and every result is strictly revalidated.
 > No caption or `captured_at` is required for an older `/cinfo`: the bot infers its regular Tuesday/Friday 14:00 GMT
@@ -196,8 +197,9 @@ Options | Description | Required
 > Optional `captured_at` accepts `YYYY-MM-DD HH:mm` in GMT or a full ISO timestamp with an explicit UTC offset when an
 > exact observation time is useful.
 > Reimporting an already committed image does not silently duplicate it. Discord shows the effective previous version
-> and the proposed version, then offers `Replace previous` or `Keep existing`. Replacement preserves the observation's
-> logical counter position, rebuilds identities/clans/affinities from the new content, and may itself be replaced later.
+> and the proposed version, then offers `Replace previous` or `Keep existing`. Replacement preserves the logical
+> counter position unless corrected `Established` data moves it to another regular wipe, rebuilds identities/clans/
+> affinities from the new content, and may itself be replaced later.
 
 The bot also creates a private `intel-imports` channel. A message may contain 1–10 images and needs no caption: F7 and
 `/cinfo` are detected from semantic OCR anchors. Starting the message with `cinfo` or `f7` remains an optional strict

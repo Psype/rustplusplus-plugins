@@ -164,9 +164,9 @@ chinois, arabes ou composés de symboles avec le seul modèle anglais.
 
 La décision initiale était de ne pas ajouter de formulaire de correction. Elle est remplacée le 1er octobre par un
 fallback explicite : conserver l'extraction automatique et les slots provisoires, mais offrir `Edit <tag>` lorsqu'une
-coquille reste visible. Le modal impose exactement le compteur déclaré, avec un pseudo Unicode par ligne, puis montre
-un nouvel aperçu avant le même clic Confirm. Une confiance moyenne ne produit toujours jamais un nom « corrigé »
-silencieusement ni une identité définitive.
+coquille reste visible. Depuis la version 1.22.12, la ligne 1 contient le ClanTag exact, la ligne 2 `Established` au
+format `MM/DD/YYYY HH:mm:ss` GMT, puis chaque ligne restante contient un pseudo Unicode. Le compteur, l'unicité, le tag
+et la date sont revalidés ; une date modifiée recalcule le wipe régulier avant le nouvel aperçu et le clic Confirm.
 
 Le pipeline structuré reste sans coordonnées absolues :
 
@@ -237,9 +237,9 @@ pixel de cette feuille temporaire n'est persisté.
 Depuis la version 1.22.7, un roster encore incomplet après la passe panneau reçoit une seule lecture PSM 6 du champ
 `Clan Members` isolé entre ses ancres relatives. Le résultat n'est retenu que si le tag/compteur restent ceux du même
 panneau et si la qualité structurelle augmente. Si `n444shj, spirit_monger19` reste par exemple fusionné en
-`n444. spirit_monger19`, le bouton `Edit GenX` ouvre le roster courant avec un pseudo par ligne. La soumission exige
-exactement huit lignes uniques dans cet exemple, relance le résolveur et sa corroboration bornée, puis remplace
-uniquement l'aperçu en attente. Le journal canonique et les dictionnaires restent intacts avant Confirm.
+`n444. spirit_monger19`, le bouton `Edit GenX` ouvre le cinfo courant : tag en première ligne, date en deuxième, puis
+les huit pseudos uniques dans cet exemple. La soumission relance le résolveur, la corroboration bornée et l'inférence
+du wipe, puis remplace uniquement l'aperçu en attente. Le journal et les dictionnaires restent intacts avant Confirm.
 
 Les membres `/cinfo` déjà résolus et les lignes F7 nom/SteamID non ambiguës enrichissent enfin une mémoire visuelle
 persistante par serveur sous
@@ -575,7 +575,8 @@ constats est utile. La forme courte est GMT et un ISO explicite doit porter son 
   `{serverKey, wipeId, tagExact, establishedAt?}`. Un même tag recréé pendant le wipe avec un autre `Established` est
   une nouvelle instance. Avec `clanId` natif, le conserver sans supposer sa persistance après wipe.
 - Chaque nouvelle capture `/cinfo` confirmée crée un `clan_snapshot` daté : roster, compteur, rôles et complétude.
-  Une correction confirmée du même hash remplace toutefois son interprétation effective à la même place logique : elle
+  Une correction confirmée du même hash remplace toutefois son interprétation effective à la même place logique, sauf
+  si un `Established` corrigé la rattache explicitement à un autre wipe régulier : elle
   ne crée pas un constat ni un compteur supplémentaire, et ses liens sont entièrement reconstruits.
 - Un joueur peut rejoindre, quitter, changer de clan ou de rôle pendant un wipe. Deux snapshots complets bornent le
   changement entre `lastObservedPresentAt` et `firstObservedAbsentAt`; ils ne donnent pas son heure exacte. Un snapshot

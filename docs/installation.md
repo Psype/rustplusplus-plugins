@@ -30,8 +30,8 @@ selects the result, not a blind retry. Known persistent aliases are supplied thr
 [`--user-words`](https://github.com/tesseract-ocr/tesseract/blob/main/doc/tesseract.1.asc) file;
 that temporary UTF-8 file is deleted after the process. The current English model is still insufficient for arbitrary
 Unicode; unresolved members are stored as pending slots rather than invented. A cinfo preview can be corrected through
-`Edit <tag>` by entering exactly one name per line; the edited roster is previewed again and remains uncommitted until
-the normal Confirm button is used.
+`Edit <tag>`: line 1 is the exact ClanTag, line 2 is `Established` as `MM/DD/YYYY HH:mm:ss` GMT, and every remaining
+line is one exact player name. The complete correction is previewed again and remains uncommitted until Confirm.
 
 Resolved `/cinfo` name shapes and unambiguous F7 name/SteamID rows are stored independently from the code in
 `data/player-intelligence/<guild>/<battlemetricsServerId>/visual-alias-library.json`. The file is bounded, validated,

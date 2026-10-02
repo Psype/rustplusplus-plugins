@@ -498,9 +498,10 @@ Test('incomplete cinfo roster is committed only as a partial snapshot', async t 
     Assert.equal(snapshot.payload.unresolvedMembers.length, 2);
 });
 
-Test('manual roster correction is validated, previewed, and learned only after confirmation', async t => {
+Test('manual cinfo correction validates tag, date and roster before confirmation', async t => {
     Assert.throws(() => ImportWorkflow.parseCorrectedRoster('Alice\nBob', 3), /exactly 3/);
     Assert.throws(() => ImportWorkflow.parseCorrectedRoster('Alice\nAlice', 2), /unique/);
+    Assert.throws(() => ImportWorkflow.parseCorrectedCinfo('GenX\nbad date\nAlice', 1), /Established/);
     const value = createHarness(t);
     value.client.playerIntelligenceImportDependencies.recognize = async () => [
         word('ClanTag: GenX', 20), word('Members: 8', 45),
@@ -521,6 +522,8 @@ Test('manual roster correction is validated, previewed, and learned only after c
         }
     }), true);
     Assert.match(modal.data.custom_id, /^PIImportEditModal:/u);
+    Assert.match(modal.toJSON().components[0].components[0].value,
+        /^GenX\n09\/29\/2026 14:01:10\nSumdumsit/u);
     let modalDeferred = false;
     value.client.playerIntelligenceImportDependencies.identityCandidates = async () => {
         Assert.equal(modalDeferred, true);
@@ -536,12 +539,15 @@ Test('manual roster correction is validated, previewed, and learned only after c
             customId: modal.data.custom_id,
             guildId: 'guild', channelId: 'commands', user: { id: 'requester' },
             deferUpdate: async () => { modalDeferred = true; },
-            fields: { getTextInputValue: () => corrected.join('\n') }
+            fields: { getTextInputValue: () => ['genx', '09/25/2026 14:02:10', ...corrected].join('\n') }
         }
     }), true);
     Assert.equal(modalDeferred, true);
     const correctedPreview = value.edits.at(-1);
     Assert.match(correctedPreview.content, /8\/8 names read/);
+    Assert.match(correctedPreview.content, /Corrected \/cinfo.*genx/u);
+    Assert.match(correctedPreview.content, /Established: 09\/25\/2026 14:02:10/u);
+    Assert.match(correctedPreview.content, /Wipe inferred from Established: 2026-09-25T14:00:00\.000Z/u);
     Assert.match(correctedPreview.content, /Corrected roster:.*n444shj, spirit_monger19/u);
     const libraryFile = Path.join(value.directory, 'guild', '42', 'visual-alias-library.json');
     Assert.deepEqual(await VisualAliasLibrary.confirmedUserWords(libraryFile), []);
@@ -556,6 +562,9 @@ Test('manual roster correction is validated, previewed, and learned only after c
     Assert.equal(learned.includes('spirit_monger19'), true);
     const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
     const snapshot = (await store.readAll()).find(event => event.kind === 'clan_snapshot');
+    Assert.equal(snapshot.payload.tag, 'genx');
+    Assert.equal(snapshot.payload.establishedAt, '2026-09-25T14:02:10.000Z');
+    Assert.equal(snapshot.scope.wipeId, 'wipe:2026-09-25T14:00:00.000Z');
     Assert.equal(snapshot.payload.declaredMemberCount, 8);
     Assert.equal(snapshot.payload.unresolvedMembers.some(member => member.observedText === 'n444shj'), true);
     let futureUserWords = [];
