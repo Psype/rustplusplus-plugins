@@ -713,7 +713,8 @@ function importEvents(context, scope, parsed, metadata, recordedAt, revision = n
         parsed.entries.forEach((/** @type {any} */ entry, /** @type {number} */ index) =>
             events.push(identityEvent(scope, {
             steamId: entry.steamId, battlemetricsPlayerId: null, name: entry.name, caseFidelity: false
-        }, { ...common, sourceEventId: `${sourceBase}:f7:${index}:${entry.steamId}` })));
+        }, { ...common, confidence: entry.identityConfidence || common.confidence,
+            sourceEventId: `${sourceBase}:f7:${index}:${entry.steamId}` })));
     }
     else {
         const resolvedMembers = Array.isArray(parsed.resolvedMembers) ? parsed.resolvedMembers :

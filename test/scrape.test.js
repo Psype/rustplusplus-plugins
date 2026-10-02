@@ -59,3 +59,29 @@ Test('external Steam name failure degrades to one warning instead of repeated er
         Scrape.scrape = original;
     }
 });
+
+Test('a transient Steam profile failure expires after thirty seconds without an automatic retry', async () => {
+    const originalScrape = Scrape.scrape;
+    const originalNow = Date.now;
+    const logs = [];
+    let calls = 0;
+    let now = 1_800_000_000_000;
+    Date.now = () => now;
+    Scrape.scrape = async () => {
+        calls += 1;
+        return { status: 503 };
+    };
+    try {
+        Assert.equal(await Scrape.scrapeSteamProfileName(client(logs), '76561199237622444'), null);
+        Assert.equal(await Scrape.scrapeSteamProfileName(client(logs), '76561199237622444'), null);
+        Assert.equal(calls, 1);
+        now += 30_001;
+        Assert.equal(await Scrape.scrapeSteamProfileName(client(logs), '76561199237622444'), null);
+        Assert.equal(calls, 2);
+        Assert.equal(logs.length, 1);
+    }
+    finally {
+        Date.now = originalNow;
+        Scrape.scrape = originalScrape;
+    }
+});

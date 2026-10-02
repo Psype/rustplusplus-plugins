@@ -206,7 +206,7 @@ Test('OCR compares one text-mask pass with raw semantics and feeds persistent al
         call.options.userWords.includes('tom.le.geek.2')), true);
 });
 
-Test('F7 adds one dedicated muted-neutral pass when normal OCR misses every SteamID', async t => {
+Test('F7 always adds one dedicated muted-neutral pass and reports cross-pass ID agreement', async t => {
     const value = createHarness(t);
     const calls = [];
     value.client.playerIntelligenceImportDependencies.downloadImage = async () => ({
@@ -234,8 +234,39 @@ Test('F7 adds one dedicated muted-neutral pass when normal OCR misses every Stea
         options: { getSubcommand: () => 'f7', getAttachment: () => ({ id: 'f7' }) }
     });
     Assert.deepEqual(calls, ['normal-mask', 'raw-f7', 'muted-mask']);
-    Assert.match(value.edits[0].content, /OCR F7 — 1 complete SteamID64/);
+    Assert.match(value.edits[0].content, /OCR F7 — 1 pair \(1 verified, 0 OCR-consensus/);
     Assert.match(value.edits[0].content, /76561197976022895 — Rw/);
+});
+
+Test('F7 retains a Steam-unavailable pair only when two independent exact-ID passes agree', async t => {
+    const value = createHarness(t);
+    const steamId = '76561198843692446';
+    value.client.playerIntelligenceImportDependencies.downloadImage = async () => ({
+        imageBase64: 'raw-f7-consensus', sha256: '1'.repeat(64)
+    });
+    value.client.playerIntelligenceImportDependencies.preprocessImage = async () => ({
+        imageBase64: 'normal-f7-consensus', scale: 1
+    });
+    value.client.playerIntelligenceImportDependencies.preprocessF7Image = async () => ({
+        imageBase64: 'muted-f7-consensus', scale: 1
+    });
+    value.client.playerIntelligenceImportDependencies.extractVisualSamples = async () => [[]];
+    value.client.playerIntelligenceImportDependencies.identityCandidates = async () => [];
+    value.client.playerIntelligenceImportDependencies.steamProfileName = async () => null;
+    value.client.playerIntelligenceImportDependencies.recognize = async image => image === 'raw-f7-consensus' ?
+        [{ ...word('FIND PLAYER', 20), x: 20 }] : [
+            { ...word('FIND PLAYER', 20), x: 20 },
+            { ...word('零^X^LAZY2ERO', 200), x: 100 },
+            { ...word(steamId, 244), x: 100, width: 300, confidence: 88 }
+        ];
+
+    await ImportWorkflow.beginImport(value.client, {
+        ...value.command,
+        options: { getSubcommand: () => 'f7', getAttachment: () => ({ id: 'f7-consensus' }) }
+    });
+
+    Assert.match(value.edits[0].content, /1 pair \(0 verified, 1 OCR-consensus/);
+    Assert.match(value.edits[0].content, /76561198843692446 — 零\^X\^LAZY2ERO \[OCR-consensus\]/);
 });
 
 Test('cinfo selection takes the safest panel independently from each OCR variant', () => {

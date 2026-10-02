@@ -163,6 +163,26 @@ Test('confirmed F7 and cinfo imports fuse by exact normalized name and stay hash
     ]);
 });
 
+Test('an OCR-consensus-only F7 observation remains explicitly probable in the journal', async t => {
+    const value = harness(t);
+    const parsed = Object.freeze({
+        kind: 'f7', complete: true,
+        entries: Object.freeze([Object.freeze({
+            steamId: STEAM_A, name: 'ALICE', caseFidelity: false, ambiguous: false,
+            alternatives: Object.freeze([]), identityConfidence: 'probable', ocrConsensusOnly: true
+        })]),
+        errors: Object.freeze([])
+    });
+
+    await Runtime.commitParsedImport(value.context(), parsed, { sha256: '9'.repeat(64) });
+
+    const [event] = await value.store().readAll();
+    Assert.equal(event.kind, 'identity_observed');
+    Assert.equal(event.confidence, 'probable');
+    Assert.equal(event.subject.steamId, STEAM_A);
+    Assert.equal(event.subject.exactName, 'ALICE');
+});
+
 Test('compact commands expose only useful identity, affinity and conservative activity', async t => {
     const value = harness(t);
     await Runtime.onBattlemetricsUpdated(value.context({ firstTime: true }));

@@ -193,6 +193,22 @@ Test('an exact-ID Steam recovery learns the canonical visual alias, never the ba
     Assert.equal(samples.some(sample => sample.name === 'of a'), false);
 });
 
+Test('an OCR-consensus-only F7 pair never trains authoritative visual identity evidence', async t => {
+    const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-visual-f7-consensus-'));
+    t.after(() => Fs.rmSync(directory, { recursive: true, force: true }));
+    const file = Path.join(directory, 'visual-alias-library.json');
+    await Visual.recordResolved(file, [{
+        parsed: { kind: 'f7', entries: [{
+            name: '零^X^LAZY2ERO', steamId: '76561198843692446', ambiguous: false,
+            visualMemberIndex: 0, identityConfidence: 'probable', ocrConsensusOnly: true
+        }] },
+        visualSamples: [{ memberIndex: 0, observedText: '零^X^LAZY2ERO',
+            boundaryProof: true, feature: feature(0x64) }]
+    }], '2026-10-02T14:13:00.000Z');
+
+    Assert.equal((await Visual.read(file)).samples.length, 0);
+});
+
 Test('partial cinfo rosters cannot emit or persist position-based visual samples', async t => {
     const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-visual-partial-'));
     t.after(() => Fs.rmSync(directory, { recursive: true, force: true }));

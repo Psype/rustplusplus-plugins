@@ -583,7 +583,7 @@ function recordResolved(file, items, observedAt) {
             (item.parsed.resolvedMembers || []).map((/** @type {any} */ member) => [member.memberIndex, member]) :
             (item.parsed.entries || []).map((/** @type {any} */ entry, /** @type {number} */ index) =>
                 [Number.isSafeInteger(entry.visualMemberIndex) ? entry.visualMemberIndex : index,
-                    entry.ambiguous || !entry.name ? null : entry]));
+                    entry.ambiguous || !entry.name || entry.identityConfidence === 'probable' ? null : entry]));
         for (const visual of item.visualSamples || []) {
             if (visual.boundaryProof !== true) continue;
             const member = resolved.get(visual.memberIndex);

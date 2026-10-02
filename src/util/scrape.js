@@ -25,6 +25,7 @@ const Utils = require('../util/utils.js');
 
 const REQUEST_TIMEOUT_MS = 5000;
 const PROFILE_CACHE_MS = 60 * 60 * 1000;
+const PROFILE_FAILURE_CACHE_MS = 30 * 1000;
 const profileNameCache = new Map();
 const warningCache = new Map();
 
@@ -59,7 +60,8 @@ module.exports = {
         const id = String(steamId);
         if (!/^\d{17}$/.test(id)) return null;
         const cached = profileNameCache.get(id);
-        if (cached && Date.now() - cached.cachedAt < PROFILE_CACHE_MS) return cached.name;
+        const cacheDuration = cached && cached.name === null ? PROFILE_FAILURE_CACHE_MS : PROFILE_CACHE_MS;
+        if (cached && Date.now() - cached.cachedAt < cacheDuration) return cached.name;
 
         const link = `${Constants.STEAM_PROFILES_URL}${id}?xml=1`;
         const response = await module.exports.scrape(link);

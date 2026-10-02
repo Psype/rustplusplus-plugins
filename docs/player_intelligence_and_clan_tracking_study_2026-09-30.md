@@ -310,9 +310,10 @@ tag/compteur, les lectures numériques indépendantes restantes et le moteur mul
 
 Les exemples F7 réels ajoutés le 1er octobre combinent décorations autour d'un nom latin, lettres volontairement
 espacées, `İ` turc, caractères cyrilliques, coréens et chaînes visuellement ambiguës mélangeant potentiellement
-plusieurs alphabets. Le pseudo F7 n'est donc pas canonique. Depuis 1.22.13, une variante visuelle dédiée est déclenchée
-uniquement lorsque les passes normales reconnaissent F7 sans aucun SteamID ; elle conserve le gris atténué et agrandit
-l'image dans la même limite de pixels. Le parseur accepte au plus deux substitutions OCR usuelles dans un candidat de
+plusieurs alphabets. Le pseudo F7 n'est donc pas canonique. Depuis 1.22.15, la variante visuelle qui conserve le gris
+atténué est exécutée pour chaque image F7, même si les passes normales trouvent déjà des IDs. Le résultat privilégie
+les SteamID exacts répétés entre variantes puis leur confiance OCR, dans la même limite de pixels. Le parseur accepte au
+plus deux substitutions OCR usuelles dans un candidat de
 17 caractères, puis valide sa plage SteamID64. Le nom majuscule reste normalement un contrôle : la ligne est conservée
 si sa similarité avec le persona Steam ou un alias déjà lié au même ID dépasse le seuil renforcé selon sa longueur.
 Depuis 1.22.14, l'échec extrême observé `KASANE TETO` → `of a` ne fait plus perdre un ID lu exactement : pour une ligne
@@ -322,6 +323,14 @@ texte rejeté avant confirmation. Ce repli reste interdit pour tout SteamID rép
 ne soit pas masquée par un compte Steam différent. Une vérification indisponible exclut toujours la ligne. Après
 confirmation, la forme visuelle peut apprendre le persona canonique, jamais `of a` comme alias. Aucun avatar n'est
 comparé visuellement et aucun credential Steam n'est requis.
+
+Une indisponibilité du profil Steam ne supprime plus une paire lorsque deux variantes OCR distinctes lisent exactement
+le même SteamID non réparé avec une confiance d'au moins 60 et que l'association géométrique du pseudo n'est pas
+ambiguë. L'aperçu la marque `[OCR-consensus]` et l'événement confirmé reste explicitement `probable`; il ne peut pas
+entraîner une preuve visuelle autoritaire. Une seule passe, un ID réparé ou une confiance inférieure restent rejetés.
+Le contrôle textuel même-ID accepte aussi un noyau contigu long malgré un préfixe décoratif endommagé, ce qui couvre
+`L @*X4LAZY2ERO` face à `零^x Lazy2ero` sans relâcher la recherche vers d'autres identités. Les requêtes Steam passent à
+deux simultanées et une panne est mise en cache trente secondes seulement ; il n'existe toujours aucun retry aveugle.
 
 Ces identités exactes enrichissent ensuite un dictionnaire de candidats commun à F7, `/cinfo`, chat et clans. Le roster
 peut être reconnu de façon contrainte en comparant chaque segment visuel aux alias déjà connus et, si utile, à leur

@@ -175,14 +175,17 @@ Options | Description | Required
 > Persistent known aliases are passed to Tesseract as UTF-8 user words. Confirmed name shapes are also retained in a
 > bounded per-server data sidecar: exact repeats may corroborate, while approximate visual matches only rank candidates
 > and visual collisions remain ambiguous. No screenshot pixels are kept by this dictionary.
-> F7 uses a separate muted-neutral mask for the dim gray SteamID64 rows when the normal passes find none. At most two
-> common OCR substitutions may be repaired inside a 17-character candidate, which must remain inside the valid Steam
-> individual-account range. The displayed uppercase name may contain OCR errors. A similar public Steam persona or
-> alias already tied to the ID confirms the pair normally. When the all-caps F7 font is transcribed too badly for that
-> comparison, an unambiguous row may still use the canonical Steam persona only if all 17 ID digits were read directly
-> with OCR confidence of at least 80; the preview marks it `[Steam-recovered]` and reports the discarded OCR text.
-> This fallback is forbidden for an ID reconstructed through OCR substitutions. Unverifiable rows are excluded, and no
-> Steam credential or Web API key is used.
+> F7 always compares the original, normal text mask and a separate muted-neutral mask for the dim gray SteamID64 rows.
+> The selected pass favors exact IDs independently repeated across variants, then OCR confidence; at most two common OCR
+> substitutions may be repaired inside a 17-character candidate, which must remain inside the valid Steam account
+> range. The uppercase name may contain OCR errors. A similar public Steam persona or same-ID alias confirms the pair;
+> long matching cores also tolerate damaged decorative prefixes such as `L @*X4LAZY2ERO` versus `零^x Lazy2ero`.
+> When the font is transcribed too badly, an unambiguous row may use the canonical Steam persona only if all 17 digits
+> were read directly with confidence at least 80; it is marked `[Steam-recovered]`. If Steam is temporarily unavailable,
+> an unrepaired ID repeated by at least two OCR variants with confidence at least 60 is retained as a `probable`
+> `[OCR-consensus]` pair. It remains usable as reversible evidence but cannot train authoritative visual identity data.
+> Reconstructed, single-pass or low-confidence unverifiable rows are excluded. No Steam credential or Web API key is
+> used, and a failed public-profile lookup is cached for only thirty seconds rather than one hour.
 > Ambiguous name/SteamID associations and truncated IDs are never guessed. A structurally valid `/cinfo` with uncertain
 > or missing members is offered as a partial snapshot: pending identities stay out of aliases and affinity counts until
 > later evidence resolves them automatically. A complete SteamID with a hidden name is retained without an alias. Set

@@ -133,6 +133,15 @@ Test('F7 names tolerate OCR case/glyph errors only when the same SteamID profile
     Assert.match(verified.parsed.errors.at(-1), /does not match Steam/);
 });
 
+Test('F7 same-ID validation tolerates a damaged decoration around a long matching core', () => {
+    const observed = 'L @*X4LAZY2ERO';
+    const canonical = '零^x Lazy2ero';
+    Assert.equal(F7IdentityValidation.f7NameScore(observed, canonical) >=
+        F7IdentityValidation.requiredNameScore(observed), true);
+    Assert.equal(F7IdentityValidation.f7NameScore('WRONG PERSON', canonical) <
+        F7IdentityValidation.requiredNameScore('WRONG PERSON'), true);
+});
+
 Test('F7 recovers a bad all-caps name read from Steam only behind an exact high-confidence ID', async () => {
     const exactSteamId = '76561198875390964';
     const correctedSteamId = '76561198052859299';
@@ -166,6 +175,25 @@ Test('F7 recovers a bad all-caps name read from Steam only behind an exact high-
     ]);
     Assert.match(verified.parsed.errors.join(' '), /recovered from an exact high-confidence SteamID/);
 });
+
+Test('F7 keeps an exact SteamID/name pair as probable when independent OCR passes agree but Steam is unavailable',
+    async () => {
+        const steamId = '76561198843692446';
+        const items = [{ parsed: {
+            kind: 'f7', complete: true, rejectedPartialIds: [], errors: [], entries: [{
+                steamId, name: '零^X^LAZY2ERO', ambiguous: false, idOcrCorrected: false,
+                idOcrConfidence: 88, idOcrPasses: 2
+            }]
+        } }];
+
+        const [verified] = await F7IdentityValidation.verify(items, [], async () => null);
+
+        Assert.equal(verified.parsed.entries.length, 1);
+        Assert.equal(verified.parsed.entries[0].steamId, steamId);
+        Assert.equal(verified.parsed.entries[0].ocrConsensusOnly, true);
+        Assert.equal(verified.parsed.entries[0].identityConfidence, 'probable');
+        Assert.match(verified.parsed.errors.join(' '), /independent OCR-pass agreement/);
+    });
 
 Test('F7 OCR parser never chooses between conflicting names for one SteamID', () => {
     const steamId = '76561197976022895';

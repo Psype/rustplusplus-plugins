@@ -93,11 +93,16 @@ function previewText(parsed) {
         ].filter(Boolean).join('\n').slice(0, 1900);
     }
     const idOnly = parsed.entries.filter((/** @type {any} */ entry) => !entry.name).length;
+    const consensusOnly = parsed.entries.filter((/** @type {any} */ entry) => entry.ocrConsensusOnly === true).length;
+    const verified = parsed.entries.length - consensusOnly;
+    const pairLabel = parsed.entries.length === 1 ? 'pair' : 'pairs';
     const pairs = parsed.entries.slice(0, 20).map((/** @type {any} */ entry) =>
         `${entry.steamId} — ${entry.name || '[name hidden/unread]'}${
-            entry.profileNameRecovered ? ' [Steam-recovered]' : ''}`).join('\n');
+            entry.profileNameRecovered ? ' [Steam-recovered]' :
+                entry.ocrConsensusOnly ? ' [OCR-consensus]' : ''}`).join('\n');
     return [
-        `OCR F7 — ${parsed.entries.length} complete SteamID64 (${idOnly} without a safe name)`,
+        `OCR F7 — ${parsed.entries.length} ${pairLabel} (${verified} verified, ${consensusOnly} OCR-consensus, ` +
+            `${idOnly} without a safe name)`,
         pairs,
         parsed.rejectedPartialIds.length > 0 ?
             `Rejected partial IDs: ${parsed.rejectedPartialIds.length}` : '',
@@ -340,8 +345,17 @@ function parseRecognizedWords(words, kindHint, dependencies) {
 function recognitionQuality(result) {
     if (result.kind === 'f7') {
         const parsed = result.blocks[0].parsed;
+        const confidences = /** @type {number[]} */ (parsed.entries.flatMap((/** @type {any} */ entry) =>
+            typeof entry.idOcrConfidence === 'number' && Number.isFinite(entry.idOcrConfidence) ?
+                [entry.idOcrConfidence] : []));
+        const averageConfidence = confidences.length > 0 ?
+            confidences.reduce((/** @type {number} */ sum, /** @type {number} */ value) => sum + value, 0) /
+                confidences.length : 0;
+        const correctedIds = parsed.entries.filter((/** @type {any} */ entry) =>
+            entry.idOcrCorrected === true).length;
         return parsed.entries.length * 100 + (parsed.complete ? 40 : 0) -
-            parsed.rejectedPartialIds.length * 4 - parsed.errors.length * 2;
+            parsed.rejectedPartialIds.length * 4 - parsed.errors.length * 2 +
+            averageConfidence * 0.2 - correctedIds * 10;
     }
     return result.blocks.reduce((score, block) => score + cinfoBlockQuality(block), 0);
 }
@@ -357,6 +371,35 @@ function cinfoBlockQuality(block) {
 
 /** @param {{label:string,result:any,quality:number}[]} recognized */
 function selectRecognizedResult(recognized) {
+    const f7Variants = recognized.filter(value => value.result.kind === 'f7');
+    if (f7Variants.length > 0 && f7Variants.length === recognized.length) {
+        /** @type {Map<string,number>} */
+        const passCounts = new Map();
+        for (const variant of f7Variants) {
+            const ids = new Set(variant.result.blocks[0].parsed.entries
+                .filter((/** @type {any} */ entry) => entry.idOcrCorrected !== true)
+                .map((/** @type {any} */ entry) => entry.steamId));
+            for (const steamId of ids) passCounts.set(steamId, (passCounts.get(steamId) || 0) + 1);
+        }
+        f7Variants.sort((left, right) => {
+            const agreement = (/** @type {any} */ variant) =>
+                variant.result.blocks[0].parsed.entries.reduce((/** @type {number} */ sum,
+                    /** @type {any} */ entry) =>
+                    sum + Math.max(0, (passCounts.get(entry.steamId) || 0) - 1), 0);
+            return agreement(right) - agreement(left) || right.quality - left.quality ||
+                Number(right.label === 'f7-muted-text') - Number(left.label === 'f7-muted-text');
+        });
+        const selected = f7Variants[0].result;
+        const block = selected.blocks[0];
+        const entries = block.parsed.entries.map((/** @type {any} */ entry) => Object.freeze({
+            ...entry,
+            idOcrPasses: passCounts.get(entry.steamId) || 0
+        }));
+        return Object.freeze({ ...selected, blocks: Object.freeze([Object.freeze({
+            ...block,
+            parsed: Object.freeze({ ...block.parsed, entries: Object.freeze(entries) })
+        })]) });
+    }
     recognized.sort((left, right) => right.quality - left.quality ||
         Number(right.label === 'text-mask') - Number(left.label === 'text-mask'));
     const selected = recognized[0].result;
@@ -427,9 +470,8 @@ async function parseAttachment(client, kindHint, attachment, reference, attachme
     catch (error) {
         failures.push(error);
     }
-    const f7DetectedWithoutIds = recognized.some(value => value.result.kind === 'f7') &&
-        recognized.every(value => value.result.kind !== 'f7' || value.result.blocks[0].parsed.entries.length === 0);
-    if (f7DetectedWithoutIds && dependencies.disableF7MutedTextPass !== true) {
+    const f7Detected = recognized.some(value => value.result.kind === 'f7');
+    if (f7Detected && dependencies.disableF7MutedTextPass !== true) {
         try {
             const preprocessF7 = dependencies.preprocessF7Image || OcrImagePreprocess.createF7TextMask;
             const processed = await preprocessF7(image.imageBase64, dependencies);
