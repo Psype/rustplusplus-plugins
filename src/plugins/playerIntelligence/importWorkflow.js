@@ -654,13 +654,29 @@ async function prepareImports(client, source, requests, requesterUserId, referen
     if (captureTime !== null && items.some(item => item.parsed.kind !== 'cinfo')) {
         throw new Error('Historical capture time is supported only for cinfo imports.');
     }
-    const importScope = captureTime === null ? scope : await Runtime.resolveHistoricalScope(context, captureTime);
-    if (captureTime !== null && items.some(item => item.parsed.establishedAtUtc < importScope.wipeStart ||
+    let importScope = captureTime === null ? scope : await Runtime.resolveHistoricalScope(context, captureTime);
+    let inferredFromEstablished = false;
+    if (captureTime === null && items.every(item => item.parsed.kind === 'cinfo')) {
+        const inferredScopes = items.map(item => Runtime.resolveEstablishedScope(context,
+            item.parsed.establishedAtUtc));
+        const wipeStarts = [...new Set(inferredScopes.map(value => value.wipeStart))];
+        if (wipeStarts.length !== 1) {
+            throw new Error('Detected cinfo blocks belong to different inferred wipes; upload each wipe separately.');
+        }
+        if (inferredScopes[0].wipeId !== scope.wipeId) {
+            const observedAt = items.map(item => item.parsed.establishedAtUtc).sort().at(-1);
+            importScope = Object.freeze({ ...inferredScopes[0], observedAt });
+            inferredFromEstablished = true;
+        }
+    }
+    const historical = captureTime !== null || inferredFromEstablished;
+    if (historical && items.some(item => item.parsed.establishedAtUtc < importScope.wipeStart ||
         item.parsed.establishedAtUtc > importScope.observedAt)) {
         throw new Error('Clan Established time must fall between the selected wipe start and capture time.');
     }
-    const timingText = captureTime === null ? null :
-        `Historical capture: ${importScope.observedAt} | wipe: ${importScope.wipeStart}`;
+    const timingText = inferredFromEstablished ?
+        `Wipe inferred from Established: ${importScope.wipeStart} | capture time not used` :
+        captureTime === null ? null : `Historical capture: ${importScope.observedAt} | wipe: ${importScope.wipeStart}`;
     const preview = timedPreview(items, timingText);
     if (Array.from(preview).length > 1900) {
         return Object.freeze({
@@ -679,8 +695,9 @@ async function prepareImports(client, source, requests, requesterUserId, referen
         activeWipeId: scope.wipeId,
         wipeId: importScope.wipeId,
         wipeStart: importScope.wipeStart,
-        observedAt: captureTime === null ? null : importScope.observedAt,
-        historical: captureTime !== null,
+        observedAt: historical ? importScope.observedAt : null,
+        historical,
+        inferredFromEstablished,
         timingText,
         visualFile,
         items: Object.freeze(items),

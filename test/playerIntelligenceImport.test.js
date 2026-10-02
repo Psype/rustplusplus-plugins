@@ -648,8 +648,10 @@ Test('short-name collision resolves only after bounded SteamID corroboration', a
 
 Test('dedicated import channel accepts only an approved helper webhook and still requires confirmation', async t => {
     const value = createHarness(t);
+    value.client.playerIntelligenceDependencies.now = () => new Date('2026-10-02T20:00:00.000Z');
+    value.client.rustplusInstances.guild.info.wipeTime = Date.parse('2026-10-02T14:00:00.000Z') / 1000;
     const message = {
-        guildId: 'guild', channelId: 'intel-imports', id: 'message-1', content: 'cinfo 2026-09-29 21:15',
+        guildId: 'guild', channelId: 'intel-imports', id: 'message-1', content: 'cinfo',
         webhookId: '12345678901234567', author: { id: 'webhook', bot: true },
         attachments: new Map([['image', { id: 'image' }]]),
         reply: async payload => value.replies.push(payload)
@@ -657,7 +659,7 @@ Test('dedicated import channel accepts only an approved helper webhook and still
     Assert.equal(await ImportWorkflow.handleMessage({ client: value.client, message }), true);
     Assert.equal(value.replies.length, 1);
     Assert.match(value.replies[0].content,
-        /Historical capture: 2026-09-29T21:15:00\.000Z \| wipe: 2026-09-29T14:00:00\.000Z/);
+        /Wipe inferred from Established: 2026-09-29T14:00:00\.000Z \| capture time not used/);
     Assert.match(value.replies[0].content, /OCR \/cinfo/);
     const customId = value.replies[0].components[0].components[0].data.custom_id;
     const confirmation = {
@@ -668,7 +670,7 @@ Test('dedicated import channel accepts only an approved helper webhook and still
     const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
     const snapshots = (await store.readAll()).filter(event => event.kind === 'clan_snapshot');
     Assert.equal(snapshots.length, 1);
-    Assert.equal(snapshots[0].observedAt, '2026-09-29T21:15:00.000Z');
+    Assert.equal(snapshots[0].observedAt, '2026-09-29T14:58:27.000Z');
     Assert.equal(snapshots[0].scope.wipeId, 'wipe:2026-09-29T14:00:00.000Z');
 
     let downloaded = false;

@@ -189,12 +189,12 @@ Options | Description | Required
 > user-word lexicon for future captures, without becoming SteamID proof or unsafe glyph training data.
 > Missing `Members`/`Established` anchors and a polluted tag are reread from isolated rows derived from neighboring
 > semantic lines. Count/date reads use restricted numeric alphabets and every result is strictly revalidated.
-> For an older `/cinfo`, set optional `captured_at` to `YYYY-MM-DD HH:mm` in GMT, or to a full ISO timestamp
-> with an explicit UTC offset. The preview shows the canonical UTC observation and selected wipe before confirmation.
-> The regular boundary is Tuesday/Friday 14:00 GMT for the active WarBandits EU 5x NoBPs server. Rust's monthly
-> first-Thursday 19:00 GMT forced wipe and any observed server boundary are additional candidates. `Established` is
-> server time in GMT and must fall inside the selected wipe and no later
-> than the capture, but remains the clan creation time rather than the roster observation time.
+> No caption or `captured_at` is required for an older `/cinfo`: the bot infers its regular Tuesday/Friday 14:00 GMT
+> wipe from `Established` and shows that wipe before confirmation. Forced wipes and intermediate observed boundaries
+> are deliberately ignored. Upload blocks from different inferred regular wipes separately. `Established` remains the
+> clan creation time, not the roster capture time; the upload time is not used as the historical capture time.
+> Optional `captured_at` accepts `YYYY-MM-DD HH:mm` in GMT or a full ISO timestamp with an explicit UTC offset when an
+> exact observation time is useful.
 > Reimporting an already committed image does not silently duplicate it. Discord shows the effective previous version
 > and the proposed version, then offers `Replace previous` or `Keep existing`. Replacement preserves the observation's
 > logical counter position, rebuilds identities/clans/affinities from the new content, and may itself be replaced later.
