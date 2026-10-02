@@ -176,7 +176,12 @@ Options | Description | Required
 > bounded per-server data sidecar: exact repeats may corroborate, while approximate visual matches only rank candidates
 > and visual collisions remain ambiguous. No screenshot pixels are kept by this dictionary.
 > F7 always compares the original, normal text mask and a separate muted-neutral mask for the dim gray SteamID64 rows.
-> The selected pass favors exact IDs independently repeated across variants, then OCR confidence; at most two common OCR
+> The muted pass is digit-only instead of repeating the same general text recognition. The selected pass favors exact
+> IDs independently repeated across variants, then OCR confidence. Every complete, partial, or name-only row inferred
+> across any of those passes is then cropped from its relative OCR box, masked, placed on one bounded 4x numeric sheet and read
+> once with a digit whitelist. This can correct a valid-looking wrong digit and recover an ID missed by the whole-image
+> pass without fixed screen coordinates or one process per player. The preview reports `Isolated SteamID rows reread`.
+> At most two common OCR
 > substitutions may be repaired inside a 17-character candidate, which must remain inside the valid Steam account
 > range. The uppercase name may contain OCR errors. A similar public Steam persona or same-ID alias confirms the pair;
 > long matching cores also tolerate damaged decorative prefixes such as `L @*X4LAZY2ERO` versus `零^x Lazy2ero`.

@@ -221,8 +221,8 @@ Test('F7 always adds one dedicated muted-neutral pass and reports cross-pass ID 
     value.client.playerIntelligenceImportDependencies.extractVisualSamples = async () => [[]];
     value.client.playerIntelligenceImportDependencies.identityCandidates = async () => [];
     value.client.playerIntelligenceImportDependencies.steamProfileName = async () => 'Rw';
-    value.client.playerIntelligenceImportDependencies.recognize = async image => {
-        calls.push(image);
+    value.client.playerIntelligenceImportDependencies.recognize = async (image, options) => {
+        calls.push({ image, options });
         return image === 'muted-mask' ? [
             { ...word('FIND PLAYER', 20), x: 20 },
             { ...word('RW', 200), x: 100 },
@@ -233,7 +233,9 @@ Test('F7 always adds one dedicated muted-neutral pass and reports cross-pass ID 
         ...value.command,
         options: { getSubcommand: () => 'f7', getAttachment: () => ({ id: 'f7' }) }
     });
-    Assert.deepEqual(calls, ['normal-mask', 'raw-f7', 'muted-mask']);
+    Assert.deepEqual(calls.map(call => call.image), ['normal-mask', 'raw-f7', 'muted-mask']);
+    Assert.equal(calls[2].options.characterWhitelist, '0123456789');
+    Assert.deepEqual(calls[2].options.userWords, []);
     Assert.match(value.edits[0].content, /OCR F7 — 1 pair \(1 verified, 0 OCR-consensus/);
     Assert.match(value.edits[0].content, /76561197976022895 — Rw/);
 });
@@ -267,6 +269,32 @@ Test('F7 retains a Steam-unavailable pair only when two independent exact-ID pas
 
     Assert.match(value.edits[0].content, /1 pair \(0 verified, 1 OCR-consensus/);
     Assert.match(value.edits[0].content, /76561198843692446 — 零\^X\^LAZY2ERO \[OCR-consensus\]/);
+});
+
+Test('F7 row refinement receives complementary complete rows found by another OCR variant', () => {
+    const entry = (steamId, x, y, name = null) => Object.freeze({
+        steamId, name, ambiguous: false, alternatives: Object.freeze([]), idOcrCorrected: false,
+        idOcrConfidence: 90, idBox: Object.freeze({ x, y, width: 140, height: 10 }), nameBox: null
+    });
+    const variant = (entries, quality) => ({
+        label: quality === 2 ? 'raw' : 'text-mask', quality,
+        result: { kind: 'f7', blocks: [{ words: [], parsed: {
+            kind: 'f7', entries: Object.freeze(entries), refinementRows: Object.freeze([]),
+            rejectedPartialIds: Object.freeze([]), errors: Object.freeze([]), complete: true
+        } }] }
+    });
+    const selected = ImportWorkflow.selectRecognizedResult([
+        variant([entry('76561198875390964', 100, 100, 'KASANE TETO')], 2),
+        variant([
+            entry('76561198875390964', 100, 100, 'KASANE TETO'),
+            entry('76561198843692446', 500, 100, '零^X^LAZY2ERO')
+        ], 1)
+    ]);
+
+    Assert.equal(selected.blocks[0].parsed.entries.length, 1);
+    Assert.deepEqual(selected.blocks[0].parsed.refinementRows.map(row => [row.partialText, row.name]), [
+        ['76561198843692446', '零^X^LAZY2ERO']
+    ]);
 });
 
 Test('cinfo selection takes the safest panel independently from each OCR variant', () => {

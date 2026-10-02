@@ -209,6 +209,18 @@ Test('F7 OCR parser never chooses between conflicting names for one SteamID', ()
     Assert.deepEqual(result.entries[0].alternatives, ['RW', 'SOMEONE ELSE']);
 });
 
+Test('F7 exposes an OCR-name row without a readable ID for isolated numeric recovery', () => {
+    const result = parseF7Words([
+        word('FIND', 30, 10), word('PLAYER', 72, 10),
+        word('MISSING ID PLAYER', 100, 100, 160)
+    ]);
+
+    Assert.equal(result.entries.length, 0);
+    Assert.equal(result.refinementRows.length, 1);
+    Assert.equal(result.refinementRows[0].name, 'MISSING ID PLAYER');
+    Assert.equal(result.refinementRows[0].idBox.y > result.refinementRows[0].nameBox.y, true);
+});
+
 Test('import type detection uses OCR semantics and rejects mixed images', () => {
     const f7 = [word('FIND PLAYER', 10, 10), word('RW', 10, 40),
         word('76561197976022895', 10, 62, 150)];

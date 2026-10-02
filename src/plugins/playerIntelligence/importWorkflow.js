@@ -9,6 +9,7 @@ const ImageAttachment = require('./imageAttachment.js');
 const CinfoPanelRefinement = require('./cinfoPanelRefinement.js');
 const CinfoRoles = require('./cinfoRoles.js');
 const F7IdentityValidation = require('./f7IdentityValidation.js');
+const F7RowRefinement = require('./f7RowRefinement.js');
 const Layout = require('./ocrLayout.js');
 const OcrImagePreprocess = require('./ocrImagePreprocess.js');
 const { detectImportKind } = require('./detectImportKind.js');
@@ -103,6 +104,7 @@ function previewText(parsed) {
     return [
         `OCR F7 — ${parsed.entries.length} ${pairLabel} (${verified} verified, ${consensusOnly} OCR-consensus, ` +
             `${idOnly} without a safe name)`,
+        parsed.idRowsRefined > 0 ? `Isolated SteamID rows reread: ${parsed.idRowsRefined}.` : '',
         pairs,
         parsed.rejectedPartialIds.length > 0 ?
             `Rejected partial IDs: ${parsed.rejectedPartialIds.length}` : '',
@@ -391,13 +393,73 @@ function selectRecognizedResult(recognized) {
         });
         const selected = f7Variants[0].result;
         const block = selected.blocks[0];
-        const entries = block.parsed.entries.map((/** @type {any} */ entry) => Object.freeze({
-            ...entry,
-            idOcrPasses: passCounts.get(entry.steamId) || 0
-        }));
+        const namesBySteamId = new Map();
+        for (const variant of f7Variants) {
+            for (const entry of variant.result.blocks[0].parsed.entries) {
+                if (!entry.name || entry.ambiguous) continue;
+                const names = namesBySteamId.get(entry.steamId) || new Map();
+                names.set(entry.name.normalize('NFKC').toLocaleLowerCase('en'), entry.name);
+                namesBySteamId.set(entry.steamId, names);
+            }
+        }
+        const entries = block.parsed.entries.map((/** @type {any} */ entry) => {
+            const names = [...(namesBySteamId.get(entry.steamId) || new Map()).values()];
+            const recoveredName = !entry.name && names.length === 1 ? names[0] : entry.name;
+            return Object.freeze({
+                ...entry,
+                name: recoveredName,
+                ambiguous: recoveredName ? false : entry.ambiguous,
+                alternatives: recoveredName ? Object.freeze([]) : entry.alternatives,
+                idOcrPasses: passCounts.get(entry.steamId) || 0
+            });
+        });
+        /** @type {any[]} */
+        const refinementRows = [];
+        const refinementKeys = new Set();
+        const selectedIdBoxes = block.parsed.entries.map((/** @type {any} */ entry) => entry.idBox).filter(Boolean);
+        const sameRow = (/** @type {any} */ left, /** @type {any} */ right) => {
+            const leftCenterX = left.x + left.width / 2;
+            const leftCenterY = left.y + left.height / 2;
+            const rightCenterX = right.x + right.width / 2;
+            const rightCenterY = right.y + right.height / 2;
+            const height = Math.max(left.height, right.height);
+            return Math.abs(leftCenterY - rightCenterY) <= height * 1.5 &&
+                Math.abs(leftCenterX - rightCenterX) <= Math.max(left.width, right.width) * 0.55;
+        };
+        for (const variant of f7Variants) {
+            for (const entry of variant.result.blocks[0].parsed.entries) {
+                const box = entry && entry.idBox;
+                if (!box) continue;
+                if (selectedIdBoxes.some((/** @type {any} */ selectedBox) => sameRow(box, selectedBox)) ||
+                    refinementRows.some((/** @type {any} */ selectedRow) => sameRow(box, selectedRow.idBox))) continue;
+                refinementRows.push(Object.freeze({
+                    partialIndex: null,
+                    partialText: entry.steamId,
+                    idBox: box,
+                    idOcrConfidence: entry.idOcrConfidence,
+                    name: entry.name,
+                    ambiguous: entry.ambiguous === true,
+                    alternatives: entry.alternatives || Object.freeze([]),
+                    nameGeometryScore: entry.nameGeometryScore,
+                    nameBox: entry.nameBox || null
+                }));
+            }
+            for (const row of variant.result.blocks[0].parsed.refinementRows || []) {
+                const box = row && row.idBox;
+                if (!box) continue;
+                if (selectedIdBoxes.some((/** @type {any} */ selectedBox) => sameRow(box, selectedBox)) ||
+                    refinementRows.some((/** @type {any} */ selectedRow) => sameRow(box, selectedRow.idBox))) continue;
+                const key = `${Math.round(box.x)}\0${Math.round(box.y)}\0${Math.round(box.width)}\0${
+                    Math.round(box.height)}`;
+                if (refinementKeys.has(key)) continue;
+                refinementKeys.add(key);
+                refinementRows.push(row);
+            }
+        }
         return Object.freeze({ ...selected, blocks: Object.freeze([Object.freeze({
             ...block,
-            parsed: Object.freeze({ ...block.parsed, entries: Object.freeze(entries) })
+            parsed: Object.freeze({ ...block.parsed, entries: Object.freeze(entries),
+                refinementRows: Object.freeze(refinementRows) })
         })]) });
     }
     recognized.sort((left, right) => right.quality - left.quality ||
@@ -476,7 +538,8 @@ async function parseAttachment(client, kindHint, attachment, reference, attachme
             const preprocessF7 = dependencies.preprocessF7Image || OcrImagePreprocess.createF7TextMask;
             const processed = await preprocessF7(image.imageBase64, dependencies);
             const words = normalizeWordScale(await recognize(processed.imageBase64,
-                { ...ocrOptions, psm: 11 }), processed.scale);
+                { ...ocrOptions, psm: 11, userWords: [], confirmedUserWords: [],
+                    characterWhitelist: '0123456789' }), processed.scale);
             const result = parseRecognizedWords(words, 'f7', dependencies);
             recognized.push({ label: 'f7-muted-text', result, quality: recognitionQuality(result) });
         }
@@ -510,6 +573,22 @@ async function parseAttachment(client, kindHint, attachment, reference, attachme
         catch (error) {
             if (typeof client.log === 'function') {
                 client.log('PLAYER_INTELLIGENCE', `Optional cinfo panel refinement failed: ${
+                    sanitizeError(error)}`, 'warn');
+            }
+        }
+    }
+    else {
+        try {
+            const refine = dependencies.refineF7Rows || F7RowRefinement.refineF7Rows;
+            const refined = await refine(image.imageBase64, blocks[0], recognize, ocrOptions, dependencies);
+            if (!refined || !refined.parsed || refined.parsed.kind !== 'f7') {
+                throw new TypeError('F7 row refiner returned an invalid result.');
+            }
+            blocks = Object.freeze([refined]);
+        }
+        catch (error) {
+            if (typeof client.log === 'function') {
+                client.log('PLAYER_INTELLIGENCE', `Optional F7 row refinement failed: ${
                     sanitizeError(error)}`, 'warn');
             }
         }

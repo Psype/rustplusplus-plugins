@@ -332,6 +332,15 @@ Le contrôle textuel même-ID accepte aussi un noyau contigu long malgré un pr�
 `L @*X4LAZY2ERO` face à `零^x Lazy2ero` sans relâcher la recherche vers d'autres identités. Les requêtes Steam passent à
 deux simultanées et une panne est mise en cache trente secondes seulement ; il n'existe toujours aucun retry aveugle.
 
+La version 1.22.16 remplace la répétition plein écran F7 par deux signaux réellement différents. La passe gris atténué
+est limitée aux chiffres. Ensuite, chaque ligne d'ID complète, partielle ou déduite d'une ligne de pseudo sans ID est
+découpée à partir de ses boîtes OCR relatives, débarrassée du fond, assemblée avec les autres sur une seule planche 4x,
+puis relue en PSM 6 avec une whitelist numérique. Une seule exécution Tesseract traite donc jusqu'aux 21 lignes de la
+capture fournie ; aucune position d'écran absolue ni boucle d'un processus par joueur n'est utilisée. Une nouvelle
+lecture valide peut corriger un chiffre-vers-chiffre qui produisait malgré tout un SteamID64 de forme valide, ou
+compléter une ligne tronquée. Les doublons, lignes décalées, sorties hors plage et planches de plus de 8 millions de
+pixels échouent sans modifier l'interprétation précédente.
+
 Ces identités exactes enrichissent ensuite un dictionnaire de candidats commun à F7, `/cinfo`, chat et clans. Le roster
 peut être reconnu de façon contrainte en comparant chaque segment visuel aux alias déjà connus et, si utile, à leur
 rendu synthétique avec les polices Rust et leurs fallbacks. Les espaces, signes décoratifs et alphabets doivent rester
