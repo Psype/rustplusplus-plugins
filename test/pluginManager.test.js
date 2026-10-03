@@ -5,7 +5,6 @@ const Test = require('node:test');
 
 const CommandCatalog = require('../src/util/commandCatalog.js');
 const PluginManager = require('../src/plugins/pluginManager.js');
-const TeammateLanguageDatabase = require('../src/plugins/teammateLanguageDatabase/index.js');
 
 function createClient() {
     return {
@@ -159,7 +158,8 @@ Test('canonical documentation covers every static in-game command', () => {
     const runtimeNames = new Set([...runtimeKeys].map(key => language[key]));
     for (const name of [
         'activity', 'affinity', 'alarmstatus', 'clan', 'clanhistory', 'clantop', 'help', 'intel', 'raidtest',
-        'track', 'trackhistory', 'trackinfo', 'tracklist', 'trackrelated', 'tracks', 'untrack'
+        'record', 'scanplayers', 'steamid', 'track', 'trackhistory', 'trackinfo', 'tracklist', 'trackrelated',
+        'tracks', 'untrack', 'who'
     ]) runtimeNames.add(name);
 
     Assert.deepEqual([...CommandCatalog.getCommandNames()].sort(), [...runtimeNames].sort());
@@ -229,28 +229,6 @@ Test('help and commands share immutable documented synopsis data', async () => {
     }
     Assert.equal(Object.isFrozen(CommandCatalog.getCommands()), true);
     Assert.equal(Object.isFrozen(CommandCatalog.getCommand('track')), true);
-});
-
-Test('record command preserves a pseudonym with non-ASCII characters', async t => {
-    const client = createClient();
-    const rustplus = createRustplus();
-    rustplus.guildId = 'test-record-command';
-    const csvPath = Path.join(__dirname, '..', 'data', 'teammate-language-database',
-        'test-record-command-server.csv');
-    t.after(() => {
-        if (Fs.existsSync(csvPath)) Fs.unlinkSync(csvPath);
-    });
-
-    const response = await PluginManager.handleCommand({
-        source: 'inGame', client, rustplus, guildId: rustplus.guildId,
-        message: {}, command: '!record 76561198000000003 这就是我的宿命',
-        commandLowerCase: '!record 76561198000000003 这就是我的宿命', prefix: '!'
-    });
-
-    Assert.equal(response.handled, true);
-    Assert.deepEqual(
-        TeammateLanguageDatabase.getKnownPseudonyms(rustplus, '76561198000000003').map(entry => entry.name),
-        ['这就是我的宿命']);
 });
 
 Test('Deep Sea detection requires an off-map vendor cluster', async () => {

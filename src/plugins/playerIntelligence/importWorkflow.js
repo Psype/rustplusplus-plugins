@@ -205,28 +205,46 @@ function replacementPreview(items, existing) {
     return `${truncateCharacters(body, budget)}\n\n${footer}`;
 }
 
+/** @param {any} item */
+function itemCommitReady(item) {
+    return Boolean(item && item.parsed && (item.parsed.kind === 'f7' ?
+        item.parsed.complete : item.parsed.kind === 'cinfo' && item.parsed.importable));
+}
+
+/** @param {any} item */
+function editableCinfo(item) {
+    if (!item || !item.parsed || item.parsed.kind !== 'cinfo' ||
+        !Number.isSafeInteger(item.parsed.declaredCount) || item.parsed.declaredCount < 1 ||
+        item.parsed.declaredCount > 100 || !Array.isArray(item.parsed.members)) return false;
+    const value = [item.parsed.tag || '', item.parsed.establishedRaw || '',
+        ...item.parsed.members.map((/** @type {any} */ member) => member.name)].join('\n');
+    return Array.from(value).length <= 4000;
+}
+
+/** @param {any} item */
+function recoverableCinfo(item) {
+    return editableCinfo(item) && Boolean(item.parsed.establishedAtUtc);
+}
+
 /** @param {string} token @param {readonly any[]} items @param {'confirm'|'replace'} mode */
 function actionRows(token, items, mode = 'confirm') {
+    const confirmationEnabled = mode === 'replace' || items.every(itemCommitReady);
     const rows = [new Discord.ActionRowBuilder().addComponents(
         new Discord.ButtonBuilder().setCustomId(`${mode === 'replace' ? REPLACE_PREFIX : CONFIRM_PREFIX}${token}`)
             .setLabel(mode === 'replace' ? 'Replace previous' : 'Confirm import')
-            .setStyle(mode === 'replace' ? Discord.ButtonStyle.Primary : Discord.ButtonStyle.Success),
+            .setStyle(mode === 'replace' ? Discord.ButtonStyle.Primary : Discord.ButtonStyle.Success)
+            .setDisabled(!confirmationEnabled),
         new Discord.ButtonBuilder().setCustomId(`${mode === 'replace' ? KEEP_PREFIX : REJECT_PREFIX}${token}`)
             .setLabel(mode === 'replace' ? 'Keep existing' : 'Reject')
             .setStyle(mode === 'replace' ? Discord.ButtonStyle.Secondary : Discord.ButtonStyle.Danger)
     )];
-    const editable = items.map((item, index) => ({ item, index })).filter(({ item }) => {
-        if (!item.parsed || item.parsed.kind !== 'cinfo' || !Number.isSafeInteger(item.parsed.declaredCount) ||
-            item.parsed.declaredCount < 1 || item.parsed.declaredCount > 100) return false;
-        const value = item.parsed.members.map((/** @type {any} */ member) => member.name).join('\n');
-        return Array.from(value).length <= 4000;
-    });
+    const editable = items.map((item, index) => ({ item, index })).filter(({ item }) => editableCinfo(item));
     for (let offset = 0; offset < editable.length; offset += 5) {
         rows.push(new Discord.ActionRowBuilder().addComponents(...editable.slice(offset, offset + 5)
             .map(({ item, index }) => new Discord.ButtonBuilder()
                 .setCustomId(`${EDIT_PREFIX}${token}:${index}`)
                 .setLabel(truncateCharacters(
-                    `Edit ${items.length > 1 ? `${index + 1}: ` : ''}${item.parsed.tag}`, 80))
+                    `Edit ${items.length > 1 ? `${index + 1}: ` : ''}${item.parsed.tag || 'unknown tag'}`, 80))
                 .setStyle(Discord.ButtonStyle.Secondary))));
     }
     return Object.freeze(rows);
@@ -246,7 +264,7 @@ function rosterEditModal(token, index, item) {
     if (value) input.setValue(value);
     return new Discord.ModalBuilder()
         .setCustomId(`${EDIT_MODAL_PREFIX}${token}:${index}`)
-        .setTitle(truncateCharacters(`Edit /cinfo — ${item.parsed.tag}`, 45))
+        .setTitle(truncateCharacters(`Edit /cinfo — ${item.parsed.tag || 'unknown tag'}`, 45))
         .addComponents(/** @type {any} */ (new Discord.ActionRowBuilder().addComponents(input)));
 }
 
@@ -1017,7 +1035,8 @@ async function prepareImports(client, source, requests, requesterUserId, referen
     }
     if (corroborated.length > 0) items = resolveItems(Object.freeze([...candidates, ...corroborated]));
     if (items.length < 1 || items.length > 20) throw new Error('Detected import block count must be between 1 and 20.');
-    if (items.some(item => item.parsed.kind === 'f7' ? !item.parsed.complete : !item.parsed.importable)) {
+    const blockedItems = items.filter(item => !itemCommitReady(item));
+    if (blockedItems.length > 0 && !blockedItems.every(recoverableCinfo)) {
         const preview = previewItems(items);
         return Object.freeze({
             content: `${preview}\nNothing was committed.`, components: [],
@@ -1035,7 +1054,9 @@ async function prepareImports(client, source, requests, requesterUserId, referen
         throw new Error('Historical capture time is supported only for cinfo imports.');
     }
     const timing = await resolveImportTiming(context, items, scope, captureTime);
-    const preview = timedPreview(items, timing.timingText);
+    const correctionFooter = blockedItems.length > 0 ?
+        '\nCorrection required: use Edit to fix the ClanTag before confirmation.' : '';
+    const preview = `${timedPreview(items, timing.timingText)}${correctionFooter}`;
     if (Array.from(preview).length > 1900) {
         return Object.freeze({
             content: `Detected ${items.length} import blocks, but the confirmation preview is too long. ` +
@@ -1470,6 +1491,18 @@ async function handleButton({ client, interaction }) {
             return true;
         }
         await interaction.showModal(rosterEditModal(token, index, target));
+        return true;
+    }
+    if (confirm && !item.items.every(itemCommitReady)) {
+        const acknowledged = await acknowledgeButton(interaction);
+        const notice = 'Confirmation refused: correct every invalid or empty required field with Edit first. ' +
+            'Nothing was changed.';
+        const body = timedPreview(item.items, item.timingText || null);
+        const budget = Math.max(0, 1900 - Array.from(notice).length - 1);
+        await updateButton(client, interaction, {
+            content: `${truncateCharacters(body, budget)}\n${notice}`,
+            embeds: [], components: actionRows(token, item.items), allowedMentions: { parse: [] }
+        }, acknowledged);
         return true;
     }
     if (decisionClaims.has(token)) {

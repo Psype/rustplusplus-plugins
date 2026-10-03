@@ -714,6 +714,76 @@ Test('manual cinfo correction validates tag, date and roster before confirmation
     Assert.equal(futureUserWords.includes('n444shj'), true);
 });
 
+Test('an unreadable cinfo tag stays editable and cannot be confirmed until corrected', async t => {
+    const value = createHarness(t);
+    value.client.playerIntelligenceImportDependencies.recognize = async () => [
+        word('ClanTag:', 20), word('Members: 3', 45),
+        word('Clan Members: Nirks, Psype and tom.le.geek.2', 70),
+        word('Established: 09/29/2026 14:58:27', 95)
+    ];
+
+    await ImportWorkflow.beginImport(value.client, value.command);
+
+    const preview = value.edits[0];
+    Assert.match(preview.content, /OCR \/cinfo — unknown — 3\/3/u);
+    Assert.match(preview.content, /ClanTag is empty or too long\./u);
+    Assert.match(preview.content, /Correction required: use Edit to fix the ClanTag before confirmation\./u);
+    Assert.equal(preview.components[0].components[0].data.disabled, true);
+    Assert.equal(preview.components[1].components[0].data.label, 'Edit unknown tag');
+
+    const blockedConfirmId = preview.components[0].components[0].data.custom_id;
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: {
+            customId: blockedConfirmId, guildId: 'guild', channelId: 'commands', user: { id: 'requester' }
+        }
+    }), true);
+    Assert.match(value.updates.at(-1).content,
+        /Confirmation refused: correct every invalid or empty required field with Edit first\. Nothing was changed\./u);
+    Assert.equal(value.updates.at(-1).components[0].components[0].data.disabled, true);
+    Assert.equal(value.updates.at(-1).components[1].components[0].data.label, 'Edit unknown tag');
+    const emptyStore = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
+    Assert.equal((await emptyStore.readAll()).length, 0);
+
+    let modal;
+    const editId = preview.components[1].components[0].data.custom_id;
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: {
+            customId: editId, guildId: 'guild', channelId: 'commands', user: { id: 'requester' },
+            showModal: async value => { modal = value; }
+        }
+    }), true);
+    Assert.match(modal.data.title, /unknown tag/u);
+    Assert.match(modal.toJSON().components[0].components[0].value,
+        /^\n09\/29\/2026 14:58:27\nNirks/u);
+
+    Assert.equal(await ImportWorkflow.handleModal({
+        client: value.client,
+        interaction: {
+            customId: modal.data.custom_id,
+            guildId: 'guild', channelId: 'commands', user: { id: 'requester' },
+            deferUpdate: async () => {},
+            fields: { getTextInputValue: () => [
+                'kirk', '09/29/2026 14:58:27', 'Nirks', 'Psype', 'tom.le.geek.2'
+            ].join('\n') }
+        }
+    }), true);
+    const corrected = value.edits.at(-1);
+    Assert.match(corrected.content, /Corrected \/cinfo — kirk — 3\/3/u);
+    Assert.doesNotMatch(corrected.content, /ClanTag is empty or too long/u);
+    Assert.equal(corrected.components[0].components[0].data.disabled, false);
+
+    const confirmId = corrected.components[0].components[0].data.custom_id;
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { customId: confirmId, guildId: 'guild', channelId: 'commands', user: { id: 'requester' } }
+    }), true);
+    const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
+    const snapshot = (await store.readAll()).find(event => event.kind === 'clan_snapshot');
+    Assert.equal(snapshot.payload.tag, 'kirk');
+});
+
 Test('manual cinfo spelling correction preserves the color-derived role at the same roster slot', () => {
     const parsed = {
         kind: 'cinfo', declaredCount: 2, complete: true, errors: [],

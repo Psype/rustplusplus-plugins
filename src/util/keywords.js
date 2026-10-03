@@ -126,7 +126,24 @@ module.exports = {
             client.intlGet('en', 'commandSyntaxUpkeep'),
             client.intlGet('en', 'commandSyntaxUptime'),
             client.intlGet('en', 'commandSyntaxWipe'),
-            client.intlGet('en', 'commandSyntaxWho')
+            client.intlGet('en', 'commandSyntaxWho'),
+            'activity',
+            'affinity',
+            'alarmstatus',
+            'clan',
+            'clanhistory',
+            'clantop',
+            'help',
+            'intel',
+            'raidtest',
+            'scanplayers',
+            'track',
+            'trackhistory',
+            'trackinfo',
+            'tracklist',
+            'trackrelated',
+            'tracks',
+            'untrack'
         ];
     },
 

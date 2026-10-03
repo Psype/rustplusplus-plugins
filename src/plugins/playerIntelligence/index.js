@@ -4,6 +4,7 @@
 const Contracts = require('./contracts.js');
 const HistoryStore = require('./historyStore.js');
 const { projectIdentities } = require('./identityProjector.js');
+const { projectMetrics } = require('./metricProjector.js');
 const { projectClans } = require('./clanProjector.js');
 const { projectPresence } = require('./presenceProjector.js');
 const { projectWipes } = require('./wipeProjector.js');
@@ -12,6 +13,7 @@ const { projectWipes } = require('./wipeProjector.js');
  * identities:ReturnType<typeof projectIdentities>,
  * clans:ReturnType<typeof projectClans>,
  * presence:ReturnType<typeof projectPresence>,
+ * metrics:ReturnType<typeof projectMetrics>,
  * wipes:ReturnType<typeof projectWipes>
  * }>} Projection */
 /** @type {WeakMap<readonly Readonly<Record<string, any>>[], Projection>} */
@@ -49,6 +51,7 @@ function rebuild(events) {
     const identities = projectIdentities(canonical);
     const projection = Contracts.deepFreeze({
         identities,
+        metrics: projectMetrics(canonical, identities),
         clans: projectClans(canonical, identities),
         presence: projectPresence(canonical, identities),
         wipes: projectWipes(canonical)

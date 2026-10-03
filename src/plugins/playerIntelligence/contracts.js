@@ -13,6 +13,7 @@ const EVENT_KINDS = Object.freeze([
     'identity_link_revoked',
     'clan_snapshot',
     'events_superseded',
+    'player_metric_observed',
     'presence_observed',
     'wipe_snapshot'
 ]);
@@ -135,6 +136,19 @@ function validateIdentityObserved(value) {
     assertExactKeys(/** @type {object} */ (value), ['caseFidelity'], 'identity_observed payload');
     if (typeof /** @type {{caseFidelity: unknown}} */ (value).caseFidelity !== 'boolean') {
         throw new TypeError('identity_observed payload.caseFidelity must be boolean.');
+    }
+}
+
+/** @param {unknown} value */
+function validatePlayerMetricObserved(value) {
+    assertExactKeys(/** @type {object} */ (value),
+        ['provider', 'metric', 'value', 'unit'], 'player_metric_observed payload');
+    const payload = /** @type {{provider: unknown, metric: unknown, value: unknown, unit: unknown}} */ (value);
+    if (payload.provider !== 'warbandits' || payload.metric !== 'playtime' || payload.unit !== 'hours') {
+        throw new TypeError('player_metric_observed payload metric is unsupported.');
+    }
+    if (typeof payload.value !== 'number' || !Number.isFinite(payload.value) || payload.value < 0) {
+        throw new TypeError('player_metric_observed payload.value must be a finite non-negative number.');
     }
 }
 
@@ -300,6 +314,7 @@ function validatePayload(kind, payload, scope) {
     if (kind === 'identity_link_revoked') return validateIdentityLinkRevoked(payload);
     if (kind === 'clan_snapshot') return validateClanSnapshot(payload, scope);
     if (kind === 'events_superseded') return validateEventsSuperseded(payload);
+    if (kind === 'player_metric_observed') return validatePlayerMetricObserved(payload);
     if (kind === 'presence_observed') return validatePresence(payload);
     if (kind === 'wipe_snapshot') return validateWipeSnapshot(payload, scope);
     throw new TypeError('Unsupported player-intelligence event kind.');
@@ -352,6 +367,7 @@ function createEvent(input) {
     normalizeIso(raw.recordedAt, 'recordedAt');
     validateScope(raw.scope);
     const subjectRequired = ['identity_observed', 'identity_linked', 'identity_link_revoked',
+        'player_metric_observed',
         'presence_observed'].includes(raw.kind);
     validateSubject(raw.subject, subjectRequired);
     validatePayload(raw.kind, raw.payload, raw.scope);

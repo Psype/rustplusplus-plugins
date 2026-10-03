@@ -3,6 +3,7 @@ const Crypto = require('node:crypto');
 const Path = require('node:path');
 
 const Core = require('./index.js');
+const F7IdentityValidation = require('./f7IdentityValidation.js');
 const PlayerScanDaemon = require('./scanDaemon.js');
 
 const COLLECTOR_VERSION = 'player-intelligence-1';
@@ -172,19 +173,36 @@ function getStore(context, scope) {
 }
 
 /** @param {any} context @param {any} scope @param {any} store @param {any} dependencies */
-function schedulePlayerScan(context, scope, store, dependencies) {
-    if (!dependencies.playerScanDaemon && !dependencies.warBanditsProvider) return;
-    const daemon = dependencies.playerScanDaemon || PlayerScanDaemon;
-    if (!daemon || typeof daemon.schedule !== 'function') return;
-    const directory = typeof store.directory === 'string' ? store.directory : getDataDirectory(context, scope);
-    daemon.schedule({
+function playerScanOptions(context, scope, store, dependencies) {
+    return Object.freeze({
         context,
         scope,
         store,
-        directory,
+        directory: typeof store.directory === 'string' ? store.directory : getDataDirectory(context, scope),
         dependencies,
         warBanditsProvider: dependencies.warBanditsProvider || null
     });
+}
+
+/** @param {any} context @param {any} scope @param {any} store @param {any} dependencies */
+function schedulePlayerScan(context, scope, store, dependencies) {
+    if (!dependencies.playerScanDaemon && !dependencies.warBanditsProvider) return false;
+    const daemon = dependencies.playerScanDaemon || PlayerScanDaemon;
+    if (!daemon || typeof daemon.schedule !== 'function') return false;
+    return daemon.schedule(playerScanOptions(context, scope, store, dependencies));
+}
+
+/** @param {any} context @param {any} scope @param {any} store @param {any} dependencies */
+function requestPlayerScan(context, scope, store, dependencies) {
+    const daemon = dependencies.playerScanDaemon || PlayerScanDaemon;
+    if (!daemon) return Object.freeze({ accepted: false, state: 'unavailable', retryAfterSeconds: 0 });
+    const options = playerScanOptions(context, scope, store, dependencies);
+    if (typeof daemon.requestRescan === 'function') return daemon.requestRescan(options);
+    if (typeof daemon.schedule !== 'function') {
+        return Object.freeze({ accepted: false, state: 'unavailable', retryAfterSeconds: 0 });
+    }
+    const started = daemon.schedule({ ...options, forceWarBanditsRescan: true });
+    return Object.freeze({ accepted: true, state: started ? 'started' : 'queued', retryAfterSeconds: 0 });
 }
 
 /** @param {string} kind @param {any} scope @param {any} subject @param {any} payload @param {any} details */
@@ -485,8 +503,53 @@ function parseCommand(context) {
     const separator = body.search(/\s/u);
     const name = normalize(separator === -1 ? body : body.slice(0, separator));
     const query = sanitize(separator === -1 ? '' : body.slice(separator + 1));
-    if (!['intel', 'affinity', 'activity', 'clan', 'clanhistory', 'clantop'].includes(name)) return null;
+    if (!['intel', 'steamid', 'who', 'record', 'scanplayers', 'affinity', 'activity', 'clan',
+        'clanhistory', 'clantop'].includes(name)) return null;
     return Object.freeze({ name, query });
+}
+
+/** @param {string} query */
+function parseManualIdentity(query) {
+    const match = /^(\S+)\s+(\S+)\s+([\s\S]+)$/u.exec(query);
+    if (!match) return null;
+    const steamId = match[1];
+    const battlemetricsPlayerId = match[2];
+    const name = sanitize(match[3]);
+    if (!F7IdentityValidation.isValidSteamId64(steamId) ||
+        !/^\d{1,32}$/u.test(battlemetricsPlayerId) || !name || Array.from(name).length > MAX_QUERY_LENGTH) {
+        return null;
+    }
+    return Object.freeze({ steamId, battlemetricsPlayerId, name });
+}
+
+/** @param {any} context @param {any} scope @param {any} store @param {any} identity */
+async function recordManualIdentity(context, scope, store, identity) {
+    const projection = Core.rebuild(await store.readAll());
+    const battlemetricsMatches = projection.identities.findByIdentifier(identity.battlemetricsPlayerId);
+    const conflictingSteamIds = [...new Set(battlemetricsMatches
+        .map((/** @type {any} */ person) => person.steamId).filter(Boolean))]
+        .filter((/** @type {string} */ steamId) => steamId !== identity.steamId);
+    if (conflictingSteamIds.length > 0) return Object.freeze({
+        appended: false, conflictSteamId: conflictingSteamIds[0]
+    });
+    const exact = projection.identities.findByIdentifier(identity.steamId).some((/** @type {any} */ person) =>
+        person.battlemetricsPlayerIds.includes(identity.battlemetricsPlayerId) &&
+        person.names.some((/** @type {any} */ alias) => alias.name === identity.name));
+    if (exact) return Object.freeze({ appended: false, conflictSteamId: null });
+    const recordedAt = nowIso(getDependencies(context));
+    const sourceEventId = `manual:${Crypto.createHash('sha256').update([
+        identity.steamId, identity.battlemetricsPlayerId, identity.name
+    ].join('\u0000')).digest('hex')}`;
+    const event = identityEvent(scope, { ...identity, caseFidelity: true }, {
+        guildId: context.guildId,
+        observedAt: recordedAt,
+        recordedAt,
+        source: 'manual-command',
+        sourceEventId,
+        confidence: 'verified',
+        evidence: null
+    });
+    return Object.freeze({ appended: (await store.append(event)).appended, conflictSteamId: null });
 }
 
 /** @param {any} context */
@@ -554,6 +617,8 @@ function identityLine(projection, scope, person) {
     const state = projection.presence.getStatus(subject, scope.serverKey).state;
     if (state === 'online') fields.push('on');
     else if (state === 'offline') fields.push('off');
+    const playtime = projection.metrics.getLatest(subject, scope.serverKey, 'warbandits', 'playtime');
+    if (playtime) fields.push(`WB hours:${Math.floor(playtime.value)}+`);
     return fields.join(' | ');
 }
 
@@ -566,6 +631,13 @@ function affinityLines(projection, person) {
         boundedList('Played with', affinity.playedWith.map((/** @type {any} */ item) =>
             `${item.name} ${item.count}x`))
     ]);
+}
+
+/** @param {any} person */
+function aliasesLine(person) {
+    return boundedList('Aliases', person.names.slice().sort((/** @type {any} */ left, /** @type {any} */ right) =>
+        right.lastObservedAt.localeCompare(left.lastObservedAt) || left.name.localeCompare(right.name))
+    .map((/** @type {any} */ alias) => alias.name));
 }
 
 /** @param {number} milliseconds */
@@ -617,6 +689,35 @@ async function handleCommand(context) {
     if (!scope) return handled('Player intelligence unavailable: configure BattleMetrics for the active server.');
     try {
         const store = getStore(context, scope);
+        if (parsed.name === 'scanplayers') {
+            if (parsed.query !== '') return handled(`Usage: ${context.prefix}scanplayers.`);
+            if (!scope.wipeId) return handled('Player scan unavailable: current wipe is unknown.');
+            const request = requestPlayerScan(context, scope, store, getDependencies(context));
+            if (request.state === 'started') {
+                return handled('Player scan started in background; progress continues on BattleMetrics polling ticks.');
+            }
+            if (request.state === 'queued') {
+                return handled('Player scan queued behind the active background cycle.');
+            }
+            if (request.state === 'cooldown') {
+                return handled(`Player scan cooldown: retry in ${request.retryAfterSeconds}s.`);
+            }
+            return handled('Player scan unavailable: no background identity provider is configured.');
+        }
+        if (parsed.name === 'record') {
+            const identity = parseManualIdentity(parsed.query);
+            if (!identity) {
+                return handled(`Usage: ${context.prefix}record <SteamID64> <BattleMetrics ID> <exact name>.`);
+            }
+            const result = await recordManualIdentity(context, scope, store, identity);
+            if (result.conflictSteamId) {
+                return handled(`BM:${identity.battlemetricsPlayerId} is already linked to Steam:${
+                    result.conflictSteamId}; nothing changed.`);
+            }
+            return handled(result.appended ?
+                `Identity recorded | Steam:${identity.steamId} | BM:${identity.battlemetricsPlayerId}` :
+                `Identity already known | Steam:${identity.steamId} | BM:${identity.battlemetricsPlayerId}`);
+        }
         const projection = Core.rebuild(await store.readAll());
         if (parsed.name === 'clantop') {
             const requested = parsed.query === '' ? 5 : Number(parsed.query);
@@ -644,9 +745,10 @@ async function handleCommand(context) {
                 `${snapshot.observedAt.slice(0, 10)} ${snapshot.tag}: ${snapshot.members.length} members`));
         }
 
+        const effectiveName = parsed.name === 'steamid' ? 'intel' : parsed.name;
         let query = parsed.query;
         let range = '1mo';
-        if (parsed.name === 'activity') {
+        if (effectiveName === 'activity') {
             const match = /\s+(1mo|all)$/iu.exec(query);
             if (match) {
                 range = normalize(match[1]);
@@ -654,18 +756,23 @@ async function handleCommand(context) {
             }
         }
         if (!query || query.length > MAX_QUERY_LENGTH) {
-            const suffix = parsed.name === 'activity' ? ' [1mo|all]' : '';
+            const suffix = effectiveName === 'activity' ? ' [1mo|all]' : '';
             return handled(`Usage: ${context.prefix}${parsed.name} <SteamID64|BM ID|exact name>${suffix}.`);
         }
         const resolved = resolveQuery(projection, query);
         if (!resolved.person) return handled(ambiguousResponse(resolved.matches));
-        if (parsed.name === 'activity') {
+        if (effectiveName === 'activity') {
             return handled(activityLine(projection, scope, resolved.person, range,
                 Date.parse(nowIso(getDependencies(context)))));
         }
+        if (effectiveName === 'who') return handled(aliasesLine(resolved.person));
         const lines = affinityLines(projection, resolved.person);
-        return handled(parsed.name === 'affinity' ? lines :
-            Object.freeze([identityLine(projection, scope, resolved.person), ...lines]));
+        return handled(effectiveName === 'affinity' ? lines : Object.freeze([
+            identityLine(projection, scope, resolved.person),
+            aliasesLine(resolved.person),
+            ...lines,
+            activityLine(projection, scope, resolved.person, '1mo', Date.parse(nowIso(getDependencies(context))))
+        ]));
     }
     catch (error) {
         if (context.rustplus && typeof context.rustplus.log === 'function') {
@@ -985,8 +1092,10 @@ module.exports = Object.freeze({
     linkedClanSteamCandidates,
     onBattlemetricsUpdated,
     parseCommand,
+    parseManualIdentity,
     parseCaptureTime,
     recordWarBanditsIdentity,
+    recordManualIdentity,
     regularWipeStart,
     resolveEstablishedScope,
     resolveHistoricalScope,

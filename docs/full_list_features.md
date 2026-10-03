@@ -14,7 +14,9 @@
 - **intel-imports channel** - Drop 1–10 screenshots manually or through the allowlisted Windows region-capture
   webhook, or paste 1–100 complete SteamID64 values with one ID per line. F7 versus `/cinfo` and repeated `/cinfo`
   panels are detected semantically; every image or text batch still requires a Discord confirmation. Renaming the
-  configured channel (for example to `intel-reports`) is safe because routing uses its Discord ID.
+  configured channel (for example to `intel-reports`) is safe because routing uses its Discord ID. Confirmed text IDs
+  receive restart-safe, one-per-tick exact WarBandits enrichment; the background wipe leaderboard also collects names
+  and cumulative hours without treating them as online presence.
 - **/item** - Get the details of an item.
 - **/leader** - Transfer leadership.
 - **/map** - Display the In-Game Map.
@@ -46,7 +48,7 @@
 - **decay** - `!decay [item]` - Display the decay time of an item.
 - **despawn** - `!despawn [item]` - Display the despawn time of an item.
 - **language** - `!language [code]` - Show or change the bot language for this server.
-- **intel** - `!intel [SteamID64|BattleMetrics ID|exact name]` - Show compact identity, reliable presence, known tags, and repeated clanmates.
+- **intel** - `!intel [SteamID64|BattleMetrics ID|exact name]` - Show the complete compact local profile: current identity, aliases, reliable presence, known tags, repeated clanmates, and rolling activity.
 - **leader** - `!leader [teammate]` - Transfer leadership.
 - **logs** - `!logs [on|off]` - Show, enable, or disable bot file/debug logging.
 - **marker/markers** - `!marker [name]` or `!markers` - Set markers to navigate to.
@@ -59,12 +61,13 @@
 - **prox** - `!prox` - Display teammates that are nearby.
 - **alarmstatus** - `!alarmstatus` - Show alarm transport/history and, until pairing is proven, watch 120 seconds for a matching active-server Pair notification.
 - **raidtest** - `!raidtest` - Send a critical test alert through the same immediate Rust team-chat path used by FCM raid alarms.
-- **record** - `!record [steamid] [pseudonym]` - Add a pseudonym; player languages are edited directly in the teammate CSV.
+- **record** - `!record [SteamID64] [BattleMetrics ID] [exact name]` - Add one verified manual identity link to the active server intelligence database.
 - **recycle** - `!recycle [item] [quantity]` - Display the output of recycling an item.
 - **research** - `!research [item]` - Display the cost to research an item.
 - **send** - `!send [discord user] [message]` - Send a message through rustplusplus to a person on Discord.
 - **stack** - `!stack [item]` - Display stack size information for an item.
-- **steamid** - `!steamid [teammate]` - Get teammate SteamID.
+- **scanplayers** - `!scanplayers` - Trigger or queue an immediate bounded background identity rescan for the active wipe.
+- **steamid** - `!steamid [SteamID64|BattleMetrics ID|exact name]` - Compatibility alias for the complete `!intel` server-wide profile.
 - **team** - `!team` - Get team information (names of all teammates).
 - **time** - `!time` - Get in-game time.
 - **timer/timers** - `!timer [duration] [message]` or `!timers` - Set or list timers.
@@ -80,7 +83,7 @@
 - **unmute** - `!unmute` - Unmute rustplusplus in-game.
 - **upkeep** - `!upkeep` - Check upkeep of Storage Monitor Tool Cupboards.
 - **uptime** - `!uptime` - Display the uptime of rustplusplus and currently connected server.
-- **who** - `!who [steamid]` - List known pseudonyms for a SteamID from the teammate language CSV database.
+- **who** - `!who [SteamID64|BattleMetrics ID|exact name]` - List exact aliases known by the active server intelligence database.
 - **wipe** - `!wipe` - Display time since wipe.
 
 ## Smart Devices

@@ -187,6 +187,28 @@ Test('identity projection joins stable IDs and keeps name-only links reversible'
     }).personId.startsWith('name:'), true);
 });
 
+Test('WarBandits playtime keeps the latest collected lower bound without implying presence', () => {
+    const metric = (value, observedAt) => event('player_metric_observed', {
+        observedAt,
+        subject: { steamId: STEAM_A, battlemetricsPlayerId: null, exactName: null },
+        payload: { provider: 'warbandits', metric: 'playtime', value, unit: 'hours' }
+    });
+    const projection = PlayerIntelligence.rebuild([
+        identity(),
+        metric(10.8, '2026-09-30T12:01:00.000Z'),
+        metric(12.25, '2026-10-01T12:01:00.000Z')
+    ]);
+    const latest = projection.metrics.getLatest({
+        steamId: STEAM_A, battlemetricsPlayerId: null, exactName: null
+    }, 'warbandits-main', 'warbandits', 'playtime');
+    Assert.equal(latest.value, 12.25);
+    Assert.equal(latest.observedAt, '2026-10-01T12:01:00.000Z');
+    Assert.equal(projection.presence.getStatus({
+        steamId: STEAM_A, battlemetricsPlayerId: null, exactName: null
+    }, 'warbandits-main').state, 'unknown');
+    Assert.throws(() => metric(-1, '2026-10-01T12:02:00.000Z'), /non-negative/u);
+});
+
 Test('clan affinities count only distinct confirmed snapshots across wipes', () => {
     const identities = [
         identity({ subject: { steamId: STEAM_A, battlemetricsPlayerId: null, exactName: 'Alice' } }),

@@ -201,12 +201,33 @@ Test('an OCR-consensus-only F7 observation remains explicitly probable in the jo
 Test('compact commands expose only useful identity, affinity and conservative activity', async t => {
     const value = harness(t);
     await Runtime.onBattlemetricsUpdated(value.context({ firstTime: true }));
+    await value.store().append(Core.createEvent({
+        schemaVersion: Core.SCHEMA_VERSION,
+        kind: 'player_metric_observed',
+        observedAt: '2026-10-01T10:00:00.000Z',
+        recordedAt: '2026-10-01T10:00:00.000Z',
+        scope: { guildId: 'guild', serverKey: 'battlemetrics:42',
+            wipeId: 'wipe:2026-09-29T14:00:00.000Z' },
+        subject: { steamId: STEAM_A, battlemetricsPlayerId: null, exactName: null },
+        payload: { provider: 'warbandits', metric: 'playtime', value: 7500.9, unit: 'hours' },
+        provenance: { source: 'warbandits-current-wipe-daemon', sourceEventId: 'playtime-test',
+            collectorVersion: 'test-1' },
+        confidence: 'verified',
+        evidence: null
+    }));
     const intel = await Runtime.handleCommand(value.command('!intel Alice'));
     Assert.equal(intel.handled, true);
-    Assert.match(intel.response[0], new RegExp(`^Alice \\| Steam:${STEAM_A} \\| BM:101 \\| on$`));
-    Assert.equal(intel.response[1], 'Known tags: none');
-    Assert.equal(intel.response[2], 'Played with: none');
+    Assert.match(intel.response[0], new RegExp(
+        `^Alice \\| Steam:${STEAM_A} \\| BM:101 \\| on \\| WB hours:7500\\+$`));
+    Assert.equal(intel.response[1], 'Aliases: Alice');
+    Assert.equal(intel.response[2], 'Known tags: none');
+    Assert.equal(intel.response[3], 'Played with: none');
+    Assert.equal(intel.response[4], 'Activity 1mo: 0h00m');
     Assert.equal(intel.response.every(line => Array.from(line).length <= 122), true);
+    const steamIdAlias = await Runtime.handleCommand(value.command(`!steamid ${STEAM_A}`));
+    Assert.deepEqual(steamIdAlias.response, intel.response);
+    const aliases = await Runtime.handleCommand(value.command('!who 101'));
+    Assert.equal(aliases.response, 'Aliases: Alice');
 
     value.setNow('2026-10-01T10:30:00.000Z');
     value.battlemetrics.updatedAt = '2026-10-01T10:30:00.000Z';
@@ -216,4 +237,46 @@ Test('compact commands expose only useful identity, affinity and conservative ac
     await Runtime.onBattlemetricsUpdated(value.context());
     const activity = await Runtime.handleCommand(value.command('!activity Alice all'));
     Assert.equal(activity.response, 'Activity all: 0h30m');
+});
+
+Test('record writes one durable server-wide Steam/BattleMetrics/name identity and rejects conflicts', async t => {
+    const value = harness(t);
+    const steamId = '76561198000000003';
+    const otherSteamId = '76561198036538266';
+    const name = '这就是我的宿命';
+
+    const first = await Runtime.handleCommand(value.command(`!record ${steamId} 777 ${name}`));
+    const duplicate = await Runtime.handleCommand(value.command(`!record ${steamId} 777 ${name}`));
+    const conflict = await Runtime.handleCommand(value.command(`!record ${otherSteamId} 777 Other`));
+
+    Assert.equal(first.response, `Identity recorded | Steam:${steamId} | BM:777`);
+    Assert.equal(duplicate.response, `Identity already known | Steam:${steamId} | BM:777`);
+    Assert.match(conflict.response, new RegExp(`^BM:777 is already linked to Steam:${steamId}`));
+    const events = await value.store().readAll();
+    Assert.equal(events.length, 1);
+    Assert.equal(events[0].provenance.source, 'manual-command');
+    Assert.equal(events[0].subject.exactName, name);
+    const who = await Runtime.handleCommand(value.command('!who 777'));
+    Assert.equal(who.response, `Aliases: ${name}`);
+});
+
+Test('scanplayers acknowledges a bounded background rescan without awaiting it', async t => {
+    const value = harness(t);
+    const requests = [];
+    value.client.playerIntelligenceDependencies.playerScanDaemon = {
+        requestRescan: options => {
+            requests.push(options);
+            return Object.freeze({ accepted: true, state: 'started', retryAfterSeconds: 0 });
+        }
+    };
+
+    const response = await Runtime.handleCommand(value.command('!scanplayers'));
+
+    Assert.equal(response.response,
+        'Player scan started in background; progress continues on BattleMetrics polling ticks.');
+    Assert.equal(requests.length, 1);
+    Assert.equal(requests[0].scope.wipeId, 'wipe:2026-09-29T14:00:00.000Z');
+    Assert.equal(requests[0].directory, Path.join(value.directory, 'guild', '42'));
+    const usage = await Runtime.handleCommand(value.command('!scanplayers now'));
+    Assert.equal(usage.response, 'Usage: !scanplayers.');
 });

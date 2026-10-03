@@ -224,15 +224,19 @@ The bot also creates a private `intel-imports` channel (renaming that configured
 `/cinfo` are detected from semantic OCR anchors. Starting the message with `cinfo` or `f7` remains an optional strict
 hint for all attachments. Repeated `ClanTag` anchors allow several stacked `/cinfo` panels in one image; every panel is
 validated separately, receives its own Established-derived wipe, and the whole preview is confirmed as one batch. A `/cinfo` block needs a valid tag, declared
-count and `Established` timestamp; its roster may remain partial. If a block lacks that structure or the complete preview
-cannot fit safely, nothing is offered for confirmation. The human sender alone can confirm. An approved Windows helper
+count and `Established` timestamp; its roster may remain partial. If OCR leaves the ClanTag empty or invalid while the
+rest of the panel is structurally usable, the preview remains pending with `Edit unknown tag`: confirmation is disabled,
+and a forged/stale confirmation is also refused without writing or discarding the preview. Correct line 1 in the modal;
+the bot reruns strict validation and enables confirmation only after the block is valid. A non-editable malformed block,
+or a complete preview that cannot fit safely, is still rejected before confirmation. The human sender alone can confirm. An approved Windows helper
 webhook can post the same messages when its ID is listed in `RPP_INTEL_IMPORT_WEBHOOK_IDS`; because a webhook has no
 human requester, any member with the configured bot role (or an administrator) may confirm it. Unapproved webhooks are
 ignored. A text-only message may instead contain 1–100 complete SteamID64 values, one per non-empty line (an optional
 whole-message `text` code fence is accepted). Blank and duplicate lines are ignored; any other line rejects the entire
 lot. The preview reuses a unique locally known name/BattleMetrics ID when available, preserves unknown IDs without
 inventing a name, and requires the same `Confirm import` or `Reject` decision before durable storage. Missing names are
-left for the existing background identity enrichment. All paths use the same validation, thirty-minute requester/channel/
+left for the background identity daemon, which prioritizes one pasted SteamID per BattleMetrics tick through an exact
+WarBandits all-time lookup and stores its current name plus cumulative hours when found. All paths use the same validation, thirty-minute requester/channel/
 server binding and durable batch commit logic.
 Import decision buttons are acknowledged before validation or disk work begins. The message temporarily changes to
 `Import processing…` or `Import queued…`; decisions are serialized per server and repeated clicks on the same pending
@@ -452,7 +456,7 @@ Command | Description
 [**decay**](commands.md#decay-ingame) | Display the decay time of an item.
 [**despawn**](commands.md#despawn-ingame) | Display the despawn time of an item.
 [**language**](commands.md#language) | Show or change the bot language for this server and config file.
-[**intel**](commands.md#player-intelligence) | Show compact identity, reliable presence, known tags, and repeated clanmates.
+[**intel**](commands.md#player-intelligence) | Show the complete compact local profile: identity, aliases, presence, clan affinity, and rolling activity.
 [**leader**](commands.md#leader-1) | Give/Take the Team Leadership.
 [**marker/markers**](commands.md#marker) | Set or list custom markers anywhere on the map.
 [**logs**](commands.md#logs) | Show, enable, or disable bot file/debug logging.
@@ -467,10 +471,11 @@ Command | Description
 [**raidtest**](commands.md#raidtest) | Send a critical test alert through the production Rust team-chat raid path.
 [**recycle**](commands.md#recycle-ingame) | Display the output of recycling an item.
 [**research**](commands.md#research-ingame) | Display the cost to research an item.
-[**record**](commands.md#record) | Manually record a SteamID and pseudonym in the teammate language CSV database.
+[**record**](commands.md#record) | Manually link a SteamID64, BattleMetrics ID, and exact name in the active server intelligence database.
+[**scanplayers**](commands.md#player-intelligence) | Trigger or queue an immediate bounded background identity rescan for the active wipe.
 [**send**](commands.md#send) | Send a message to a discord user.
 [**stack**](commands.md#stack-ingame) | Display stack size information for an item.
-[**steamid**](commands.md#steamid) | Get the steamid of a teammate.
+[**steamid**](commands.md#steamid) | Compatibility alias for the complete server-wide `!intel` profile.
 [**team**](commands.md#team) | Get the names of all members in the team.
 [**time**](commands.md#time) | Get the current time In-Game and time till day/night.
 [**timer/timers**](commands.md#timer) | Set or list custom timers.
@@ -487,7 +492,7 @@ Command | Description
 [**upkeep**](commands.md#upkeep) | Get the upkeep time of all connected tool cupboard monitors.
 [**uptime**](commands.md#uptime-ingame) | Display uptime of the bot and server.
 [**wipe**](commands.md#wipe) | Get the time since it was wiped.
-[**who**](commands.md#who) | List all known pseudonyms for a SteamID from the teammate language CSV database.
+[**who**](commands.md#who) | List exact aliases known by the active server intelligence database.
 
 
 
@@ -649,7 +654,9 @@ Subcommand | Description | Required
 
 ## **player/players**
 
-> **Get the names and playtime of the currently online players on the server (Based on Battlemetrics).** To get all the currently online players on the server run `!players`. To get the information from a certain player run `!player <name or part of name>`.
+> **Get the names and current-session playtime of players online now (based on BattleMetrics).** This is deliberately a
+> live roster view, not a historical player profile. Run `!players` for the online server list or `!player <name or
+> part of name>` to filter it; use `!intel` for everything retained about one exact identity.
 
 ![In-Game Command players Image](images/ingame_commands/players_ingame.png)
 ![In-Game Command player Image](images/ingame_commands/player_ingame.png)
@@ -667,21 +674,42 @@ Subcommand | Description | Required
 > disk change or corruption fails closed instead of serving stale data.
 > The same 60-second hook clocks a coalesced background identity daemon without delaying BattleMetrics notifications.
 > It refreshes each already-linked SteamID at most once per wipe when that BattleMetrics identity is actually online,
-> and incrementally reads one bounded current-wipe WarBandits page at a time. Exact, unique live names of at least
+> prioritizes one SteamID pasted through `intel-reports` with an exact WarBandits all-time lookup per tick, and
+> incrementally reads one bounded 100-row current-wipe WarBandits page at a time. Exact, unique live names of at least
 > three characters may join the two sources; collisions and short names stay unlinked. Its atomic cursor under the
 > player-intelligence server directory survives restarts. A completed WarBandits sweep waits twelve hours before a
-> conservative rescan for players who joined the wipe later; it never creates presence or login/logout events.
+> conservative rescan for players who joined the wipe later. Names and WarBandits cumulative hours are retained, but
+> neither a leaderboard row nor increasing playtime creates presence or login/logout events.
 <br>Command: `!intel <SteamID64|BattleMetrics ID|exact name>`
+<br>Compatibility alias: `!steamid <SteamID64|BattleMetrics ID|exact name>`
+<br>Command: `!who <SteamID64|BattleMetrics ID|exact name>`
+<br>Command: `!record <SteamID64> <BattleMetrics ID> <exact name>`
+<br>Command: `!scanplayers`
 <br>Command: `!affinity <SteamID64|BattleMetrics ID|exact name>`
 <br>Command: `!activity <SteamID64|BattleMetrics ID|exact name> [1mo|all]`
 <br>Command: `!clan <ClanTag>`
 <br>Command: `!clanhistory <ClanTag>`
 <br>Command: `!clantop [1-10]`
-<br>`!intel` returns only the current display name, available SteamID64/BattleMetrics ID, reliable compact presence,
-`Known tags`, and `Played with`. The `x` count is the number of distinct confirmed `/cinfo` screenshots, not shared
-wipes or BattleMetrics co-presence. `!activity` defaults to a rolling 30 days (`1mo`); `all` covers all retained local
-events. Only known-online segments count, provider outages are excluded, and overlapping providers are merged.
-`!clan` is the latest stored observation, not a claim that the roster is still current.
+<br>`!intel` is the canonical complete compact lookup. It returns the current display name, available
+SteamID64/primary BattleMetrics ID, reliable compact presence, the latest collected cumulative WarBandits hours,
+exact aliases, `Known tags`, `Played with`, and rolling 30-day activity. WarBandits hours use a lower-bound display such
+as `WB hours:7500+`: it means at least 7,500 hours at the last successful collection, not a live counter.
+`!steamid` returns the same result and no longer searches only Rust+ teammates. `!who` is the alias-only
+view. The `x` count is the number of distinct confirmed `/cinfo` screenshots, not shared wipes or BattleMetrics
+co-presence. `!activity` defaults to a rolling 30 days (`1mo`); `all` covers all retained local events. Only
+known-online segments count, provider outages are excluded, and overlapping providers are merged. `!clan` is the
+latest stored observation, not a claim that the roster is still current.
+<br>`!record` is idempotent and writes one exact manual identity observation into the append-only per-server journal.
+It preserves spaces and Unicode in the name, validates the SteamID64 range and numeric BattleMetrics ID, and refuses
+to attach a BattleMetrics ID already linked to another SteamID. It no longer mutates the teammate-language CSV;
+that file remains private implementation data for translation language preferences only.
+<br>`!scanplayers` immediately acknowledges and starts one bounded WarBandits current-wipe page in the background, or
+queues one forced pass behind an already-running cycle. Further pages advance on the existing 60-second BattleMetrics
+ticks, so Discord/Rust+ command handling never waits for the scan. It bypasses the normal twelve-hour completed-sweep
+delay, has a five-minute manual cooldown, reuses its restart-safe cursor and known-ID sets, and resets the once-per-wipe
+priority lookup set for pasted SteamIDs. With 100 pasted IDs, exact all-time lookups therefore take at most roughly
+100 successful ticks rather than requiring a traversal of the full all-time leaderboard. Provider cooldowns extend
+that delay safely. The command does not manufacture online/offline presence.
 
 
 ## **track/trackinfo/trackhistory/trackrelated/tracklist/tracks/untrack**
@@ -763,13 +791,16 @@ events. Only known-online segments count, provider outages are excluded, and ove
 
 ## **record**
 
-> **Manually record a SteamID and pseudonym in the teammate language CSV database.** The pseudonym is everything after the SteamID, so spaces and special characters are allowed. The language list is managed directly in the CSV; a new alias inherits the latest dated row for that SteamID. Works from in-game team chat and from the Discord commands channel.
-<br>Command: `!record [steamid] [pseudonym]`
+> **Manually add an exact identity link to the active server intelligence journal.** The name is everything after the
+> two identifiers, so spaces and Unicode are preserved. Repeating the same triple is a no-op; a BattleMetrics ID
+> already linked to another SteamID is rejected. Works from Rust team chat and the Discord commands channel.
+<br>Command: `!record <SteamID64> <BattleMetrics ID> <exact name>`
 
 ## **who**
 
-> **List all known pseudonyms for a SteamID from the teammate language CSV database.** Results include the first recorded date for each known pseudonym and the semicolon-separated language codes from the latest dated row for that SteamID. Works from in-game team chat and from the Discord commands channel.
-<br>Command: `!who [steamid]`
+> **List exact aliases known by the active server intelligence database.** The player can be selected by SteamID64,
+> BattleMetrics ID, or exact known name. This is server-wide and no longer reads only the teammate-language CSV.
+<br>Command: `!who <SteamID64|BattleMetrics ID|exact name>`
 
 ## **send**
 
@@ -788,11 +819,9 @@ events. Only known-online segments count, provider outages are excluded, and ove
 
 ## **steamid**
 
-> **Get the steamid of a teammate.**
-
-Subcommand | Description | Required
----------- | ----------- | --------
-`<team_member_name>` | The name or part of the name of a team member (`!steamid <name>`). | `False`
+> **Compatibility alias for `!intel`.** It queries the complete active-server intelligence database rather than the
+> Rust+ team only, and returns the same identity, aliases, reliable presence, clan affinity, and rolling activity.
+<br>Command: `!steamid <SteamID64|BattleMetrics ID|exact name>`
 
 ![In-Game Command steamid Image](images/ingame_commands/steamid_ingame.png)
 

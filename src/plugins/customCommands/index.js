@@ -5,7 +5,6 @@ const CommandCatalog = require('../../util/commandCatalog.js');
 const DeepSea = require('../deepSea');
 const HiddenVendors = require('../hiddenVendors');
 const LoggingSettings = require('../../util/loggingSettings.js');
-const TeammateLanguageDatabase = require('../teammateLanguageDatabase');
 
 function result(response, logType = 'Plugin') {
     return Object.freeze({ handled: true, response, logType });
@@ -46,12 +45,6 @@ async function handleCommand(context) {
     }
     if (matches(context, 'commandSyntaxLanguage')) {
         return result(getCommandLanguage(context));
-    }
-    if (matches(context, 'commandSyntaxRecord')) {
-        return result(getCommandRecord(context));
-    }
-    if (matches(context, 'commandSyntaxWho')) {
-        return result(getCommandWho(context));
     }
     if (matches(context, 'commandSyntaxLogs')) {
         return result(getCommandLogs(context));
@@ -111,29 +104,6 @@ function getCommandLanguage(context) {
     return context.client.intlGet(context.guildId, 'setBotLanguageConfigUpdated', { language });
 }
 
-function getCommandRecord(context) {
-    const parsed = parseRecordCommand(context.command);
-    if (!parsed) return context.client.intlGet(context.guildId, 'recordUsage');
-    TeammateLanguageDatabase.recordManual(context.rustplus, parsed.steamId, parsed.name);
-    return context.client.intlGet(context.guildId, 'recordSaved', {
-        steamid: parsed.steamId,
-        name: parsed.name
-    });
-}
-
-function getCommandWho(context) {
-    const steamId = getArgs(context.command)[1];
-    if (!steamId) return context.client.intlGet(context.guildId, 'whoUsage');
-    const pseudonyms = TeammateLanguageDatabase.getKnownPseudonyms(context.rustplus, steamId);
-    if (pseudonyms.length === 0) {
-        return context.client.intlGet(context.guildId, 'whoNoPseudonyms', { steamid: steamId });
-    }
-    return context.client.intlGet(context.guildId, 'whoPseudonyms', {
-        steamid: steamId,
-        names: pseudonyms.map(entry => `${entry.name} (${entry.date}) [${entry.language}]`).join(', ')
-    });
-}
-
 function getCommandCommands(context) {
     const commandName = getArgs(context.command)[1];
     if (!commandName) {
@@ -166,14 +136,6 @@ function getCommandAutoTranslate(context) {
 
 function getArgs(command) {
     return command.trim().split(/\s+/).map(value => value.toLowerCase());
-}
-
-function parseRecordCommand(command) {
-    const match = /^\S+\s+(\S+)\s+([\s\S]+)$/.exec(command.trim());
-    if (!match) return null;
-    const steamId = match[1].trim();
-    const name = match[2].trim();
-    return steamId && name ? Object.freeze({ steamId, name }) : null;
 }
 
 module.exports = Object.freeze({ handleCommand });

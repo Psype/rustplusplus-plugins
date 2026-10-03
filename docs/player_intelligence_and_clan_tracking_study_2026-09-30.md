@@ -732,6 +732,13 @@ couple seulement si le pseudo normalisé est exact, unique parmi les joueurs en 
 caractères et ne contredit aucun lien connu. Le curseur, les SteamID déjà vus et les rafraîchissements du wipe sont
 écrits atomiquement dans `scan-daemon.json`; un sweep terminé attend douze heures avant de chercher les nouveaux
 arrivants. Ces observations enrichissent l'identité uniquement : elles ne créent jamais une présence ou une alerte.
+Depuis `1.22.21`, `!scanplayers` contourne explicitement l'attente de douze heures, démarre une page bornée en
+arrière-plan ou met un seul passage forcé en file derrière le cycle actif. Les pages suivantes restent cadencées par
+le poll existant et un cooldown manuel de cinq minutes empêche les relances accidentelles.
+Depuis `1.22.23`, les SteamID collés dans le canal d’import sont prioritaires : un identifiant reçoit par tick une
+requête WarBandits `all-time` exacte, tandis que le parcours global du wipe continue par pages de 100. Le nom et le
+playtime cumulatif sont journalisés ; `!intel` affiche ce dernier comme borne basse (`WB hours:7500+`). Cette métrique
+datée ne prouve jamais une présence en ligne.
 
 ### Stockage
 
@@ -748,7 +755,12 @@ alimentent la projection centrale : aucune recollecte d'une paire SteamID/Battle
 
 ### Commandes implémentées
 
-- `!intel <SteamID64|BattleMetrics ID|pseudo exact>` : identité utile, état fiable, `Known tags`, `Played with` ;
+- `!intel <SteamID64|BattleMetrics ID|pseudo exact>` : profil compact complet, avec identité, alias, état fiable,
+  `Known tags`, `Played with` et activité glissante ; `!steamid` en est un alias de compatibilité serveur-wide ;
+- `!who <...>` : vue bornée des alias exacts connus ;
+- `!record <SteamID64> <BattleMetrics ID> <pseudo exact>` : observation manuelle idempotente dans le journal serveur,
+  avec validation des identifiants et refus d'un BattleMetrics ID déjà lié à un autre SteamID ;
+- `!scanplayers` : déclenchement asynchrone et borné du daemon d'identités pour le wipe actif ;
 - `!affinity <...>` : uniquement les deux lignes compactes d'affinité ;
 - `!activity <...> [1mo|all]` : durée connue en ligne, `1mo` par défaut, plages `unknown` exclues ;
 - `!clan <tag>`, `!clanhistory <tag>` et `!clantop [1-10]` : observations confirmées locales ;
@@ -756,8 +768,8 @@ alimentent la projection centrale : aucune recollecte d'une paire SteamID/Battle
   décision liée au demandeur/canal/serveur/wipe pendant trente minutes et prompt ancien/nouveau pour conserver ou
   remplacer un hash déjà importé.
 
-L'historique détaillé des alias et les commandes manuelles de liaison/révocation restent différés : ces métadonnées
-existent dans le journal mais ne sont pas exposées dans le chat in-game.
+Les dates détaillées d'alias et la révocation manuelle restent internes ; les alias exacts sont désormais exposés de
+façon bornée par `!intel` et `!who`.
 
 `!track`/`!untrack` restent la watchlist de présence. Retirer une alerte ne supprime jamais l'histoire.
 
@@ -797,7 +809,9 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
    mémoire visuelle persistante sont également implémentés. Les rosters complets sont désormais redécoupés relativement
    aux virgules/`and`, avec une ligne image isolée par membre et une seule lecture bornée par panneau. Un roster
    incomplet reçoit aussi une lecture de champ dédiée ; le fallback Edit/Confirm apprend un lexique textuel persistant
-   sans transformer la correction en preuve d'identité ou de glyphe. Les décisions Discord sont acquittées avant tout
+   sans transformer la correction en preuve d’identité ou de glyphe. Un ClanTag OCR vide ou invalide ne détruit plus un
+   panneau autrement exploitable : l’aperçu reste éditable, Confirm demeure désactivé, et toute confirmation forgée est
+   refusée sans écriture jusqu’à ce que la correction manuelle passe la validation stricte. Les décisions Discord sont acquittées avant tout
    traitement durable, verrouillées par token et sérialisées par serveur ; le message affiche temporairement
    `Import processing…` ou `Import queued…` au lieu de dépasser la fenêtre de réponse Discord.
 3. **À calibrer et étendre** : corpus de PNG originaux, précision champ par champ et seuils couleur/OCR sur Linux,
