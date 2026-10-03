@@ -128,6 +128,21 @@ Test('BattleMetrics ingestion records initial presence, outage unknown and recov
     }, 'battlemetrics:42').state, 'offline');
 });
 
+Test('quiet BattleMetrics polls still clock the coalesced background player daemon', async t => {
+    const value = harness(t);
+    const scheduled = [];
+    value.client.playerIntelligenceDependencies.playerScanDaemon = {
+        schedule: options => { scheduled.push(options); return true; }
+    };
+    await Runtime.onBattlemetricsUpdated(value.context({ firstTime: true }));
+    value.battlemetrics.newPlayers = [];
+    await Runtime.onBattlemetricsUpdated(value.context());
+
+    Assert.equal(scheduled.length, 2);
+    Assert.equal(scheduled[0].scope.battlemetricsId, '42');
+    Assert.equal(scheduled[1].directory, Path.join(value.directory, 'guild', '42'));
+});
+
 Test('confirmed F7 and cinfo imports fuse by exact normalized name and stay hash-idempotent', async t => {
     const value = harness(t);
     const f7 = Object.freeze({

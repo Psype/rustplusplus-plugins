@@ -108,6 +108,17 @@ Test('JSONL history serializes concurrent appends, deduplicates and detects corr
     Assert.deepEqual((await new PlayerIntelligence.JsonlHistoryStore({ directory }).readAll())
         .map(item => item.eventId).sort(), events.map(item => item.eventId).sort());
 
+    const cachedEvents = await firstStore.readAll();
+    Assert.strictEqual(await secondStore.readAll(), cachedEvents);
+    const cachedProjection = PlayerIntelligence.rebuild(cachedEvents);
+    Assert.strictEqual(PlayerIntelligence.rebuild(await firstStore.readAll()), cachedProjection);
+    const added = identity({ observedAt: '2026-09-30T12:01:00.000Z' });
+    Assert.equal((await secondStore.append(added)).appended, true);
+    const updatedEvents = await firstStore.readAll();
+    Assert.notStrictEqual(updatedEvents, cachedEvents);
+    Assert.equal(updatedEvents.length, cachedEvents.length + 1);
+    Assert.notStrictEqual(PlayerIntelligence.rebuild(updatedEvents), cachedProjection);
+
     Fs.appendFileSync(shard, '{broken\n', 'utf8');
     const preserved = Fs.readFileSync(shard, 'utf8');
     await Assert.rejects(() => firstStore.readAll(), PlayerIntelligence.HistoryCorruptionError);
@@ -127,6 +138,10 @@ Test('identity projection joins stable IDs and keeps name-only links reversible'
         })
     ];
     const first = PlayerIntelligence.rebuild(base).identities;
+    Assert.deepEqual(first.findByIdentifier(STEAM_A).map(person => person.personId), [`steam:${STEAM_A}`]);
+    Assert.deepEqual(first.findByIdentifier('101').map(person => person.personId), [`steam:${STEAM_A}`]);
+    Assert.deepEqual(first.findByExactName('ALICE').map(person => person.personId), [`steam:${STEAM_A}`]);
+    Assert.equal(first.getPerson(`steam:${STEAM_A}`).steamId, STEAM_A);
     Assert.equal(first.resolveSubject({ steamId: null, battlemetricsPlayerId: '101', exactName: null }).personId,
         `steam:${STEAM_A}`);
     Assert.deepEqual(first.resolveSubject({ steamId: null, battlemetricsPlayerId: null, exactName: 'ALICE' }), {

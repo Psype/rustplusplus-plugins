@@ -46,12 +46,15 @@ function withPlayerTrackerDependencies(context) {
 function withPlayerIntelligenceDependencies(context) {
     const dependencies = context.playerIntelligenceDependencies ||
         context.client.playerIntelligenceDependencies || {};
-    if (Object.prototype.hasOwnProperty.call(dependencies, 'identityHistory')) return context;
+    const hasIdentityHistory = Object.prototype.hasOwnProperty.call(dependencies, 'identityHistory');
+    const hasWarBandits = Object.prototype.hasOwnProperty.call(dependencies, 'warBanditsProvider');
+    if (hasIdentityHistory && hasWarBandits) return context;
     return Object.freeze({
         ...context,
         playerIntelligenceDependencies: Object.freeze({
             ...dependencies,
-            identityHistory: TeammateLanguageDatabase
+            identityHistory: hasIdentityHistory ? dependencies.identityHistory : TeammateLanguageDatabase,
+            warBanditsProvider: hasWarBandits ? dependencies.warBanditsProvider : getWarBanditsProvider(context)
         })
     });
 }

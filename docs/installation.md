@@ -61,6 +61,15 @@ For a complete roster, comma and final standalone `and` separators isolate one t
 one additional bounded OCR pass. Comma pixels are excluded, and OCR lines are assigned by their sheet row rather than
 array order, preventing a missing row from shifting later members. A changed spelling is accepted only through a unique
 confirmed name/template; otherwise the prior member remains unchanged.
+The same configured channel may be renamed (for example to `intel-reports`) without changing routing. A text-only
+message can contain 1 to 100 complete SteamID64 values, one per non-empty line. Blank and duplicate lines are ignored,
+while any invalid line rejects the whole lot. The bot shows known names/BattleMetrics IDs when they resolve uniquely,
+keeps other IDs without a guessed name, and writes nothing until `Confirm import` is clicked. Existing background
+identity sources may enrich missing names after confirmation.
+Confirm/Reject/Replace/Keep button interactions are acknowledged immediately, before durable import work. Mutating
+decisions are serialized per BattleMetrics server and protected by an in-flight token lock; Discord therefore receives
+its response inside the interaction deadline even when another import is already writing. The original message shows
+`Import processing…` or `Import queued…` until the final result replaces it.
 If a roster remains incomplete, the bot first performs one distinct OCR read of only the roster field. A confirmed
 manual correction is then added to the persistent user-word lexicon and supplied to future Tesseract reads; it is not
 identity proof and cannot train a visual/glyph sample without an independently safe pixel boundary.

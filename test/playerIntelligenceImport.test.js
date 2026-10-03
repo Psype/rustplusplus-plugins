@@ -12,6 +12,7 @@ const CinfoPanelRefinement = require('../src/plugins/playerIntelligence/cinfoPan
 const ImportWorkflow = require('../src/plugins/playerIntelligence/importWorkflow.js');
 const OcrCorrectionMemory = require('../src/plugins/playerIntelligence/ocrCorrectionMemory.js');
 const { parseCinfoWords } = require('../src/plugins/playerIntelligence/parseCinfo.js');
+const Runtime = require('../src/plugins/playerIntelligence/runtime.js');
 const VisualAliasLibrary = require('../src/plugins/playerIntelligence/visualAliasLibrary.js');
 
 function word(text, y) {
@@ -76,6 +77,16 @@ function createHarness(t) {
 
 Test('Discord import decisions remain valid for thirty minutes', () => {
     Assert.equal(ImportWorkflow.TTL_MS, 30 * 60 * 1000);
+});
+
+Test('text SteamID lists are strict, line-based, deduplicated and code-fence friendly', () => {
+    const first = '76561197975819827';
+    const second = '76561198875390964';
+    const parsed = ImportWorkflow.parseSteamIdTextList(`\`\`\`text\n${first}\n\n${second}\n${first}\n\`\`\``);
+    Assert.deepEqual(parsed.steamIds, [first, second]);
+    Assert.equal(parsed.duplicateLineCount, 1);
+    Assert.throws(() => ImportWorkflow.parseSteamIdTextList(`${first}\nnot-a-steamid`), /line 2/);
+    Assert.throws(() => ImportWorkflow.parseSteamIdTextList(''), /at least one/);
 });
 
 Test('Discord import previews first, binds confirmation to requester, then commits once', async t => {
@@ -868,6 +879,181 @@ Test('dedicated import channel accepts only an approved helper webhook and still
         message: { ...message, id: 'message-2', webhookId: '99999999999999999' }
     }), true);
     Assert.equal(downloaded, false);
+});
+
+Test('dedicated import channel previews and confirms one or many line-separated SteamIDs', async t => {
+    const value = createHarness(t);
+    const known = '76561197975819827';
+    const unknown = '76561198875390964';
+    const message = {
+        guildId: 'guild', channelId: 'intel-imports', id: 'message-steamids',
+        content: `${known}\n${unknown}\n${known}`,
+        webhookId: null,
+        author: { id: 'requester', bot: false },
+        member: { permissions: { has: () => false }, roles: { cache: new Map() } },
+        attachments: new Map(),
+        reply: async payload => value.replies.push(payload)
+    };
+
+    Assert.equal(await ImportWorkflow.handleMessage({ client: value.client, message }), true);
+    Assert.match(value.replies[0].content, /SteamID text list — 2 unique IDs/);
+    Assert.match(value.replies[0].content, /1 duplicate line ignored/);
+    Assert.match(value.replies[0].content, /Psype \[BM:101\]/);
+    Assert.match(value.replies[0].content, new RegExp(`${unknown} — \\[name pending\\]`));
+
+    const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
+    Assert.equal((await store.readAll()).length, 0);
+    const customId = value.replies[0].components[0].components[0].data.custom_id;
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { customId, guildId: 'guild', channelId: 'intel-imports', user: { id: 'requester' } }
+    }), true);
+    Assert.match(value.updates.at(-1).content, /Import committed \(1 block, 2 events\)/);
+    const events = await store.readAll();
+    Assert.equal(events.length, 2);
+    Assert.equal(events.every(event => event.provenance.source === 'discord-steamid-list'), true);
+    Assert.equal(events.find(event => event.subject.steamId === known).subject.battlemetricsPlayerId, '101');
+    Assert.equal(events.find(event => event.subject.steamId === known).subject.exactName, 'Psype');
+    Assert.equal(events.find(event => event.subject.steamId === unknown).subject.exactName, null);
+
+    Assert.equal(await ImportWorkflow.handleMessage({
+        client: value.client,
+        message: { ...message, id: 'message-invalid', content: `${known}\ninvalid` }
+    }), true);
+    Assert.match(value.replies.at(-1).content, /Invalid SteamID64 on line 2/);
+    Assert.equal((await store.readAll()).length, 2);
+});
+
+Test('confirm buttons acknowledge immediately and serialize durable work per server', async t => {
+    const value = createHarness(t);
+    const firstSteamId = '76561198875390964';
+    const secondSteamId = '76561198843692446';
+    for (const [id, steamId] of [['first', firstSteamId], ['second', secondSteamId]]) {
+        Assert.equal(await ImportWorkflow.handleMessage({
+            client: value.client,
+            message: {
+                guildId: 'guild', channelId: 'intel-imports', id: `message-${id}`, content: steamId,
+                webhookId: null, author: { id: 'requester', bot: false },
+                member: { permissions: { has: () => false }, roles: { cache: new Map() } },
+                attachments: new Map(), reply: async payload => value.replies.push(payload)
+            }
+        }), true);
+    }
+
+    let releaseFirst;
+    let released = false;
+    const firstGate = new Promise(resolve => {
+        releaseFirst = () => {
+            if (released) return;
+            released = true;
+            resolve();
+        };
+    });
+    t.after(() => releaseFirst());
+    let firstEnteredResolve;
+    const firstEntered = new Promise(resolve => { firstEnteredResolve = resolve; });
+    let active = 0;
+    let maximumActive = 0;
+    let calls = 0;
+    value.client.playerIntelligenceImportDependencies.commitParsedImports = async (...args) => {
+        const call = ++calls;
+        active++;
+        maximumActive = Math.max(maximumActive, active);
+        try {
+            if (call === 1) {
+                firstEnteredResolve();
+                await firstGate;
+            }
+            return await Runtime.commitParsedImports(...args);
+        }
+        finally {
+            active--;
+        }
+    };
+
+    const acknowledgements = [];
+    function confirmation(customId, label) {
+        const interaction = {
+            customId, guildId: 'guild', channelId: 'intel-imports', user: { id: 'requester' }, deferred: false,
+            deferUpdate: async () => {
+                interaction.deferred = true;
+                acknowledgements.push(label);
+            }
+        };
+        return interaction;
+    }
+    const firstId = value.replies[0].components[0].components[0].data.custom_id;
+    const secondId = value.replies[1].components[0].components[0].data.custom_id;
+    const firstDecision = ImportWorkflow.handleButton({
+        client: value.client, interaction: confirmation(firstId, 'first')
+    });
+    await firstEntered;
+    const secondDecision = ImportWorkflow.handleButton({
+        client: value.client, interaction: confirmation(secondId, 'second')
+    });
+    await new Promise(resolve => setImmediate(resolve));
+
+    Assert.deepEqual(acknowledgements, ['first', 'second']);
+    Assert.equal(calls, 1);
+    Assert.equal(maximumActive, 1);
+    Assert.equal(value.edits.some(payload => /queued behind another intelligence update/u.test(payload.content)), true);
+
+    releaseFirst();
+    await Promise.all([firstDecision, secondDecision]);
+    Assert.equal(calls, 2);
+    Assert.equal(maximumActive, 1);
+    const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
+    Assert.deepEqual((await store.readAll()).map(event => event.subject.steamId).sort(),
+        [firstSteamId, secondSteamId].sort());
+});
+
+Test('a repeated click is acknowledged but cannot execute the same pending import twice', async t => {
+    const value = createHarness(t);
+    const steamId = '76561198875390964';
+    Assert.equal(await ImportWorkflow.handleMessage({
+        client: value.client,
+        message: {
+            guildId: 'guild', channelId: 'intel-imports', id: 'message-double-click', content: steamId,
+            webhookId: null, author: { id: 'requester', bot: false },
+            member: { permissions: { has: () => false }, roles: { cache: new Map() } },
+            attachments: new Map(), reply: async payload => value.replies.push(payload)
+        }
+    }), true);
+
+    let releaseCommit;
+    const commitGate = new Promise(resolve => { releaseCommit = resolve; });
+    t.after(() => releaseCommit());
+    let commitEnteredResolve;
+    const commitEntered = new Promise(resolve => { commitEnteredResolve = resolve; });
+    let calls = 0;
+    value.client.playerIntelligenceImportDependencies.commitParsedImports = async (...args) => {
+        calls++;
+        commitEnteredResolve();
+        await commitGate;
+        return Runtime.commitParsedImports(...args);
+    };
+    const acknowledgements = [];
+    const customId = value.replies[0].components[0].components[0].data.custom_id;
+    function click(label) {
+        const interaction = {
+            customId, guildId: 'guild', channelId: 'intel-imports', user: { id: 'requester' }, deferred: false,
+            deferUpdate: async () => {
+                interaction.deferred = true;
+                acknowledgements.push(label);
+            }
+        };
+        return interaction;
+    }
+    const first = ImportWorkflow.handleButton({ client: value.client, interaction: click('first') });
+    await commitEntered;
+    Assert.equal(await ImportWorkflow.handleButton({ client: value.client, interaction: click('repeat') }), true);
+    Assert.deepEqual(acknowledgements, ['first', 'repeat']);
+    Assert.equal(calls, 1);
+
+    releaseCommit();
+    await first;
+    const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
+    Assert.equal((await store.readAll()).filter(event => event.subject.steamId === steamId).length, 1);
 });
 
 Test('dedicated channel auto-detects multiple attachments and multiple cinfo panels as one confirmed batch', async t => {

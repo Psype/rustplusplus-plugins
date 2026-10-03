@@ -80,7 +80,7 @@ Test('native tracker logs and delivers exact online/offline messages despite Dis
     };
     const client = {
         battlemetricsInstances: { 42: battlemetrics },
-        playerIntelligenceDependencies: { dataDirectory: intelligenceDirectory },
+        playerIntelligenceDependencies: { dataDirectory: intelligenceDirectory, warBanditsProvider: null },
         battlemetricsIntervalCounter: 1,
         guilds: { cache: new Map([[guildId, {}]]) },
         rustplusInstances: { [guildId]: rustplus },

@@ -219,7 +219,8 @@ Options | Description | Required
 > counter position unless corrected `Established` data moves it to another regular wipe, rebuilds identities/clans/
 > affinities from the new content, and may itself be replaced later.
 
-The bot also creates a private `intel-imports` channel. A message may contain 1–10 images and needs no caption: F7 and
+The bot also creates a private `intel-imports` channel (renaming that configured channel, for example to
+`intel-reports`, keeps working because the bot uses its Discord ID). A message may contain 1–10 images and needs no caption: F7 and
 `/cinfo` are detected from semantic OCR anchors. Starting the message with `cinfo` or `f7` remains an optional strict
 hint for all attachments. Repeated `ClanTag` anchors allow several stacked `/cinfo` panels in one image; every panel is
 validated separately, receives its own Established-derived wipe, and the whole preview is confirmed as one batch. A `/cinfo` block needs a valid tag, declared
@@ -227,7 +228,15 @@ count and `Established` timestamp; its roster may remain partial. If a block lac
 cannot fit safely, nothing is offered for confirmation. The human sender alone can confirm. An approved Windows helper
 webhook can post the same messages when its ID is listed in `RPP_INTEL_IMPORT_WEBHOOK_IDS`; because a webhook has no
 human requester, any member with the configured bot role (or an administrator) may confirm it. Unapproved webhooks are
-ignored. All paths use the same validation, thirty-minute requester/channel/server binding and durable batch commit logic.
+ignored. A text-only message may instead contain 1–100 complete SteamID64 values, one per non-empty line (an optional
+whole-message `text` code fence is accepted). Blank and duplicate lines are ignored; any other line rejects the entire
+lot. The preview reuses a unique locally known name/BattleMetrics ID when available, preserves unknown IDs without
+inventing a name, and requires the same `Confirm import` or `Reject` decision before durable storage. Missing names are
+left for the existing background identity enrichment. All paths use the same validation, thirty-minute requester/channel/
+server binding and durable batch commit logic.
+Import decision buttons are acknowledged before validation or disk work begins. The message temporarily changes to
+`Import processing…` or `Import queued…`; decisions are serialized per server and repeated clicks on the same pending
+token are ignored until its final success, replacement prompt, or safe failure is displayed.
 
 Subcommand | Options | Description | Required
 ---------- | ------- | ----------- | --------
@@ -652,6 +661,16 @@ Subcommand | Description | Required
 > the existing 60-second BattleMetrics update; it never creates a second poller. A failed/censored update changes
 > provider state to `unknown`, never to a false logout. Exact SteamID64 is the strong identity; exact-name-only links
 > remain reversible and ambiguous homonyms are not selected automatically.
+> The immutable per-server journal and its derived projections are reused between commands and invalidated after an
+> append. SteamID64, BattleMetrics ID, exact names and `Played with` relations have direct indexes; a normal repeated
+> `!affinity` therefore does not reread/rebuild the complete history. Shard metadata is still checked so an external
+> disk change or corruption fails closed instead of serving stale data.
+> The same 60-second hook clocks a coalesced background identity daemon without delaying BattleMetrics notifications.
+> It refreshes each already-linked SteamID at most once per wipe when that BattleMetrics identity is actually online,
+> and incrementally reads one bounded current-wipe WarBandits page at a time. Exact, unique live names of at least
+> three characters may join the two sources; collisions and short names stay unlinked. Its atomic cursor under the
+> player-intelligence server directory survives restarts. A completed WarBandits sweep waits twelve hours before a
+> conservative rescan for players who joined the wipe later; it never creates presence or login/logout events.
 <br>Command: `!intel <SteamID64|BattleMetrics ID|exact name>`
 <br>Command: `!affinity <SteamID64|BattleMetrics ID|exact name>`
 <br>Command: `!activity <SteamID64|BattleMetrics ID|exact name> [1mo|all]`
@@ -676,7 +695,7 @@ events. Only known-online segments count, provider outages are excluded, and ove
 <br>Command: `!tracklist [all]` (alias: `!tracks [all]`)
 <br>Command: `!untrack <partial player name|BattleMetrics ID|SteamID64>`
 <br>The plugin creates one native `Enemies` tracker per server. The existing 60-second BattleMetrics poller sends login/logout alerts to Discord and, by default, Rust team chat. `!tracklist` and `!tracks` always queue every tracked player over minimal Rust-safe messages as `name: Online`, `name: <duration> ago`, or `name: Unknown`, without page headers. Adding `all` packs multiple complete `name,BattleMetricsID,SteamID,status` records per message; `-` means the SteamID is unknown and status is `on`, `off:<age>`, or `unk:<age>`. An API failure is never reported as a logout.
-<br>On a recognized WarBandits server, `!track` also invokes the detached WarBandits provider once to enrich the selected identity with its server-specific name, SteamID64, internal WarBandits ID, aliases, rank, playtime, and available statistics. This provider performs no background polling and never emits an online/offline transition: BattleMetrics remains the sole presence source.
+<br>On a recognized WarBandits server, `!track` also invokes the detached WarBandits provider once to enrich the selected identity with its server-specific name, SteamID64, internal WarBandits ID, aliases, rank, playtime, and available statistics. The tracker path performs no background polling. The separate player-intelligence daemon may consume bounded current-wipe pages, but neither path emits an online/offline transition: BattleMetrics remains the sole presence source.
 <br>Presence alerts created by this plugin and their `TRACKER` info logs always use `Tracked player <name> is now online.` and `Tracked player <name> just disconnected.`. The event is logged before the optional Rust/Discord deliveries, whose failures remain isolated.
 <br>For SteamID64 input, the plugin reads the free public Steam Community profile name with a five-second timeout, then requires a strict match on the active server. A leading `[CLAN]` tag is tolerated. If BattleMetrics exposes its own Steam identifier, it must equal the requested SteamID; a mismatch, ambiguous name, private profile, or unproven loose match performs no write.
 <br>Re-adding the same proven identity never creates a second entry. A later `!track <SteamID64>` that resolves to an existing BattleMetrics player with no SteamID atomically enriches that player, preserves its history and aliases, and replies `Tracking updated`.

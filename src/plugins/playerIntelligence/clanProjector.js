@@ -47,9 +47,24 @@ function projectClans(events, identities) {
     /** @type {any[]} */
     const snapshots = [];
     const known = new Map();
-    const played = new Map();
+    const playedByPerson = new Map();
     const tags = new Map();
-    const candidates = identityCandidates(events, identities);
+    /** @type {(Readonly<Record<string, any>> & {personId:string})[]|null} */
+    let candidates = null;
+
+    /** @returns {readonly (Readonly<Record<string, any>> & {personId:string})[]} */
+    function indexedCandidates() {
+        if (candidates !== null) return candidates;
+        candidates = identityCandidates(events, identities).map(candidate => Object.freeze({
+            ...candidate,
+            personId: identities.resolveSubject({
+                steamId: candidate.steamId,
+                battlemetricsPlayerId: candidate.battlemetricsPlayerId,
+                exactName: candidate.name
+            }).personId
+        }));
+        return candidates;
+    }
 
     for (const event of events.filter(item => item.kind === 'clan_snapshot').slice().sort((left, right) =>
         left.observedAt.localeCompare(right.observedAt) || left.eventId.localeCompare(right.eventId))) {
@@ -87,16 +102,9 @@ function projectClans(events, identities) {
 
         const persistedUnresolved = /** @type {any[]} */ (Array.isArray(event.payload.unresolvedMembers) ?
             event.payload.unresolvedMembers : []);
-        const availableCandidates = candidates.filter(candidate => {
-            const resolution = identities.resolveSubject({
-                steamId: candidate.steamId,
-                battlemetricsPlayerId: candidate.battlemetricsPlayerId,
-                exactName: candidate.name
-            });
-            return !members.has(resolution.personId);
-        });
-        const matches = resolveRoster(persistedUnresolved.map(member => member.observedText),
-            availableCandidates);
+        const matches = persistedUnresolved.length > 0 ? resolveRoster(
+            persistedUnresolved.map(member => member.observedText),
+            indexedCandidates().filter(candidate => !members.has(candidate.personId))) : [];
         const unresolvedMembers = [];
         for (let index = 0; index < persistedUnresolved.length; index += 1) {
             const unresolved = persistedUnresolved[index];
@@ -163,8 +171,12 @@ function projectClans(events, identities) {
         const personIds = [...members.keys()].sort();
         for (let first = 0; first < personIds.length; first += 1) {
             for (let second = first + 1; second < personIds.length; second += 1) {
-                const pair = `${personIds[first]}\u0000${personIds[second]}`;
-                played.set(pair, (played.get(pair) || 0) + 1);
+                const left = personIds[first];
+                const right = personIds[second];
+                if (!playedByPerson.has(left)) playedByPerson.set(left, new Map());
+                if (!playedByPerson.has(right)) playedByPerson.set(right, new Map());
+                playedByPerson.get(left).set(right, (playedByPerson.get(left).get(right) || 0) + 1);
+                playedByPerson.get(right).set(left, (playedByPerson.get(right).get(left) || 0) + 1);
             }
         }
     }
@@ -175,10 +187,7 @@ function projectClans(events, identities) {
         const knownTags = [...(known.get(resolution.personId) || new Map()).values()]
             .sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag));
         const playedWith = [];
-        for (const [pair, count] of played.entries()) {
-            const [first, second] = pair.split('\u0000');
-            if (first !== resolution.personId && second !== resolution.personId) continue;
-            const otherPersonId = first === resolution.personId ? second : first;
+        for (const [otherPersonId, count] of (playedByPerson.get(resolution.personId) || new Map()).entries()) {
             playedWith.push({
                 personId: otherPersonId,
                 name: identities.displayName(otherPersonId),

@@ -168,6 +168,42 @@ Test('requests are serialized, gap-controlled and identical player lookups coale
     Assert.equal(test.calls[1].config.params.player_name, 'Psype');
 });
 
+Test('current-wipe pages are bounded, deterministic and expose a resumable cursor', async t => {
+    const rows = Array.from({ length: 100 }, (_, index) => statsRow({
+        player: {
+            ID: 1000 + index,
+            steam_64_ID: `${76561198000000000n + BigInt(index)}`,
+            name: `Player ${index}`,
+            rank: index + 1
+        }
+    }));
+    const test = harness(t, {
+        httpClient: {
+            get: async (url, config) => {
+                test.calls.push({ url, config });
+                return { data: url.endsWith('/servers') ? catalog() : stats(rows, { total: 150 }) };
+            }
+        }
+    });
+
+    const page = await test.provider.scanCurrentWipePage(null, { battlemetricsId: '42' }, 1);
+
+    Assert.equal(page.available, true);
+    Assert.equal(page.rows.length, 100);
+    Assert.equal(page.complete, false);
+    Assert.equal(page.nextPage, 2);
+    Assert.deepEqual(test.calls[1].config.params, {
+        limit: 100,
+        wipe: 0,
+        category_ID: 1,
+        sort_direction: 'DESC',
+        sort_key: 'playtime',
+        page: 1
+    });
+    Assert.equal((await test.provider.scanCurrentWipePage(null, { battlemetricsId: '42' }, 0)).reason,
+        'invalid page');
+});
+
 Test('stats parser merges Steam aliases and selection never picks an ambiguous name', () => {
     const sameSteamAlias = statsRow({ player: { name: '[WB] Psype' } });
     const parsedAliases = WarBandits.parseStatsPayload(stats([statsRow(), sameSteamAlias]));
@@ -424,6 +460,6 @@ Test('public provider API has no periodic WarBandits hook', () => {
     Assert.equal('onBattlemetricsUpdated' in WarBandits, false);
     Assert.equal('onBattlemetricsUpdated' in provider, false);
     Assert.deepEqual(Object.keys(provider).sort(), [
-        'ensureServerCatalog', 'linkBattlemetricsPlayer', 'resolvePlayer'
+        'ensureServerCatalog', 'linkBattlemetricsPlayer', 'resolvePlayer', 'scanCurrentWipePage'
     ]);
 });

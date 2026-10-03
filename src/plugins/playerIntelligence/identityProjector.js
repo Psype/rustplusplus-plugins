@@ -144,6 +144,27 @@ function projectIdentities(events) {
             left.firstObservedAt.localeCompare(right.firstObservedAt) || left.name.localeCompare(right.name))
     })).sort((left, right) => left.personId.localeCompare(right.personId));
     const personById = new Map(persons.map(person => [person.personId, person]));
+    const personsByIdentifier = new Map();
+    const personsByExactName = new Map();
+    for (const person of persons) {
+        for (const identifier of [person.steamId, ...person.battlemetricsPlayerIds].filter(Boolean)) {
+            const values = personsByIdentifier.get(identifier) || [];
+            values.push(person);
+            personsByIdentifier.set(identifier, values);
+        }
+        for (const alias of person.names) {
+            const key = nameKey(alias.name);
+            const values = personsByExactName.get(key) || [];
+            if (!values.includes(person)) values.push(person);
+            personsByExactName.set(key, values);
+        }
+    }
+    for (const [key, values] of personsByIdentifier) {
+        personsByIdentifier.set(key, deepFreeze(values));
+    }
+    for (const [key, values] of personsByExactName) {
+        personsByExactName.set(key, deepFreeze(values));
+    }
 
     /** @param {string} personId */
     function displayName(personId) {
@@ -151,6 +172,21 @@ function projectIdentities(events) {
         if (!person || person.names.length === 0) return personId;
         return person.names.slice().sort((left, right) =>
             right.lastObservedAt.localeCompare(left.lastObservedAt) || left.name.localeCompare(right.name))[0].name;
+    }
+
+    /** @param {string} identifier */
+    function findByIdentifier(identifier) {
+        return personsByIdentifier.get(identifier) || deepFreeze([]);
+    }
+
+    /** @param {string} name */
+    function findByExactName(name) {
+        return personsByExactName.get(nameKey(name)) || deepFreeze([]);
+    }
+
+    /** @param {string} personId */
+    function getPerson(personId) {
+        return personById.get(personId) || null;
     }
 
     return deepFreeze({
@@ -164,7 +200,10 @@ function projectIdentities(events) {
             }, bmToSteam)
         })).sort((left, right) => left.linkId.localeCompare(right.linkId)),
         resolveSubject,
-        displayName
+        displayName,
+        findByIdentifier,
+        findByExactName,
+        getPerson
     });
 }
 

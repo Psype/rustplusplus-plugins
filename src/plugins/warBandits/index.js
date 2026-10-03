@@ -10,6 +10,7 @@ const DEFAULT_CATALOG_TTL_MS = 60 * 60 * 1000;
 const DEFAULT_CLOUDFLARE_COOLDOWN_MS = 15 * 60 * 1000;
 const DEFAULT_REQUEST_GAP_MS = 5000;
 const DEFAULT_STATS_TTL_MS = 5 * 60 * 1000;
+const CURRENT_WIPE_PAGE_SIZE = 100;
 const DATA_DIRECTORY = Path.join(__dirname, '..', '..', '..', 'data', 'warbandits');
 const SCHEMA_VERSION = 1;
 
@@ -593,6 +594,75 @@ function createProvider(dependencies = {}) {
         return result;
     }
 
+    async function scanCurrentWipePage(context, scope, page = 1) {
+        const pageNumber = Number(page);
+        if (!Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > 1000000) {
+            return unavailable('invalid page', { rows: [], server: null });
+        }
+        const catalog = await ensureServerCatalog(context);
+        if (!catalog.available || catalog.reason === 'cooldown') {
+            return unavailable(catalog.reason, { rows: [], server: null });
+        }
+
+        let server;
+        try {
+            server = selectServer(catalog.servers, scope);
+        }
+        catch (error) {
+            return unavailable(error.message, { rows: [], server: null });
+        }
+        if (!server) return unavailable('server not supported', { rows: [], server: null });
+
+        const key = `current-wipe:${server.slug}:${pageNumber}`;
+        const cached = statsCacheGet(key);
+        if (cached) return cached;
+        return coalesce(`stats:${key}`, async () => {
+            const secondCached = statsCacheGet(key);
+            if (secondCached) return secondCached;
+            try {
+                const response = await request(`stats:${key}`,
+                    `${apiRoot}/stats/${encodeURIComponent(server.slug)}`, {
+                        params: {
+                            limit: CURRENT_WIPE_PAGE_SIZE,
+                            wipe: 0,
+                            category_ID: 1,
+                            sort_direction: 'DESC',
+                            sort_key: 'playtime',
+                            page: pageNumber
+                        }
+                    });
+                const parsed = parseStatsPayload(response && response.data);
+                if (parsed.rows.length > CURRENT_WIPE_PAGE_SIZE) {
+                    throw new TypeError('WarBandits current-wipe page exceeds the requested bound.');
+                }
+                const total = resultTotal(parsed.utils);
+                const complete = parsed.rows.length < CURRENT_WIPE_PAGE_SIZE ||
+                    (total !== null && pageNumber * CURRENT_WIPE_PAGE_SIZE >= total);
+                const value = deepFreeze({
+                    available: true,
+                    reason: null,
+                    server,
+                    page: pageNumber,
+                    pageSize: CURRENT_WIPE_PAGE_SIZE,
+                    nextPage: complete ? null : pageNumber + 1,
+                    complete,
+                    observedAt: dateNow().toISOString(),
+                    rows: parsed.rows,
+                    utils: parsed.utils
+                });
+                responseCache.set(key, { savedAt: dateNow().getTime(), value });
+                return value;
+            }
+            catch (error) {
+                const state = readCatalogCache();
+                const reason = state && state.cooldownUntil &&
+                    Date.parse(state.cooldownUntil) > dateNow().getTime() ? 'cooldown' : 'request failed';
+                log(context, `Current-wipe scan unavailable: ${reason}.`);
+                return unavailable(reason, { server, rows: [], page: pageNumber });
+            }
+        });
+    }
+
     function sidecarPath(guildId, server) {
         return Path.join(dataDirectory,
             `${sanitizeFilePart(guildId)}-${sanitizeFilePart(server.slug)}.json`);
@@ -796,7 +866,8 @@ function createProvider(dependencies = {}) {
     return Object.freeze({
         ensureServerCatalog,
         linkBattlemetricsPlayer,
-        resolvePlayer
+        resolvePlayer,
+        scanCurrentWipePage
     });
 }
 
@@ -810,6 +881,7 @@ module.exports = Object.freeze({
     parseServerCatalog,
     parseStatsPayload,
     resolvePlayer: (context, scope, query) => singleton.resolvePlayer(context, scope, query),
+    scanCurrentWipePage: (context, scope, page) => singleton.scanCurrentWipePage(context, scope, page),
     selectPlayer,
     selectServer
 });

@@ -31,8 +31,13 @@ const EDIT_MODAL_PREFIX = 'PIImportEditModal:';
 const EDIT_ROSTER_FIELD = 'PIImportRosterNames';
 const TTL_MS = 30 * 60 * 1000;
 const MAX_CORROBORATION_QUERIES = 3;
+const MAX_TEXT_STEAM_IDS = 100;
 /** @type {Map<string, any>} */
 const pending = new Map();
+/** @type {Map<string, Promise<any>>} */
+const decisionQueues = new Map();
+/** @type {Set<string>} */
+const decisionClaims = new Set();
 
 /** @param {unknown} value @param {number} limit */
 function truncateCharacters(value, limit) {
@@ -91,6 +96,21 @@ function previewText(parsed) {
             showOcrRoster ?
                 `Pending identities: ${pendingCount}. They stay excluded until automatically matched.` : '',
             parsed.errors.length > 0 ? `Warnings: ${parsed.errors.join(' ')}` : 'Ready to commit.'
+        ].filter(Boolean).join('\n').slice(0, 1900);
+    }
+    if (parsed.textSteamIdList === true) {
+        const named = parsed.entries.filter((/** @type {any} */ entry) => entry.name).length;
+        const rows = parsed.entries.slice(0, 20).map((/** @type {any} */ entry) =>
+            `${entry.steamId} — ${entry.name || '[name pending]'}${
+                entry.battlemetricsPlayerId ? ` [BM:${entry.battlemetricsPlayerId}]` : ''}`);
+        if (parsed.entries.length > rows.length) rows.push(`+${parsed.entries.length - rows.length} more`);
+        return [
+            `SteamID text list — ${parsed.entries.length} unique ID${parsed.entries.length === 1 ? '' : 's'} ` +
+                `(${named} named, ${parsed.entries.length - named} awaiting enrichment)`,
+            rows.join('\n'),
+            parsed.duplicateLineCount > 0 ? `${parsed.duplicateLineCount} duplicate line${
+                parsed.duplicateLineCount === 1 ? '' : 's'} ignored.` : '',
+            'Ready to commit. Missing names will be enriched by the existing background sources.'
         ].filter(Boolean).join('\n').slice(0, 1900);
     }
     const idOnly = parsed.entries.filter((/** @type {any} */ entry) => !entry.name).length;
@@ -167,7 +187,10 @@ function previousImportText(events) {
             members.length > 20 ? `, +${members.length - 20}` : ''}`].join('\n');
     }
     const identities = events.filter(event => event.kind === 'identity_observed');
-    return [`Previous F7 — ${identities.length} entries`, identities.slice(0, 20).map(event =>
+    const textList = identities.length > 0 && identities.every(event =>
+        event.provenance.source === 'discord-steamid-list');
+    return [`Previous ${textList ? 'SteamID text list' : 'F7'} — ${identities.length} entries`,
+    identities.slice(0, 20).map(event =>
         `${event.subject.steamId || '?'} — ${event.subject.exactName || '[name hidden/unread]'}`).join('\n')]
         .filter(Boolean).join('\n');
 }
@@ -313,6 +336,111 @@ function isMessageAuthorized(instance, message) {
     if (instance.role === null || instance.role === undefined) return true;
     return administrator || Boolean(message.member && message.member.roles && message.member.roles.cache &&
         message.member.roles.cache.has(instance.role));
+}
+
+/** @param {unknown} value */
+function parseSteamIdTextList(value) {
+    if (typeof value !== 'string') throw new TypeError('SteamID list must be text.');
+    let text = value.trim();
+    const fenced = /^```(?:text|txt)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/iu.exec(text);
+    if (fenced) text = fenced[1];
+    const lines = text.split(/\r?\n/u).map((line, index) => ({ number: index + 1, value: line.trim() }))
+        .filter(line => line.value !== '');
+    if (lines.length < 1) throw new Error('Paste at least one SteamID64, one per line.');
+    if (lines.length > MAX_TEXT_STEAM_IDS) {
+        throw new Error(`Paste at most ${MAX_TEXT_STEAM_IDS} SteamID64 values per message.`);
+    }
+    const invalid = lines.filter(line => !F7IdentityValidation.isValidSteamId64(line.value));
+    if (invalid.length > 0) {
+        const numbers = invalid.slice(0, 10).map(line => line.number).join(', ');
+        throw new Error(`Invalid SteamID64 on line${invalid.length === 1 ? '' : 's'} ${numbers}${
+            invalid.length > 10 ? ` (+${invalid.length - 10})` : ''}; use one complete SteamID64 per line.`);
+    }
+    const steamIds = [...new Set(lines.map(line => line.value))];
+    return Object.freeze({
+        steamIds: Object.freeze(steamIds),
+        duplicateLineCount: lines.length - steamIds.length
+    });
+}
+
+/** @param {string} steamId @param {readonly any[]} candidates @param {any} scope */
+function textSteamIdEntry(steamId, candidates, scope) {
+    const matches = candidates.filter(candidate => `${candidate && candidate.steamId || ''}` === steamId);
+    const battlemetricsIds = [...new Set(matches.map(candidate => `${candidate.battlemetricsPlayerId || ''}`)
+        .filter(value => /^\d{1,32}$/u.test(value)))];
+    const live = battlemetricsIds.filter(id => scope.battlemetrics && scope.battlemetrics.players &&
+        scope.battlemetrics.players[id] && scope.battlemetrics.players[id].status === true);
+    const battlemetricsPlayerId = live.length === 1 ? live[0] : battlemetricsIds.length === 1 ?
+        battlemetricsIds[0] : null;
+    const current = battlemetricsPlayerId && scope.battlemetrics && scope.battlemetrics.players &&
+        scope.battlemetrics.players[battlemetricsPlayerId];
+    const currentName = Layout.cleanText(current && current.name || '');
+    const aliases = [...new Set(matches.map(candidate => Layout.cleanText(candidate.name || '')).filter(Boolean))];
+    const name = currentName || (aliases.length === 1 ? aliases[0] : null);
+    return Object.freeze({
+        steamId,
+        battlemetricsPlayerId,
+        name,
+        caseFidelity: true,
+        ambiguous: false,
+        alternatives: Object.freeze([]),
+        identityConfidence: 'verified'
+    });
+}
+
+/** @param {any} client @param {any} source @param {readonly string[]} steamIds
+ * @param {number} duplicateLineCount @param {string|null} requesterUserId @param {string} reference */
+async function prepareSteamIdTextImport(client, source, steamIds, duplicateLineCount, requesterUserId, reference) {
+    const context = contextFor(client, source);
+    const scope = Runtime.getScope(context);
+    if (!scope) throw new Error('Active BattleMetrics server is unavailable.');
+    const dependencies = importDependencies(client);
+    const loadCandidates = dependencies.identityCandidates || Runtime.identityCandidates;
+    const candidates = await loadCandidates(context);
+    if (!Array.isArray(candidates)) throw new TypeError('Identity candidate provider returned an invalid result.');
+    const entries = Object.freeze(steamIds.map(steamId => textSteamIdEntry(steamId, candidates, scope)));
+    const parsed = Object.freeze({
+        kind: 'f7',
+        textSteamIdList: true,
+        complete: true,
+        entries,
+        duplicateLineCount,
+        rejectedPartialIds: Object.freeze([]),
+        idRowsRefined: 0,
+        errors: Object.freeze([])
+    });
+    const hash = Crypto.createHash('sha256').update('steamid-text-list-v1\n')
+        .update([...steamIds].sort().join('\n')).digest('hex');
+    const items = Object.freeze([Object.freeze({ parsed, sha256: hash, reference })]);
+    const timing = Object.freeze({
+        activeWipeId: scope.wipeId,
+        itemTimings: Object.freeze([Object.freeze({
+            wipeId: scope.wipeId, wipeStart: scope.wipeStart, observedAt: null, historical: false
+        })]),
+        historical: false,
+        requiresActiveWipe: false,
+        timingText: null
+    });
+    const token = Crypto.randomBytes(12).toString('hex');
+    const createdAt = Date.now();
+    pending.set(token, Object.freeze({
+        guildId: `${source.guildId}`,
+        channelId: `${source.channelId}`,
+        userId: requesterUserId,
+        serverKey: scope.serverKey,
+        ...timing,
+        captureTime: null,
+        visualFile: null,
+        correctionFile: null,
+        items,
+        createdAt,
+        expiresAt: createdAt + TTL_MS
+    }));
+    return Object.freeze({
+        content: previewItems(items),
+        components: actionRows(token, items),
+        allowedMentions: { parse: [] }
+    });
 }
 
 /** @param {unknown} words @param {number} scale */
@@ -984,7 +1112,23 @@ async function handleMessage({ client, message }) {
     const kindMatch = content.match(/^(cinfo|f7)(?:\s|$)/i);
     const attachments = message.attachments && typeof message.attachments.values === 'function' ?
         [...message.attachments.values()] : [];
-    if (attachments.length < 1 || attachments.length > 10) {
+    if (attachments.length === 0) {
+        try {
+            const list = parseSteamIdTextList(content);
+            const payload = await prepareSteamIdTextImport(client, message, list.steamIds,
+                list.duplicateLineCount, webhookId ? null : `${message.author.id}`,
+                `discord-message:${message.id}:steamid-text-list`);
+            await message.reply(payload);
+        }
+        catch (error) {
+            await message.reply({
+                content: `Text import failed safely: ${sanitizeError(error)} Nothing was committed.`,
+                components: [], allowedMentions: { parse: [] }
+            });
+        }
+        return true;
+    }
+    if (attachments.length > 10) {
         await message.reply({
             content: 'Attach between 1 and 10 PNG/JPEG/WebP images. Type detection is automatic. Nothing was committed.',
             allowedMentions: { parse: [] }
@@ -1021,10 +1165,34 @@ function sanitizeError(error) {
         .replace(/\s+/g, ' ').trim().slice(0, 300);
 }
 
-/** @param {any} client @param {any} interaction @param {string} content */
-async function respondButton(client, interaction, content) {
-    await client.interactionUpdate(interaction, {
+/** @param {any} interaction */
+async function acknowledgeButton(interaction) {
+    if (interaction.deferred === true || interaction.replied === true) return true;
+    if (typeof interaction.deferUpdate !== 'function') return false;
+    await interaction.deferUpdate();
+    return true;
+}
+
+/** @param {any} client @param {any} interaction @param {any} payload @param {boolean} acknowledged */
+async function updateButton(client, interaction, payload, acknowledged) {
+    if (acknowledged) return client.interactionEditReply(interaction, payload);
+    return client.interactionUpdate(interaction, payload);
+}
+
+/** @param {any} client @param {any} interaction @param {string} content @param {boolean} acknowledged */
+async function respondButton(client, interaction, content, acknowledged = false) {
+    await updateButton(client, interaction, {
         content, embeds: [], components: [], allowedMentions: { parse: [] }
+    }, acknowledged);
+}
+
+/** @param {string} key @param {()=>Promise<any>} operation */
+function enqueueDecision(key, operation) {
+    const previous = decisionQueues.get(key) || Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    decisionQueues.set(key, current);
+    return current.finally(() => {
+        if (decisionQueues.get(key) === current) decisionQueues.delete(key);
     });
 }
 
@@ -1134,61 +1302,21 @@ async function resolveCorrectedItem(context, pendingItem, itemIndex, corrected, 
     });
 }
 
-/** @param {{client:any,interaction:any}} value */
-async function handleButton({ client, interaction }) {
-    const confirm = interaction.customId.startsWith(CONFIRM_PREFIX);
-    const reject = interaction.customId.startsWith(REJECT_PREFIX);
-    const replace = interaction.customId.startsWith(REPLACE_PREFIX);
-    const keep = interaction.customId.startsWith(KEEP_PREFIX);
-    const editMatch = new RegExp(`^${EDIT_PREFIX}([a-f0-9]{24}):(\\d{1,2})$`, 'u')
-        .exec(interaction.customId);
-    if (!confirm && !reject && !replace && !keep && !editMatch) return false;
-    const token = editMatch ? editMatch[1] :
-        interaction.customId.slice((confirm ? CONFIRM_PREFIX : reject ? REJECT_PREFIX :
-            replace ? REPLACE_PREFIX : KEEP_PREFIX).length);
-    const item = pending.get(token);
-    if (!item || item.expiresAt < Date.now()) {
-        if (item) pending.delete(token);
-        await respondButton(client, interaction, 'Import expired or already handled. Nothing was changed.');
-        return true;
+/** @param {any} client @param {any} interaction @param {string} token @param {any} item
+ * @param {boolean} confirm @param {boolean} replace @param {boolean} keep @param {boolean} acknowledged */
+async function executeDecision(client, interaction, token, item, confirm, replace, keep, acknowledged) {
+    const current = pending.get(token);
+    if (current !== item || item.expiresAt < Date.now()) {
+        if (current === item) pending.delete(token);
+        await respondButton(client, interaction, 'Import expired or already handled. Nothing was changed.', acknowledged);
+        return;
     }
-    if ((item.userId !== null && `${interaction.user.id}` !== item.userId) ||
-        `${interaction.guildId}` !== item.guildId || `${interaction.channelId}` !== item.channelId) {
-        await client.interactionReply(interaction, {
-            content: 'Only the requester can confirm this import in its original channel.', ephemeral: true
-        });
-        return true;
-    }
-    if (editMatch) {
-        if (!await client.validatePermissions(interaction)) return true;
-        const index = Number(editMatch[2]);
-        const target = item.items[index];
-        if (!Number.isSafeInteger(index) || !target || target.parsed.kind !== 'cinfo') {
-            await client.interactionReply(interaction, {
-                content: 'This cinfo block is no longer editable. Nothing was changed.', ephemeral: true
-            });
-            return true;
-        }
-        await interaction.showModal(rosterEditModal(token, index, target));
-        return true;
-    }
-    if (reject) {
-        pending.delete(token);
-        await respondButton(client, interaction, 'Import rejected. Nothing was changed.');
-        return true;
-    }
-    if ((replace || keep) && !Array.isArray(item.duplicatePrompt)) {
-        pending.delete(token);
-        await respondButton(client, interaction, 'Replacement preview is no longer available. Nothing was changed.');
-        return true;
-    }
-    if (!await client.validatePermissions(interaction)) return true;
     const context = contextFor(client, interaction);
     const scope = Runtime.getScope(context);
     if (!pendingScopeMatches(scope, item)) {
         pending.delete(token);
-        await respondButton(client, interaction, 'Active server or wipe changed. Nothing was committed.');
-        return true;
+        await respondButton(client, interaction, 'Active server or wipe changed. Nothing was committed.', acknowledged);
+        return;
     }
     let result;
     try {
@@ -1204,7 +1332,9 @@ async function handleButton({ client, interaction }) {
                 } : {})
             }
         }));
-        result = await Runtime.commitParsedImports(context, imports, {
+        const dependencies = importDependencies(client);
+        const commitImports = dependencies.commitParsedImports || Runtime.commitParsedImports;
+        result = await commitImports(context, imports, {
             onDuplicate: replace ? 'replace' : keep ? 'skip' : 'prompt',
             expectedDuplicates: replace ? item.duplicatePrompt.map((/** @type {any} */ group) => ({
                 hash: group.hash,
@@ -1215,17 +1345,17 @@ async function handleButton({ client, interaction }) {
     catch (error) {
         pending.delete(token);
         await respondButton(client, interaction,
-            `Import failed safely: ${sanitizeError(error)} Nothing was committed.`);
-        return true;
+            `Import failed safely: ${sanitizeError(error)} Nothing was committed.`, acknowledged);
+        return;
     }
     if (confirm && result.duplicate) {
         const updated = Object.freeze({ ...item, duplicatePrompt: result.existing });
         pending.set(token, updated);
-        await client.interactionUpdate(interaction, {
+        await updateButton(client, interaction, {
             content: replacementPreview(item.items, result.existing),
             embeds: [], components: actionRows(token, item.items, 'replace'), allowedMentions: { parse: [] }
-        });
-        return true;
+        }, acknowledged);
+        return;
     }
     pending.delete(token);
     const message = replace ?
@@ -1235,7 +1365,7 @@ async function handleButton({ client, interaction }) {
             `Existing duplicate(s) kept; ${result.imported} new block(s) committed (${result.appended} events).` :
             `Import committed (${result.imported} block${result.imported === 1 ? '' : 's'}, ${
                 result.appended} event${result.appended === 1 ? '' : 's'}).`;
-    await respondButton(client, interaction, message);
+    await respondButton(client, interaction, message, acknowledged);
     if (!result.duplicate) {
         const committedHashes = new Set(result.committedHashes || []);
         const committedItems = item.items.filter((/** @type {any} */ entry) =>
@@ -1285,6 +1415,122 @@ async function handleButton({ client, interaction }) {
         }
         void recrossWarBandits(context,
             committedItems.map((/** @type {any} */ entry) => entry.parsed), client);
+    }
+}
+
+/** @param {{client:any,interaction:any}} value */
+async function handleButton({ client, interaction }) {
+    const confirm = interaction.customId.startsWith(CONFIRM_PREFIX);
+    const reject = interaction.customId.startsWith(REJECT_PREFIX);
+    const replace = interaction.customId.startsWith(REPLACE_PREFIX);
+    const keep = interaction.customId.startsWith(KEEP_PREFIX);
+    const editMatch = new RegExp(`^${EDIT_PREFIX}([a-f0-9]{24}):(\\d{1,2})$`, 'u')
+        .exec(interaction.customId);
+    if (!confirm && !reject && !replace && !keep && !editMatch) return false;
+    const token = editMatch ? editMatch[1] :
+        interaction.customId.slice((confirm ? CONFIRM_PREFIX : reject ? REJECT_PREFIX :
+            replace ? REPLACE_PREFIX : KEEP_PREFIX).length);
+    if (decisionClaims.has(token)) {
+        const acknowledged = await acknowledgeButton(interaction);
+        if (!acknowledged) {
+            await client.interactionReply(interaction, {
+                content: 'This import is already being processed. Wait for its result.', ephemeral: true
+            });
+        }
+        return true;
+    }
+    const item = pending.get(token);
+    if (!item || item.expiresAt < Date.now()) {
+        if (item) pending.delete(token);
+        const acknowledged = await acknowledgeButton(interaction);
+        await respondButton(client, interaction, 'Import expired or already handled. Nothing was changed.', acknowledged);
+        return true;
+    }
+    if ((item.userId !== null && `${interaction.user.id}` !== item.userId) ||
+        `${interaction.guildId}` !== item.guildId || `${interaction.channelId}` !== item.channelId) {
+        await client.interactionReply(interaction, {
+            content: 'Only the requester can confirm this import in its original channel.', ephemeral: true
+        });
+        return true;
+    }
+    if (editMatch) {
+        if (!await client.validatePermissions(interaction)) return true;
+        if (decisionClaims.has(token)) {
+            await client.interactionReply(interaction, {
+                content: 'This import is already being processed. Wait for its result.', ephemeral: true
+            });
+            return true;
+        }
+        const index = Number(editMatch[2]);
+        const target = item.items[index];
+        if (!Number.isSafeInteger(index) || !target || target.parsed.kind !== 'cinfo') {
+            await client.interactionReply(interaction, {
+                content: 'This cinfo block is no longer editable. Nothing was changed.', ephemeral: true
+            });
+            return true;
+        }
+        await interaction.showModal(rosterEditModal(token, index, target));
+        return true;
+    }
+    if (decisionClaims.has(token)) {
+        const acknowledged = await acknowledgeButton(interaction);
+        if (!acknowledged) {
+            await client.interactionReply(interaction, {
+                content: 'This import is already being processed. Wait for its result.', ephemeral: true
+            });
+        }
+        return true;
+    }
+    if (reject) {
+        decisionClaims.add(token);
+        try {
+            const acknowledged = await acknowledgeButton(interaction);
+            pending.delete(token);
+            await respondButton(client, interaction, 'Import rejected. Nothing was changed.', acknowledged);
+        }
+        finally {
+            decisionClaims.delete(token);
+        }
+        return true;
+    }
+    if ((replace || keep) && !Array.isArray(item.duplicatePrompt)) {
+        pending.delete(token);
+        const acknowledged = await acknowledgeButton(interaction);
+        await respondButton(client, interaction,
+            'Replacement preview is no longer available. Nothing was changed.', acknowledged);
+        return true;
+    }
+    if (!await client.validatePermissions(interaction)) return true;
+    if (decisionClaims.has(token)) {
+        const acknowledged = await acknowledgeButton(interaction);
+        if (!acknowledged) {
+            await client.interactionReply(interaction, {
+                content: 'This import is already being processed. Wait for its result.', ephemeral: true
+            });
+        }
+        return true;
+    }
+    decisionClaims.add(token);
+    let acknowledged = false;
+    try {
+        acknowledged = await acknowledgeButton(interaction);
+        const queueKey = `${item.guildId}:${item.serverKey}`;
+        const queued = decisionQueues.has(queueKey);
+        await updateButton(client, interaction, {
+            content: queued ? 'Import queued behind another intelligence update…' : 'Import processing…',
+            embeds: [], components: [], allowedMentions: { parse: [] }
+        }, acknowledged);
+        await enqueueDecision(queueKey, () =>
+            executeDecision(client, interaction, token, item, confirm, replace, keep, acknowledged));
+    }
+    catch (error) {
+        if (!acknowledged) throw error;
+        pending.delete(token);
+        await respondButton(client, interaction,
+            `Import failed safely: ${sanitizeError(error)} Nothing was committed.`, true);
+    }
+    finally {
+        decisionClaims.delete(token);
     }
     return true;
 }
@@ -1340,32 +1586,44 @@ async function handleModal({ client, interaction }) {
         });
         return true;
     }
-    await interaction.deferUpdate();
-    try {
-        const corrected = await resolveCorrectedItem(context, item, index, correctedForm, client);
-        const items = Object.freeze(item.items.map((/** @type {any} */ entry, /** @type {number} */ itemIndex) =>
-            itemIndex === index ? corrected : entry));
-        const timing = await resolveImportTiming(context, items, scope, item.captureTime ?? null);
-        const preview = item.duplicatePrompt ? replacementPreview(items, item.duplicatePrompt) :
-            timedPreview(items, timing.timingText || null);
-        if (Array.from(preview).length > 1900) {
-            throw new Error('Corrected preview exceeds the Discord limit; split the upload into smaller batches.');
-        }
-        pending.set(token, Object.freeze({ ...item, ...timing, items }));
-        await client.interactionEditReply(interaction, {
-            content: preview, components: actionRows(token, items, item.duplicatePrompt ? 'replace' : 'confirm'),
-            embeds: [], allowedMentions: { parse: [] }
+    if (decisionClaims.has(token)) {
+        await client.interactionReply(interaction, {
+            content: 'This import is already being processed. Wait for its result.', ephemeral: true
         });
+        return true;
     }
-    catch (error) {
-        const preview = item.duplicatePrompt ? replacementPreview(item.items, item.duplicatePrompt) :
-            timedPreview(item.items, item.timingText || null);
-        await client.interactionEditReply(interaction, {
-            content: `${preview}\nCinfo correction rejected safely: ${sanitizeError(error)} Preview unchanged.`
-                .slice(0, 1900),
-            components: actionRows(token, item.items, item.duplicatePrompt ? 'replace' : 'confirm'),
-            embeds: [], allowedMentions: { parse: [] }
-        });
+    decisionClaims.add(token);
+    try {
+        await interaction.deferUpdate();
+        try {
+            const corrected = await resolveCorrectedItem(context, item, index, correctedForm, client);
+            const items = Object.freeze(item.items.map((/** @type {any} */ entry, /** @type {number} */ itemIndex) =>
+                itemIndex === index ? corrected : entry));
+            const timing = await resolveImportTiming(context, items, scope, item.captureTime ?? null);
+            const preview = item.duplicatePrompt ? replacementPreview(items, item.duplicatePrompt) :
+                timedPreview(items, timing.timingText || null);
+            if (Array.from(preview).length > 1900) {
+                throw new Error('Corrected preview exceeds the Discord limit; split the upload into smaller batches.');
+            }
+            pending.set(token, Object.freeze({ ...item, ...timing, items }));
+            await client.interactionEditReply(interaction, {
+                content: preview, components: actionRows(token, items, item.duplicatePrompt ? 'replace' : 'confirm'),
+                embeds: [], allowedMentions: { parse: [] }
+            });
+        }
+        catch (error) {
+            const preview = item.duplicatePrompt ? replacementPreview(item.items, item.duplicatePrompt) :
+                timedPreview(item.items, item.timingText || null);
+            await client.interactionEditReply(interaction, {
+                content: `${preview}\nCinfo correction rejected safely: ${sanitizeError(error)} Preview unchanged.`
+                    .slice(0, 1900),
+                components: actionRows(token, item.items, item.duplicatePrompt ? 'replace' : 'confirm'),
+                embeds: [], allowedMentions: { parse: [] }
+            });
+        }
+    }
+    finally {
+        decisionClaims.delete(token);
     }
     return true;
 }
@@ -1375,6 +1633,7 @@ module.exports = Object.freeze({
     EDIT_MODAL_PREFIX,
     EDIT_PREFIX,
     KEEP_PREFIX,
+    MAX_TEXT_STEAM_IDS,
     REPLACE_PREFIX,
     REJECT_PREFIX,
     TTL_MS,
@@ -1385,6 +1644,7 @@ module.exports = Object.freeze({
     handleButton,
     handleModal,
     normalizeWebhookIds,
+    parseSteamIdTextList,
     parseCorrectedCinfo,
     parseCorrectedRoster,
     previewItems,

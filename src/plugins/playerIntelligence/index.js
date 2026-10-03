@@ -8,6 +8,15 @@ const { projectClans } = require('./clanProjector.js');
 const { projectPresence } = require('./presenceProjector.js');
 const { projectWipes } = require('./wipeProjector.js');
 
+/** @typedef {Readonly<{
+ * identities:ReturnType<typeof projectIdentities>,
+ * clans:ReturnType<typeof projectClans>,
+ * presence:ReturnType<typeof projectPresence>,
+ * wipes:ReturnType<typeof projectWipes>
+ * }>} Projection */
+/** @type {WeakMap<readonly Readonly<Record<string, any>>[], Projection>} */
+const rebuildCache = new WeakMap();
+
 /** @param {readonly Readonly<Record<string, any>>[]} events */
 function effectiveEvents(events) {
     const canonical = events.map(event => Contracts.createEvent(event));
@@ -31,16 +40,21 @@ function effectiveEvents(events) {
         !superseded.has(event.eventId)));
 }
 
-/** @param {readonly Readonly<Record<string, any>>[]} events */
+/** @param {readonly Readonly<Record<string, any>>[]} events @returns {Projection} */
 function rebuild(events) {
+    if (Object.isFrozen(events) && rebuildCache.has(events)) {
+        return /** @type {Projection} */ (rebuildCache.get(events));
+    }
     const canonical = effectiveEvents(events);
     const identities = projectIdentities(canonical);
-    return Contracts.deepFreeze({
+    const projection = Contracts.deepFreeze({
         identities,
         clans: projectClans(canonical, identities),
         presence: projectPresence(canonical, identities),
         wipes: projectWipes(canonical)
     });
+    if (Object.isFrozen(events)) rebuildCache.set(events, projection);
+    return projection;
 }
 
 module.exports = Object.freeze({

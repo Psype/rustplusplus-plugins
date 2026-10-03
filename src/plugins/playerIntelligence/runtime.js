@@ -3,6 +3,7 @@ const Crypto = require('node:crypto');
 const Path = require('node:path');
 
 const Core = require('./index.js');
+const PlayerScanDaemon = require('./scanDaemon.js');
 
 const COLLECTOR_VERSION = 'player-intelligence-1';
 const DATA_DIRECTORY = Path.join(__dirname, '..', '..', '..', 'data', 'player-intelligence');
@@ -168,6 +169,22 @@ function getStore(context, scope) {
     const dependencies = getDependencies(context);
     if (dependencies.store) return dependencies.store;
     return new Core.JsonlHistoryStore({ directory: getDataDirectory(context, scope) });
+}
+
+/** @param {any} context @param {any} scope @param {any} store @param {any} dependencies */
+function schedulePlayerScan(context, scope, store, dependencies) {
+    if (!dependencies.playerScanDaemon && !dependencies.warBanditsProvider) return;
+    const daemon = dependencies.playerScanDaemon || PlayerScanDaemon;
+    if (!daemon || typeof daemon.schedule !== 'function') return;
+    const directory = typeof store.directory === 'string' ? store.directory : getDataDirectory(context, scope);
+    daemon.schedule({
+        context,
+        scope,
+        store,
+        directory,
+        dependencies,
+        warBanditsProvider: dependencies.warBanditsProvider || null
+    });
 }
 
 /** @param {string} kind @param {any} scope @param {any} subject @param {any} payload @param {any} details */
@@ -352,7 +369,10 @@ async function onBattlemetricsUpdated(context) {
     const previousHookState = stateKey ? hookStates.get(stateKey) : null;
     if (previousHookState && previousHookState.reliable === reliable && !hasDeltas &&
         previousHookState.wipeId === scope.wipeId && previousHookState.trackerFingerprint === trackerFingerprint &&
-        previousHookState.legacyFingerprint === legacyFingerprint) return;
+        previousHookState.legacyFingerprint === legacyFingerprint) {
+        schedulePlayerScan(context, scope, store, dependencies);
+        return;
+    }
     const existing = await store.readAll();
     const projection = Core.rebuild(existing);
     const recordedAt = nowIso(dependencies);
@@ -391,6 +411,7 @@ async function onBattlemetricsUpdated(context) {
         if (stateKey) hookStates.set(stateKey, {
             reliable, wipeId: scope.wipeId, trackerFingerprint, legacyFingerprint
         });
+        schedulePlayerScan(context, scope, store, dependencies);
         return;
     }
 
@@ -453,6 +474,7 @@ async function onBattlemetricsUpdated(context) {
     if (stateKey) hookStates.set(stateKey, {
         reliable, wipeId: scope.wipeId, trackerFingerprint, legacyFingerprint
     });
+    schedulePlayerScan(context, scope, store, dependencies);
 }
 
 /** @param {any} context */
@@ -483,19 +505,14 @@ function handled(response) {
 /** @param {any} projection @param {string} query */
 function resolveQuery(projection, query) {
     if (!query || query.length > MAX_QUERY_LENGTH) return Object.freeze({ person: null, matches: [] });
-    const exactId = projection.identities.persons.filter((/** @type {any} */ person) => person.steamId === query ||
-        person.battlemetricsPlayerIds.includes(query));
+    const exactId = projection.identities.findByIdentifier(query);
     if (exactId.length === 1) return Object.freeze({ person: exactId[0], matches: exactId });
-    const key = normalize(query);
-    const names = projection.identities.persons.filter((/** @type {any} */ person) => person.names.some(
-        (/** @type {any} */ alias) =>
-        normalize(alias.name) === key));
+    const names = projection.identities.findByExactName(query);
     if (names.length > 0) return Object.freeze({ person: names.length === 1 ? names[0] : null, matches: names });
     const inferred = projection.identities.resolveSubject({
         steamId: null, battlemetricsPlayerId: null, exactName: query
     });
-    const person = inferred.ambiguous ? null : projection.identities.persons.find((/** @type {any} */ item) =>
-        item.personId === inferred.personId) || null;
+    const person = inferred.ambiguous ? null : projection.identities.getPerson(inferred.personId);
     return Object.freeze({ person, matches: person ? [person] : [] });
 }
 
@@ -667,6 +684,18 @@ function validateParsedImport(parsed, metadata, scope) {
     if (!['cinfo', 'f7'].includes(parsed.kind)) throw new TypeError('Unsupported import kind.');
     if (!scope.wipeId && parsed.kind === 'cinfo') throw new Error('Current wipe is unknown; import was not committed.');
     if (parsed.kind === 'f7' && !parsed.complete) throw new Error('Import contains unresolved F7 OCR errors.');
+    if (parsed.kind === 'f7' && parsed.textSteamIdList === true) {
+        if (!Array.isArray(parsed.entries) || parsed.entries.length < 1 || parsed.entries.length > 100 ||
+            new Set(parsed.entries.map((/** @type {any} */ entry) => entry.steamId)).size !== parsed.entries.length ||
+            parsed.entries.some((/** @type {any} */ entry) => !/^7656119\d{10}$/u.test(`${entry.steamId || ''}`) ||
+                (entry.battlemetricsPlayerId !== null && entry.battlemetricsPlayerId !== undefined &&
+                    !/^\d{1,32}$/u.test(`${entry.battlemetricsPlayerId}`)) ||
+                (entry.name !== null && entry.name !== undefined &&
+                    (typeof entry.name !== 'string' || !sanitize(entry.name) ||
+                        Array.from(entry.name).length > 128)))) {
+            throw new Error('SteamID text import is invalid.');
+        }
+    }
     if (parsed.kind === 'cinfo' && parsed.complete !== true && parsed.importable !== true) {
         throw new Error('Import does not contain enough cinfo structure for a partial snapshot.');
     }
@@ -705,16 +734,21 @@ function importEvents(context, scope, parsed, metadata, recordedAt, revision = n
     const hash = `${metadata.sha256}`.toLowerCase();
     const sourceBase = revision === null ? hash : `${hash}:revision:${revision}`;
     const observedAt = canonicalIso(metadata.observedAt) || recordedAt;
+    const textSteamIdList = parsed.kind === 'f7' && parsed.textSteamIdList === true;
     const common = { guildId: context.guildId, observedAt, recordedAt,
-        source: parsed.kind === 'cinfo' ? 'discord-cinfo' : 'discord-f7', confidence: 'verified',
+        source: parsed.kind === 'cinfo' ? 'discord-cinfo' :
+            textSteamIdList ? 'discord-steamid-list' : 'discord-f7', confidence: 'verified',
         evidence: { hash, reference: metadata.reference || null, expiresAt: null } };
     const events = [];
     if (parsed.kind === 'f7') {
         parsed.entries.forEach((/** @type {any} */ entry, /** @type {number} */ index) =>
             events.push(identityEvent(scope, {
-            steamId: entry.steamId, battlemetricsPlayerId: null, name: entry.name, caseFidelity: false
+            steamId: entry.steamId,
+            battlemetricsPlayerId: textSteamIdList ? entry.battlemetricsPlayerId || null : null,
+            name: entry.name,
+            caseFidelity: textSteamIdList ? entry.caseFidelity !== false : false
         }, { ...common, confidence: entry.identityConfidence || common.confidence,
-            sourceEventId: `${sourceBase}:f7:${index}:${entry.steamId}` })));
+            sourceEventId: `${sourceBase}:${textSteamIdList ? 'steamid-list' : 'f7'}:${index}:${entry.steamId}` })));
     }
     else {
         const resolvedMembers = Array.isArray(parsed.resolvedMembers) ? parsed.resolvedMembers :

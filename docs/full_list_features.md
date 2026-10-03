@@ -12,8 +12,9 @@
 - **/help** - Get help message.
 - **/intelimport** - OCR, preview, and confirm `/cinfo` or F7 screenshots without fixed pixel coordinates.
 - **intel-imports channel** - Drop 1–10 screenshots manually or through the allowlisted Windows region-capture
-  webhook. F7 versus `/cinfo` and repeated `/cinfo` panels are detected semantically; every batch still requires a
-  Discord confirmation.
+  webhook, or paste 1–100 complete SteamID64 values with one ID per line. F7 versus `/cinfo` and repeated `/cinfo`
+  panels are detected semantically; every image or text batch still requires a Discord confirmation. Renaming the
+  configured channel (for example to `intel-reports`) is safe because routing uses its Discord ID.
 - **/item** - Get the details of an item.
 - **/leader** - Transfer leadership.
 - **/map** - Display the In-Game Map.

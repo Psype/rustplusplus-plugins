@@ -124,7 +124,9 @@ Deux entrées peuvent alimenter exactement le même pipeline serveur :
   canal privé `intel-imports`, créé automatiquement, accepte aussi 1 à 10 images sans légende obligatoire. Le type est
   détecté par les ancres OCR ; un préfixe `cinfo` ou `f7` reste un indice strict facultatif pour toutes les pièces
   jointes. Plusieurs panneaux `/cinfo` empilés dans une image sont séparés par les répétitions de `ClanTag`, jamais par
-  des coordonnées fixes, puis validés bloc par bloc avant une confirmation groupée ;
+  des coordonnées fixes, puis validés bloc par bloc avant une confirmation groupée. Un message texte seul accepte
+  aussi 1 à 100 SteamID64 complets, un par ligne, avec aperçu et confirmation identiques. Les identités locales uniques
+  enrichissent l'aperçu ; un ID inconnu est conservé sans pseudo inventé puis confié au daemon d'enrichissement ;
 - **helper Windows facultatif** : capture partielle déclenchée par l'utilisateur, sans coordonnées fixes, puis envoi de
   l'image originale au même pipeline. Le helper capture et transporte seulement ; l'OCR, la validation, la fusion et
   le stockage restent autoritaires dans le bot Linux. Il ne réalise aucune capture continue et ne contourne jamais la
@@ -340,6 +342,17 @@ capture fournie ; aucune position d'écran absolue ni boucle d'un processus par 
 lecture valide peut corriger un chiffre-vers-chiffre qui produisait malgré tout un SteamID64 de forme valide, ou
 compléter une ligne tronquée. Les doublons, lignes décalées, sorties hors plage et planches de plus de 8 millions de
 pixels échouent sans modifier l'interprétation précédente.
+
+La version 1.22.17 supprime le principal coût des commandes `!affinity` répétées. Le journal JSONL conserve en mémoire
+un snapshot immuable par serveur tout en vérifiant à chaque accès la liste, la taille et la date de modification des
+shards : une modification externe ou une corruption force donc une relecture validée et échoue toujours de façon
+fermée. Une écriture confirmée produit une nouvelle référence de snapshot et invalide automatiquement la projection
+mise en cache. Les identités sont indexées par SteamID64, identifiant BattleMetrics et pseudo exact normalisé ; les
+relations `Played with` utilisent un index d'adjacence symétrique par joueur. Les snapshots complets ne construisent
+plus l'index de rapprochement flou réservé aux membres réellement non résolus. Sur le benchmark local de 300 joueurs,
+600 snapshots et 900 événements, la commande chaude moyenne passe de 53,27 ms en reconstruction forcée à 0,67 ms,
+soit environ 79,5 fois plus rapide. Le premier chargement après démarrage ou après une écriture reste volontairement
+une reconstruction complète et validée.
 
 Ces identités exactes enrichissent ensuite un dictionnaire de candidats commun à F7, `/cinfo`, chat et clans. Le roster
 peut être reconnu de façon contrainte en comparant chaque segment visuel aux alias déjà connus et, si utile, à leur
@@ -711,6 +724,15 @@ Le plugin consomme le poll BattleMetrics existant via un hook d'observation ; au
 changements et frontières de wipe valides, pas 200 états identiques chaque minute. Une panne fournisseur produit une
 observation `unknown`, jamais des déconnexions synthétiques.
 
+Depuis `1.22.18`, ce hook cadence aussi un daemon d'identités asynchrone et coalescé. Lorsqu'un BattleMetrics ID en
+ligne est déjà relié à un SteamID64, son pseudo courant est réobservé une seule fois par wipe ; les changements de nom
+ultérieurs continuent de passer par le delta BattleMetrics normal. Sur le serveur WarBandits reconnu, le daemon lit
+progressivement `wipe=0` par pages strictes de 100, une page par tick au maximum. Il joint automatiquement un nouveau
+couple seulement si le pseudo normalisé est exact, unique parmi les joueurs en ligne, contient au moins trois
+caractères et ne contredit aucun lien connu. Le curseur, les SteamID déjà vus et les rafraîchissements du wipe sont
+écrits atomiquement dans `scan-daemon.json`; un sweep terminé attend douze heures avant de chercher les nouveaux
+arrivants. Ces observations enrichissent l'identité uniquement : elles ne créent jamais une présence ou une alerte.
+
 ### Stockage
 
 Définir d'abord une interface `HistoryStore`.
@@ -763,9 +785,11 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 `unknown`, et les pixels beige d'anti-crénelage ne peuvent plus promouvoir un membre en leader.
 
 1. **Terminé** : contrats stricts, journal JSONL mensuel durable, projections identité/clan/présence/wipe,
-   déduplication/corruption, hook BattleMetrics global sans second poller et requêtes compactes.
+   déduplication/corruption, hook BattleMetrics global sans second poller, daemon d'identités courant/wipe reprenable
+   et requêtes compactes.
 2. **Terminé fonctionnellement** : imports `/cinfo` et F7 par slash command ou dépôt de 1–10 images dans
-   `intel-imports`, détection sémantique du type, découpage de plusieurs panneaux `/cinfo`, validation de l'image,
+   `intel-imports`, plus collage de 1–100 SteamID64 exacts (un par ligne), détection sémantique du type,
+   découpage de plusieurs panneaux `/cinfo`, validation de l'image,
    Tesseract local sérialisé, regroupement relatif, couleurs de rôles relatives, aperçu/confirmation et remplacement
    explicite ancien/nouveau des hash déjà importés. Le batch est validé entièrement avant son unique append durable ; les webhooks non autorisés
    sont ignorés. Les snapshots partiels, le résolveur Unicode un-à-un, la réévaluation automatique et la corroboration
@@ -773,7 +797,9 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
    mémoire visuelle persistante sont également implémentés. Les rosters complets sont désormais redécoupés relativement
    aux virgules/`and`, avec une ligne image isolée par membre et une seule lecture bornée par panneau. Un roster
    incomplet reçoit aussi une lecture de champ dédiée ; le fallback Edit/Confirm apprend un lexique textuel persistant
-   sans transformer la correction en preuve d'identité ou de glyphe.
+   sans transformer la correction en preuve d'identité ou de glyphe. Les décisions Discord sont acquittées avant tout
+   traitement durable, verrouillées par token et sérialisées par serveur ; le message affiche temporairement
+   `Import processing…` ou `Import queued…` au lieu de dépasser la fenêtre de réponse Discord.
 3. **À calibrer et étendre** : corpus de PNG originaux, précision champ par champ et seuils couleur/OCR sur Linux,
    lectures isolées du tag/compteur, modèle synthétique multi-fontes et moteur de scène multilingue ; les tests
    déterministes utilisent actuellement les textes et boîtes correspondant aux exemples fournis.

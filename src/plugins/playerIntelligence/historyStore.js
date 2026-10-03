@@ -23,22 +23,38 @@ class HistoryCorruptionError extends Error {
 function getSharedState(directory) {
     const key = Path.resolve(directory);
     if (!sharedDirectories.has(key)) {
-        sharedDirectories.set(key, { queue: Promise.resolve(), knownEventIds: null });
+        sharedDirectories.set(key, {
+            queue: Promise.resolve(), knownEventIds: null, cachedEvents: null, diskSignature: null
+        });
     }
     return sharedDirectories.get(key);
 }
 
 /** @param {string} directory */
-async function readAllUnlocked(directory) {
-    let names;
+async function shardNames(directory) {
     try {
-        names = await Fs.promises.readdir(directory);
+        return (await Fs.promises.readdir(directory))
+            .filter(name => /^\d{4}-\d{2}\.jsonl$/u.test(name)).sort();
     }
     catch (error) {
         if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT') return [];
         throw error;
     }
-    const files = names.filter(name => /^\d{4}-\d{2}\.jsonl$/u.test(name)).sort();
+}
+
+/** @param {string} directory @param {readonly string[]} names */
+async function diskSignature(directory, names) {
+    const values = [];
+    for (const name of names) {
+        const stat = await Fs.promises.stat(Path.join(directory, name));
+        values.push(`${name}:${stat.size}:${stat.mtimeMs}`);
+    }
+    return values.join('|');
+}
+
+/** @param {string} directory @param {readonly string[]|null} [names] */
+async function readAllUnlocked(directory, names = null) {
+    const files = names || await shardNames(directory);
     const events = [];
     for (const file of files) {
         const path = Path.join(directory, file);
@@ -55,6 +71,36 @@ async function readAllUnlocked(directory) {
         }
     }
     return events;
+}
+
+/** @param {any} shared @param {string} directory */
+async function loadCachedEvents(shared, directory) {
+    const names = await shardNames(directory);
+    const signature = await diskSignature(directory, names);
+    if (shared.cachedEvents !== null && shared.diskSignature === signature) return shared.cachedEvents;
+    const events = Object.freeze(await readAllUnlocked(directory, names));
+    const verifiedNames = await shardNames(directory);
+    const verifiedSignature = await diskSignature(directory, verifiedNames);
+    if (signature !== verifiedSignature) {
+        throw new Error('Player-intelligence history changed while it was being read.');
+    }
+    shared.cachedEvents = events;
+    shared.diskSignature = signature;
+    shared.knownEventIds = new Set(events.map(item => item.eventId));
+    return events;
+}
+
+/** @param {readonly Readonly<Record<string, any>>[]} existing
+ * @param {readonly Readonly<Record<string, any>>[]} additions */
+function mergeInShardOrder(existing, additions) {
+    const shards = new Map();
+    for (const event of [...existing, ...additions]) {
+        const shard = `${event.recordedAt.slice(0, 7)}.jsonl`;
+        const values = shards.get(shard) || [];
+        values.push(event);
+        shards.set(shard, values);
+    }
+    return Object.freeze([...shards.keys()].sort().flatMap(shard => shards.get(shard)));
 }
 
 class JsonlHistoryStore {
@@ -89,15 +135,15 @@ class JsonlHistoryStore {
         }
         const events = inputs.map(input => Contracts.createEvent(input));
         const operation = this.shared.queue.then(async () => {
-            if (this.shared.knownEventIds === null) {
-                try {
-                    const existing = await readAllUnlocked(this.directory);
-                    this.shared.knownEventIds = new Set(existing.map(item => item.eventId));
-                }
-                catch (error) {
-                    this.shared.knownEventIds = null;
-                    throw error;
-                }
+            let existing;
+            try {
+                existing = await loadCachedEvents(this.shared, this.directory);
+            }
+            catch (error) {
+                this.shared.knownEventIds = null;
+                this.shared.cachedEvents = null;
+                this.shared.diskSignature = null;
+                throw error;
             }
             const batchIds = new Set();
             /** @type {Readonly<Record<string, any>>[]} */
@@ -144,9 +190,20 @@ class JsonlHistoryStore {
             }
             catch (error) {
                 this.shared.knownEventIds = null;
+                this.shared.cachedEvents = null;
+                this.shared.diskSignature = null;
                 throw error;
             }
             additions.forEach(event => this.shared.knownEventIds.add(event.eventId));
+            this.shared.cachedEvents = mergeInShardOrder(existing, additions);
+            try {
+                const names = await shardNames(this.directory);
+                this.shared.diskSignature = await diskSignature(this.directory, names);
+            }
+            catch {
+                this.shared.cachedEvents = null;
+                this.shared.diskSignature = null;
+            }
             return Object.freeze(results.map(result => Object.freeze(result)));
         });
         this.shared.queue = operation.then(() => undefined, () => undefined);
@@ -157,12 +214,12 @@ class JsonlHistoryStore {
     readAll() {
         const operation = this.shared.queue.then(async () => {
             try {
-                const events = await readAllUnlocked(this.directory);
-                this.shared.knownEventIds = new Set(events.map(item => item.eventId));
-                return Object.freeze(events);
+                return await loadCachedEvents(this.shared, this.directory);
             }
             catch (error) {
                 this.shared.knownEventIds = null;
+                this.shared.cachedEvents = null;
+                this.shared.diskSignature = null;
                 throw error;
             }
         });

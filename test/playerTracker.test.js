@@ -547,7 +547,8 @@ Test('poll sync, tracklist and untrack preserve last seen without deleting the n
         playerTrackerDependencies: harness.dependencies,
         playerIntelligenceDependencies: {
             dataDirectory: Path.join(harness.dependencies.dataDirectory, 'player-intelligence'),
-            now: harness.dependencies.now
+            now: harness.dependencies.now,
+            warBanditsProvider: null
         }
     });
 
