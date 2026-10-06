@@ -17,18 +17,22 @@ Avant toute modification :
 4. ne fais ni reset, ni checkout destructif, ni réécriture globale du worktree ;
 5. ne prétends jamais qu’un comportement fonctionne en production sur la seule base des tests locaux.
 
-État observé au dernier audit : branche master, HEAD/origin/master alignés sur la release 1.22.29 et worktree propre.
+État observé avant la release courante : branche master, HEAD/origin/master alignés sur la release 1.22.29 et
+worktree propre. La release 1.22.30 corrige le rejeu idempotent des lots SteamID texte et l'équité de leur file
+d'enrichissement Steam.
 Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; `a308c0a` ajoute la
 1.22.27. La release suivante 1.22.28 groupe les alias pending par identité BattleMetrics et ajoute le fallback
 WarBandits courant -> intervalle historique pertinent -> all-time. La release 1.22.29 centralise toute consolidation
-locale SteamID/BattleMetrics/pseudo et collecte en arrière-plan le nom Steam courant plus ses alias Steam passés.
+locale SteamID/BattleMetrics/pseudo et collecte en arrière-plan le nom Steam courant plus ses alias Steam passés. La
+release 1.22.30 garde la preuve initiale lorsqu'un lot SteamID identique est rejoué, affiche l'enrichissement local
+courant sans Replace/Keep et empêche un profil Steam indisponible de bloquer tous les IDs suivants.
 La première conserve les identifiants de ligne TSV
 Tesseract pour empêcher un pseudo /cinfo replié (U Got Kirkified) d’absorber Established, accepte la confusion l/I/1
 uniquement dans l’ancre et garde une date illisible éditable avec Confirm désactivé. La seconde ajoute la
 réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
 d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La suivante borne les délais de réponse
 Discord/traduction et la dernière fiabilise la sémantique des identités connues et des wipes WarBandits. La dernière
-validation complète a passé 266/266 tests et tsc --noEmit ; le déploiement et la
+validation complète a passé 267/267 tests et tsc --noEmit ; le déploiement et la
 nouvelle capture Discord restent à valider réellement.
 
 Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
@@ -45,8 +49,8 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 - Dépôt : `rustplusplus-plugins`.
 - Branche au moment de la passation : `master`.
-- `HEAD`, `origin/master` et `origin/HEAD` : alignés sur la release `1.22.29` au dernier audit du 6 octobre 2026.
-- Version canonique du worktree : `1.22.29` dans `package.json` et `package-lock.json`.
+- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur la release `1.22.29` avant la release courante.
+- Version canonique du worktree : `1.22.30` dans `package.json` et `package-lock.json`.
 - Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
   métrique d’heures WarBandits.
 - Le commit utilisateur `d327e7d` regroupe les releases `1.22.24` à `1.22.26`, notamment dans :
@@ -91,12 +95,30 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
   - `src/util/scrape.js` et `src/commands/intel.js` ;
   - les tests de consolidation, daemon, Steam et les documentations d'architecture/commandes/sources.
 
+- La release `1.22.30` rend les lots SteamID texte idempotents et la file Steam équitable, notamment dans :
+
+  - `src/plugins/playerIntelligence/importWorkflow.js`, `runtime.js` et `scanDaemon.js` ;
+  - les tests Discord/import et daemon de player-intelligence ;
+  - `package.json`, `package-lock.json`, `MEMORY.md`, `docs/commands.md`, `docs/full_list_features.md` et ce document.
+
 - Il ne reste qu'une branche locale `master`. Les deux anciennes branches `origin/codex/*`, déjà entièrement intégrées,
   ont été supprimées ; le suivi de l'amont est limité à `upstream/master`, avec pruning automatique des références.
 
 Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
 
-## Dernière correction : release 1.22.29
+## Dernière correction : release 1.22.30
+
+Rejouer exactement le même lot texte de SteamID ne passe plus par la logique de remplacement des captures OCR. Le
+nouvel aperçu relit les noms et liens actuels depuis la projection locale ; sa confirmation conserve la preuve
+append-only d'origine, n'ajoute aucun événement de supersession et ne propose jamais Replace/Keep. Les captures image
+réinterprétées gardent, elles, ce choix explicite.
+
+Le checkpoint du daemon distingue maintenant les profils Steam terminés des profils simplement tentés. Une réponse
+Steam absente ou un historique d'alias partiel avance vers l'ID suivant au tick BattleMetrics suivant au lieu de
+monopoliser la file. `!scanplayers` remet seulement les tentatives incomplètes en jeu ; les historiques déjà complets
+restent acquis. La migration du sidecar `scan-daemon.json` vers le schéma 4 est non destructive.
+
+## Correction précédente : release 1.22.29
 
 Toute observation contenant un SteamID64, un BattleMetrics ID ou un pseudo exact traverse désormais la même frontière
 locale avant journalisation. Elle consulte la projection existante, complète les champs manquants lorsqu'un identifiant
@@ -221,7 +243,7 @@ inventer ni commiter silencieusement.
 
 Le 6 octobre 2026, après les releases 1.22.24 à 1.22.29 :
 
-- `npm.cmd test` : `266/266` tests unitaires réussis ;
+- `npm.cmd test` : `267/267` tests unitaires réussis ;
 - `tsc --noEmit -p .` : réussi dans la même commande ;
 - `git diff --check` : aucune erreur ;
 - `npm.cmd run test:autotranslate:live` : réussi en 8,9 s pour six scénarios cumulés ; Bing a atteint sa borne de deux
@@ -312,12 +334,13 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
 
 ## Vérifications de production encore ouvertes
 
-1. Déployer/redémarrer `1.22.29`, vérifier le message `RUSTPLUS v1.22.29 OPERATIONAL`, puis réimporter l’image KIRK
+1. Déployer/redémarrer `1.22.30`, vérifier le message `RUSTPLUS v1.22.30 OPERATIONAL`, puis réimporter l’image KIRK
    originale dans le canal d’intelligence. Exiger `U Got Kirkified` et un `Established` séparé.
 2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent
    des boîtes déterministes et ne remplacent pas ce contrôle.
-3. Vérifier en conditions réelles l’enrichissement progressif WarBandits, les SteamID `[name pending]`, les heures
-   affichées comme borne basse et `!scanplayers` sans inférence de présence.
+3. Vérifier en conditions réelles qu'un lot SteamID identique ne propose plus Replace/Keep, que chaque ID pending est
+   tenté à son tour malgré un profil Steam indisponible, puis contrôler l’enrichissement WarBandits, les heures comme
+   borne basse et `!scanplayers` sans inférence de présence.
 4. Le transport raid/Pair FCM reste non prouvé côté Facepunch malgré une authentification MCS acceptée. Suivre
    `docs/fcm_transport_audit_2026-09-23.md`; `!raidtest` ne valide que la sortie Rust chat.
 5. Continuer à constituer un corpus de PNG originaux variés avant toute affirmation de précision OCR générale ou ajout

@@ -1069,6 +1069,18 @@ function expectedGroupMap(groups) {
     return result;
 }
 
+/** @param {any} item @param {readonly any[]} events */
+function isIdempotentSteamIdTextList(item, events) {
+    if (!item || !item.parsed || item.parsed.kind !== 'f7' || item.parsed.textSteamIdList !== true ||
+        !Array.isArray(item.parsed.entries) || !Array.isArray(events) || events.length < 1 ||
+        events.some(event => event.kind !== 'identity_observed' ||
+            event.provenance.source !== 'discord-steamid-list')) return false;
+    const proposed = item.parsed.entries.map((/** @type {any} */ entry) => `${entry.steamId}`).sort();
+    const previous = events.map((/** @type {any} */ event) => `${event.subject.steamId || ''}`).sort();
+    return proposed.length === previous.length && proposed.every(
+        (/** @type {string} */ steamId, /** @type {number} */ index) => steamId === previous[index]);
+}
+
 /** @param {any} context @param {readonly {parsed:any,metadata:any}[]} imports
  * @param {{onDuplicate?:'prompt'|'skip'|'replace',expectedDuplicates?:readonly any[]}} options */
 async function commitParsedImports(context, imports, options = {}) {
@@ -1097,17 +1109,21 @@ async function commitParsedImports(context, imports, options = {}) {
         throw new TypeError('Duplicate import policy is unsupported.');
     }
     const duplicateImports = imports.filter(item => hashes.has(`${item.metadata.sha256}`.toLowerCase()));
-    const existing = Object.freeze(duplicateImports.map(item => {
+    const duplicateGroups = duplicateImports.map(item => {
         const hash = `${item.metadata.sha256}`.toLowerCase();
         const events = activeByHash.get(hash);
         if (!events || events.length === 0) {
             throw new Error('Duplicate evidence has no effective event revision.');
         }
-        return Object.freeze({ hash, events: Object.freeze([...events]) });
-    }));
+        return Object.freeze({ item, hash, events: Object.freeze([...events]),
+            idempotentTextList: isIdempotentSteamIdTextList(item, events) });
+    });
+    const idempotentTextLists = duplicateGroups.filter(group => group.idempotentTextList).length;
+    const existing = Object.freeze(duplicateGroups.filter(group => !group.idempotentTextList)
+        .map(group => Object.freeze({ hash: group.hash, events: group.events })));
     if (onDuplicate === 'prompt' && existing.length > 0) {
         return Object.freeze({ appended: 0, duplicate: true, duplicates: existing.length,
-            existing, imported: 0, replaced: 0, committedHashes: Object.freeze([]) });
+            existing, idempotentTextLists, imported: 0, replaced: 0, committedHashes: Object.freeze([]) });
     }
     const expected = onDuplicate === 'replace' ? expectedGroupMap(options.expectedDuplicates || []) : new Map();
     const events = [];
@@ -1118,11 +1134,15 @@ async function commitParsedImports(context, imports, options = {}) {
     for (const item of imports) {
         const hash = `${item.metadata.sha256}`.toLowerCase();
         if (hashes.has(hash)) {
+            const previousEvents = activeByHash.get(hash);
+            if (previousEvents && isIdempotentSteamIdTextList(item, previousEvents)) {
+                duplicates += 1;
+                continue;
+            }
             if (onDuplicate === 'skip') {
                 duplicates += 1;
                 continue;
             }
-            const previousEvents = activeByHash.get(hash);
             if (!previousEvents || previousEvents.length === 0) {
                 throw new Error('Duplicate evidence has no effective event revision.');
             }
@@ -1159,10 +1179,11 @@ async function commitParsedImports(context, imports, options = {}) {
     const results = events.length > 0 ? await store.appendMany(events) : [];
     return Object.freeze({
         appended: results.filter((/** @type {any} */ result) => result.appended).length,
-        duplicate: imported === 0 && replaced === 0,
+        duplicate: imported === 0 && replaced === 0 && idempotentTextLists === 0,
         committedHashes: Object.freeze(committedHashes),
         duplicates,
         existing: Object.freeze([]),
+        idempotentTextLists,
         replaced,
         imported
     });

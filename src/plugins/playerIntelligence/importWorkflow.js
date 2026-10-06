@@ -118,7 +118,8 @@ function previewText(parsed) {
             rows.join('\n'),
             parsed.duplicateLineCount > 0 ? `${parsed.duplicateLineCount} duplicate line${
                 parsed.duplicateLineCount === 1 ? '' : 's'} ignored.` : '',
-            'Ready to commit. Missing names will be enriched by the existing background sources.'
+            'Ready to commit. Missing names use bounded Steam/WarBandits background enrichment; ' +
+                '!scanplayers retries incomplete attempts.'
         ].filter(Boolean).join('\n').slice(0, 1900);
     }
     const idOnly = parsed.entries.filter((/** @type {any} */ entry) => !entry.name).length;
@@ -217,6 +218,14 @@ function replacementPreview(items, existing) {
     const body = `Duplicate evidence detected.\n\n${previous}\n\nProposed replacement:\n${previewItems(items)}`;
     const budget = Math.max(0, 1900 - Array.from(footer).length - 2);
     return `${truncateCharacters(body, budget)}\n\n${footer}`;
+}
+
+/** @param {readonly any[]} items */
+function steamIdTextListCounts(items) {
+    const entries = items.filter(item => item && item.parsed && item.parsed.textSteamIdList === true)
+        .flatMap(item => item.parsed.entries || []);
+    const named = entries.filter((/** @type {any} */ entry) => entry.name).length;
+    return Object.freeze({ total: entries.length, named, pending: entries.length - named });
 }
 
 /** @param {any} item */
@@ -1448,7 +1457,13 @@ async function executeDecision(client, interaction, token, item, confirm, replac
         return;
     }
     pending.delete(token);
-    const message = replace ?
+    const textListCounts = steamIdTextListCounts(item.items);
+    const message = result.idempotentTextLists > 0 && !replace && !keep ?
+        `SteamID text list already imported; original evidence kept. Current local enrichment: ${
+            textListCounts.named} named, ${textListCounts.pending} awaiting enrichment. No evidence was replaced.${
+            textListCounts.pending > 0 ?
+                ' Pending IDs remain eligible for background sources; !scanplayers retries incomplete attempts.' :
+                ''}` : replace ?
         `Import replaced (${result.replaced} previous block${result.replaced === 1 ? '' : 's'}, ${
             result.appended} event${result.appended === 1 ? '' : 's'} appended). The previous version is no longer active.` :
         keep ? result.imported === 0 ? 'Existing import kept. Nothing was changed.' :

@@ -145,8 +145,10 @@ Flux actuellement implémenté :
 7. commit du snapshot avant l'accusé de réception Discord. Une panne Discord après commit ne l'annule pas.
 
 La décision reste disponible trente minutes et demeure liée au demandeur, au canal, au serveur et au wipe. Si le hash
-existe déjà, aucune écriture n'a lieu au premier clic : Discord compare la version effective précédente et la proposition,
-puis exige `Replace previous` ou `Keep existing`. Le remplacement conserve l'heure et la position logique du constat,
+d'une image existe déjà, aucune écriture n'a lieu au premier clic : Discord compare la version effective précédente et
+la proposition, puis exige `Replace previous` ou `Keep existing`. Un lot texte de SteamID strictement identique est au
+contraire idempotent : il affiche l'enrichissement local courant et conserve la preuve initiale sans supersession. Le
+remplacement d'image conserve l'heure et la position logique du constat,
 supprime l'ancienne interprétation de toutes les projections et reconstruit identités, clans, affinités et compteurs sans
 ajouter un snapshot visible. Il peut être répété ; un aperçu devenu obsolète échoue sans mutation.
 

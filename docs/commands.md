@@ -185,9 +185,11 @@ manual name override. Existing verified Steam/API aliases remain in their dated 
 such as `ChiCo` is retained as pending correction evidence and as the key used to reinterpret old captures, but it is
 never promoted into the verified alias history of `Ch1co`.
 
-The background daemon also checks one known SteamID64 profile per existing tick, at most once per wipe. The public
-Steam persona is stored as the current verified name and the profile's returned alias history is stored as verified
-past names. These aliases are never inferred from OCR, never prove presence and never outrank the current Steam name.
+The background daemon also checks one known SteamID64 profile per existing tick, at most once automatically per wipe.
+The public Steam persona is stored as the current verified name and the profile's returned alias history is stored as
+verified past names. A failed or partial profile advances to the next queued ID instead of starving it; `!scanplayers`
+retries only those incomplete attempts. These aliases are never inferred from OCR, never prove presence and never
+outrank the current Steam name.
 
 Reprojection is immediate and applies to every retained confirmed `/cinfo` capture. Occurrences from different captures
 are added; two spellings merged to the same Steam identity inside one capture count only once. `unlink` restores the
@@ -311,8 +313,13 @@ ignored. A text-only message may instead contain 1–100 complete SteamID64 valu
 whole-message `text` code fence is accepted). Blank and duplicate lines are ignored; any other line rejects the entire
 lot. The preview reuses a unique locally known name/BattleMetrics ID when available, preserves unknown IDs without
 inventing a name, and requires the same `Confirm import` or `Reject` decision before durable storage. Missing names are
-left for the background identity daemon, which prioritizes one pasted SteamID per BattleMetrics tick through an exact
-WarBandits all-time lookup and stores its current name plus cumulative hours when found. All paths use the same validation, thirty-minute requester/channel/
+left for the background identity daemon, which tries at most one Steam profile and one pasted SteamID per existing
+BattleMetrics tick. WarBandits checks the current wipe, then the relevant recent completed wipe, and only then
+all-time when the narrower scopes are empty; a unique result stores its current name plus cumulative hours. A failed
+Steam profile attempt no longer blocks the IDs behind it. `!scanplayers` explicitly retries incomplete/failed profile
+attempts while leaving already complete Steam histories alone. Reposting an identical SteamID text lot is idempotent:
+the preview reads the latest local names/links, confirmation keeps the original evidence and never asks to replace it.
+All paths use the same validation, thirty-minute requester/channel/
 server binding and durable batch commit logic.
 Import decision buttons are acknowledged before validation or disk work begins. The message temporarily changes to
 `Import processing…` or `Import queued…`; decisions are serialized per server and repeated clicks on the same pending
@@ -772,7 +779,8 @@ Subcommand | Description | Required
 > neither a leaderboard row nor increasing playtime creates presence or login/logout events.
 > The same daemon refreshes at most one known Steam profile per tick and per wipe. It journals the current persona and
 > returned former names separately, so `/intel history` can label verified `[current Steam name]` and
-> `[past Steam alias]` entries without delaying a Discord command.
+> `[past Steam alias]` entries without delaying a Discord command. Failed or partial attempts advance to the next ID;
+> `!scanplayers` retries the incomplete set without rereading completed profile histories.
 > Name lookups share one provider-neutral reconciler. `!intel`, `!steamid`, `!who`, `!affinity` and `!activity` use
 > its read-only `first` mode: exact identifier/name, prefix and contained partial matches are ranked, then the closest
 > deterministic result is returned without a selector. For example, `!intel tree` can select `Cockornut Tree`.

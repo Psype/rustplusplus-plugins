@@ -154,7 +154,7 @@ Test('text-imported SteamIDs receive one prioritized recent-scope WarBandits loo
     Assert.equal(second.targetedLookups, 0);
     Assert.equal(directLookups, 1);
     const state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
-    Assert.equal(state.schemaVersion, 3);
+    Assert.equal(state.schemaVersion, 4);
     Assert.deepEqual(state.targetedLookupSteamIds, [STEAM_D]);
 });
 
@@ -199,11 +199,52 @@ Test('a schema-1 daemon checkpoint upgrades without losing its collected SteamID
     await ScanDaemon.runCycle({ ...value, warBanditsProvider: unavailable, forceWarBanditsRescan: true });
 
     const state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
-    Assert.equal(state.schemaVersion, 3);
+    Assert.equal(state.schemaVersion, 4);
     Assert.deepEqual(state.seenWarBanditsSteamIds, [STEAM_A]);
     Assert.deepEqual(state.refreshedSteamIds, [STEAM_B]);
     Assert.deepEqual(state.targetedLookupSteamIds, []);
     Assert.deepEqual(state.profiledSteamIds, []);
+    Assert.deepEqual(state.profileAttemptedSteamIds, []);
+});
+
+Test('one failed Steam profile cannot starve the remaining enrichment queue', async t => {
+    const value = harness(t);
+    await value.store.appendMany([
+        identityEvent({ steamId: STEAM_A, battlemetricsPlayerId: null, exactName: null }, 'pending-a',
+            'discord-steamid-list'),
+        identityEvent({ steamId: STEAM_D, battlemetricsPlayerId: null, exactName: null }, 'pending-d',
+            'discord-steamid-list')
+    ]);
+    const attempts = [];
+    value.dependencies.steamProfileIdentity = async steamId => {
+        attempts.push(steamId);
+        return steamId === STEAM_A ? null : {
+            steamId,
+            currentName: 'Dana',
+            pastAliases: [],
+            aliasesComplete: true
+        };
+    };
+
+    const first = await ScanDaemon.runCycle({ ...value });
+    Assert.equal(first.steamProfileAttempts, 1);
+    Assert.equal(first.steamProfilesRefreshed, 0);
+    value.setNow('2026-10-03T12:01:00.000Z');
+    const second = await ScanDaemon.runCycle({ ...value });
+    Assert.equal(second.steamProfileAttempts, 1);
+    Assert.equal(second.steamProfilesRefreshed, 1);
+    Assert.deepEqual(attempts, [STEAM_A, STEAM_D]);
+    let state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
+    Assert.deepEqual(state.profileAttemptedSteamIds, [STEAM_A, STEAM_D].sort());
+    Assert.deepEqual(state.profiledSteamIds, [STEAM_D]);
+    Assert.equal(Core.rebuild(await value.store.readAll()).identities.displayName(`steam:${STEAM_D}`), 'Dana');
+
+    value.setNow('2026-10-03T12:02:00.000Z');
+    const retry = await ScanDaemon.runCycle({ ...value, forceWarBanditsRescan: true });
+    Assert.equal(retry.steamProfileAttempts, 1);
+    Assert.deepEqual(attempts, [STEAM_A, STEAM_D, STEAM_A]);
+    state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
+    Assert.deepEqual(state.profileAttemptedSteamIds, [STEAM_A, STEAM_D].sort());
 });
 
 Test('the background scan stores Steam current and past names as verified aliases', async t => {
@@ -236,6 +277,9 @@ Test('the background scan stores Steam current and past names as verified aliase
         ['gus', true, 'past']
     ]);
     Assert.deepEqual(person.battlemetricsPlayerIds, ['777']);
+    const state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
+    Assert.deepEqual(state.profiledSteamIds, [STEAM_D]);
+    Assert.deepEqual(state.profileAttemptedSteamIds, [STEAM_D]);
     Assert.equal(Core.consolidateProjection(projection, {
         steamId: null, battlemetricsPlayerId: '999', name: 'gus', caseFidelity: true
     }).identity.steamId, null);

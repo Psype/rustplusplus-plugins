@@ -20,10 +20,12 @@ review/correction output to Rust team chat.
   webhook, or paste 1–100 complete SteamID64 values with one ID per line. F7 versus `/cinfo` and repeated `/cinfo`
   panels are detected semantically; every image or text batch still requires a Discord confirmation. Renaming the
   configured channel (for example to `intel-reports`) is safe because routing uses its Discord ID. Confirmed text IDs
-  receive restart-safe, one-per-tick exact WarBandits enrichment; the background wipe leaderboard also collects names
+  receive restart-safe, one-per-tick scoped WarBandits enrichment; the background wipe leaderboard also collects names
   and cumulative hours without treating them as online presence. The same background cycle refreshes at most one
   known Steam profile per tick and per wipe, preserving its current persona and returned past aliases as verified
-  history without making them presence evidence.
+  history without making them presence evidence. Failed Steam requests advance fairly to the next ID and are
+  explicitly retryable with `!scanplayers`. Reposting an identical text lot shows current local enrichment and keeps
+  the original evidence; only changed image interpretations use Replace/Keep.
 - **/item** - Get the details of an item.
 - **/leader** - Transfer leadership.
 - **/map** - Display the In-Game Map.

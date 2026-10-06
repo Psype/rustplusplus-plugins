@@ -7,8 +7,8 @@ const Path = require('node:path');
 
 const Core = require('./index.js');
 
-const STATE_SCHEMA_VERSION = 3;
-const COLLECTOR_VERSION = 'player-scan-daemon-3';
+const STATE_SCHEMA_VERSION = 4;
+const COLLECTOR_VERSION = 'player-scan-daemon-4';
 const STATE_FILE = 'scan-daemon.json';
 const MAX_LOCAL_REFRESHES_PER_CYCLE = 100;
 const RESCAN_DELAY_MS = 12 * 60 * 60 * 1000;
@@ -87,6 +87,7 @@ function emptyState(options, now) {
         targetedLookupSteamIds: [],
         refreshedSteamIds: [],
         profiledSteamIds: [],
+        profileAttemptedSteamIds: [],
         updatedAt: now.toISOString()
     };
 }
@@ -97,7 +98,7 @@ function validateState(value, options) {
         throw new TypeError('state must be an object');
     }
     const state = /** @type {any} */ (value);
-    if (![1, 2, STATE_SCHEMA_VERSION].includes(state.schemaVersion) ||
+    if (![1, 2, 3, STATE_SCHEMA_VERSION].includes(state.schemaVersion) ||
         `${state.guildId}` !== `${options.context.guildId}` ||
         typeof state.serverKey !== 'string' || typeof state.wipeId !== 'string' ||
         !Number.isSafeInteger(state.nextWarBanditsPage) || state.nextWarBanditsPage < 1 ||
@@ -110,16 +111,24 @@ function validateState(value, options) {
     }
     const targetedLookupSteamIds = state.schemaVersion === 1 ? [] : state.targetedLookupSteamIds;
     const profiledSteamIds = state.schemaVersion < 3 ? [] : state.profiledSteamIds;
+    const profileAttemptedSteamIds = state.schemaVersion < 4 ? [...profiledSteamIds] :
+        state.profileAttemptedSteamIds;
     if (!Array.isArray(targetedLookupSteamIds)) throw new TypeError('state targeted lookup set is invalid');
     if (!Array.isArray(profiledSteamIds)) throw new TypeError('state Steam profile set is invalid');
+    if (!Array.isArray(profileAttemptedSteamIds)) throw new TypeError('state Steam profile attempt set is invalid');
     for (const values of /** @type {any[][]} */ ([state.seenWarBanditsSteamIds, state.refreshedSteamIds,
-        targetedLookupSteamIds, profiledSteamIds])) {
+        targetedLookupSteamIds, profiledSteamIds, profileAttemptedSteamIds])) {
         if (values.length > 200000 || new Set(values).size !== values.length ||
             values.some(value => !/^7656119\d{10}$/u.test(`${value}`))) {
             throw new TypeError('state SteamID set is invalid');
         }
     }
-    return { ...state, schemaVersion: STATE_SCHEMA_VERSION, targetedLookupSteamIds, profiledSteamIds };
+    const attempted = new Set(profileAttemptedSteamIds);
+    if (profiledSteamIds.some((/** @type {string} */ steamId) => !attempted.has(steamId))) {
+        throw new TypeError('completed Steam profiles must also be marked attempted');
+    }
+    return { ...state, schemaVersion: STATE_SCHEMA_VERSION, targetedLookupSteamIds, profiledSteamIds,
+        profileAttemptedSteamIds };
 }
 
 /** @param {any} options @param {Date} now */
@@ -328,11 +337,13 @@ async function runCycle(options) {
         state.nextWarBanditsPage = 1;
         state.warBanditsResumeAt = null;
         state.targetedLookupSteamIds = [];
+        state.profileAttemptedSteamIds = [...state.profiledSteamIds];
     }
     const seen = new Set(state.seenWarBanditsSteamIds);
     const refreshed = new Set(state.refreshedSteamIds);
     const targeted = new Set(state.targetedLookupSteamIds);
     const profiled = new Set(state.profiledSteamIds);
+    const profileAttempts = new Set(state.profileAttemptedSteamIds);
     const existing = await options.store.readAll();
     recoverSetsFromJournal(existing, options.scope, seen, refreshed);
     const projection = Core.rebuild(existing);
@@ -347,6 +358,7 @@ async function runCycle(options) {
     let targetedLookups = 0;
     let metricsObserved = 0;
     let steamProfilesRefreshed = 0;
+    let steamProfileAttempts = 0;
     const latestPlaytimes = new Map(projection.metrics.observations
         .filter(value => value.serverKey === options.scope.serverKey && value.provider === 'warbandits' &&
             value.metric === 'playtime' && value.personId.startsWith('steam:'))
@@ -373,9 +385,11 @@ async function runCycle(options) {
     if (typeof steamProfileIdentity === 'function') {
         const profileSteamId = projection.identities.persons
             .map((/** @type {any} */ person) => person.steamId)
-            .filter((/** @type {any} */ steamId) => steamId && !profiled.has(steamId))
+            .filter((/** @type {any} */ steamId) => steamId && !profileAttempts.has(steamId))
             .sort()[0];
         if (profileSteamId) {
+            profileAttempts.add(profileSteamId);
+            steamProfileAttempts = 1;
             let profile = null;
             try {
                 profile = await steamProfileIdentity(profileSteamId);
@@ -536,7 +550,8 @@ async function runCycle(options) {
     newlyRefreshed.forEach(value => refreshed.add(value));
     let changed = forcedRescan || events.length > 0 || seen.size !== state.seenWarBanditsSteamIds.length ||
         targeted.size !== state.targetedLookupSteamIds.length ||
-        refreshed.size !== state.refreshedSteamIds.length || profiled.size !== state.profiledSteamIds.length;
+        refreshed.size !== state.refreshedSteamIds.length || profiled.size !== state.profiledSteamIds.length ||
+        profileAttempts.size !== state.profileAttemptedSteamIds.length;
     if (scan && scan.available) {
         changed = true;
         if (scan.complete || scan.nextPage === null) {
@@ -553,6 +568,7 @@ async function runCycle(options) {
     state.targetedLookupSteamIds = [...targeted].sort();
     state.refreshedSteamIds = [...refreshed].sort();
     state.profiledSteamIds = [...profiled].sort();
+    state.profileAttemptedSteamIds = [...profileAttempts].sort();
     state.updatedAt = recordedAt;
     if (changed || !Fs.existsSync(statePath(options.directory))) {
         await writeStateAtomic(statePath(options.directory), validateState(state, options));
@@ -564,6 +580,7 @@ async function runCycle(options) {
         warBanditsSeen: newlySeen.size,
         targetedLookups,
         metricsObserved,
+        steamProfileAttempts,
         steamProfilesRefreshed,
         nextWarBanditsPage: state.nextWarBanditsPage,
         warBanditsResumeAt: state.warBanditsResumeAt

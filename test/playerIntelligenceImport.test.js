@@ -1093,12 +1093,37 @@ Test('dedicated import channel previews and confirms one or many line-separated 
     Assert.equal(events.find(event => event.subject.steamId === known).subject.exactName, 'Psype');
     Assert.equal(events.find(event => event.subject.steamId === unknown).subject.exactName, null);
 
+    await Runtime.recordWarBanditsIdentity({
+        client: value.client,
+        guildId: 'guild',
+        rustplus: value.client.rustplusInstances.guild,
+        playerIntelligenceDependencies: value.client.playerIntelligenceDependencies
+    }, { steamId: unknown, name: 'Enriched Persona' }, '2026-10-01T12:01:00.000Z');
+    delete value.client.playerIntelligenceImportDependencies.identityCandidates;
+    Assert.equal(await ImportWorkflow.handleMessage({
+        client: value.client,
+        message: { ...message, id: 'message-steamids-repeat' }
+    }), true);
+    const repeatedPreview = value.replies.at(-1);
+    Assert.match(repeatedPreview.content, new RegExp(`${unknown}.*Enriched Persona`));
+    const repeatedConfirmId = repeatedPreview.components[0].components[0].data.custom_id;
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { customId: repeatedConfirmId, guildId: 'guild', channelId: 'intel-imports',
+            user: { id: 'requester' } }
+    }), true);
+    Assert.match(value.updates.at(-1).content, /SteamID text list already imported; original evidence kept/);
+    Assert.match(value.updates.at(-1).content, /Current local enrichment: 2 named, 0 awaiting enrichment/);
+    Assert.doesNotMatch(value.updates.at(-1).content, /Replace previous|Duplicate evidence detected/);
+    Assert.equal((await store.readAll()).filter(event => event.kind === 'events_superseded').length, 0);
+    Assert.equal((await store.readAll()).length, 3);
+
     Assert.equal(await ImportWorkflow.handleMessage({
         client: value.client,
         message: { ...message, id: 'message-invalid', content: `${known}\ninvalid` }
     }), true);
     Assert.match(value.replies.at(-1).content, /Invalid SteamID64 on line 2/);
-    Assert.equal((await store.readAll()).length, 2);
+    Assert.equal((await store.readAll()).length, 3);
 });
 
 Test('confirm buttons acknowledge immediately and serialize durable work per server', async t => {
