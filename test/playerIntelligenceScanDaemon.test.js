@@ -154,7 +154,7 @@ Test('text-imported SteamIDs receive one prioritized recent-scope WarBandits loo
     Assert.equal(second.targetedLookups, 0);
     Assert.equal(directLookups, 1);
     const state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
-    Assert.equal(state.schemaVersion, 2);
+    Assert.equal(state.schemaVersion, 3);
     Assert.deepEqual(state.targetedLookupSteamIds, [STEAM_D]);
 });
 
@@ -199,10 +199,72 @@ Test('a schema-1 daemon checkpoint upgrades without losing its collected SteamID
     await ScanDaemon.runCycle({ ...value, warBanditsProvider: unavailable, forceWarBanditsRescan: true });
 
     const state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
-    Assert.equal(state.schemaVersion, 2);
+    Assert.equal(state.schemaVersion, 3);
     Assert.deepEqual(state.seenWarBanditsSteamIds, [STEAM_A]);
     Assert.deepEqual(state.refreshedSteamIds, [STEAM_B]);
     Assert.deepEqual(state.targetedLookupSteamIds, []);
+    Assert.deepEqual(state.profiledSteamIds, []);
+});
+
+Test('the background scan stores Steam current and past names as verified aliases', async t => {
+    const value = harness(t);
+    await value.store.append(identityEvent({
+        steamId: STEAM_D, battlemetricsPlayerId: '777', exactName: 'Old local name'
+    }, 'known-dana'));
+    let calls = 0;
+    value.dependencies.steamProfileIdentity = async steamId => {
+        calls += 1;
+        Assert.equal(steamId, STEAM_D);
+        return {
+            steamId,
+            currentName: 'FUNTIK',
+            pastAliases: [{ name: '+=import&**' }, { name: 'gus' }]
+        };
+    };
+
+    const first = await ScanDaemon.runCycle({ ...value });
+    Assert.equal(first.steamProfilesRefreshed, 1);
+    Assert.equal(first.appended, 3);
+    Assert.equal(calls, 1);
+    const projection = Core.rebuild(await value.store.readAll());
+    const person = projection.identities.getPerson(`steam:${STEAM_D}`);
+    Assert.equal(projection.identities.displayName(person.personId), 'FUNTIK');
+    Assert.deepEqual(person.names.filter(alias => alias.name !== 'Old local name')
+        .map(alias => [alias.name, alias.verified, alias.steamStatus]), [
+        ['+=import&**', true, 'past'],
+        ['FUNTIK', true, 'current'],
+        ['gus', true, 'past']
+    ]);
+    Assert.deepEqual(person.battlemetricsPlayerIds, ['777']);
+    Assert.equal(Core.consolidateProjection(projection, {
+        steamId: null, battlemetricsPlayerId: '999', name: 'gus', caseFidelity: true
+    }).identity.steamId, null);
+
+    value.setNow('2026-10-03T12:01:00.000Z');
+    const second = await ScanDaemon.runCycle({ ...value });
+    Assert.equal(second.steamProfilesRefreshed, 0);
+    Assert.equal(calls, 1);
+});
+
+Test('Steam alias lookup failure does not cancel the independent WarBandits page', async t => {
+    const value = harness(t);
+    await value.store.append(identityEvent({
+        steamId: STEAM_A, battlemetricsPlayerId: '101', exactName: 'Alice'
+    }, 'known-alice'));
+    value.dependencies.steamProfileIdentity = async () => { throw new Error('Steam unavailable'); };
+    let pages = 0;
+    const result = await ScanDaemon.runCycle({
+        ...value,
+        warBanditsProvider: {
+            scanCurrentWipePage: async () => {
+                pages += 1;
+                return { available: true, observedAt: value.battlemetrics.updatedAt,
+                    complete: true, nextPage: null, rows: [] };
+            }
+        }
+    });
+    Assert.equal(result.steamProfilesRefreshed, 0);
+    Assert.equal(pages, 1);
 });
 
 Test('the scheduler coalesces cycles for the same server directory', async t => {

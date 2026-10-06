@@ -27,6 +27,7 @@ const REQUEST_TIMEOUT_MS = 5000;
 const PROFILE_CACHE_MS = 60 * 60 * 1000;
 const PROFILE_FAILURE_CACHE_MS = 30 * 1000;
 const profileNameCache = new Map();
+const profileIdentityCache = new Map();
 const warningCache = new Map();
 
 function logWarningOnce(client, key, message) {
@@ -84,5 +85,53 @@ module.exports = {
         logWarningOnce(client, `name:${id}`, client.intlGet(null, 'failedToScrapeProfileName', { link }));
         profileNameCache.set(id, Object.freeze({ name: null, cachedAt: Date.now() }));
         return null;
+    },
+
+    scrapeSteamProfileIdentity: async function (client, steamId) {
+        const id = String(steamId);
+        if (!/^\d{17}$/.test(id)) return null;
+        const cached = profileIdentityCache.get(id);
+        const cacheDuration = cached && cached.complete ? PROFILE_CACHE_MS : PROFILE_FAILURE_CACHE_MS;
+        if (cached && Date.now() - cached.cachedAt < cacheDuration) return cached.identity;
+
+        const aliasLink = `${Constants.STEAM_PROFILES_URL}${id}/ajaxaliases/`;
+        const [currentName, aliasResponse] = await Promise.all([
+            module.exports.scrapeSteamProfileName(client, id),
+            module.exports.scrape(aliasLink)
+        ]);
+        if (!currentName) {
+            profileIdentityCache.set(id, Object.freeze({ identity: null, complete: false, cachedAt: Date.now() }));
+            return null;
+        }
+
+        const rows = aliasResponse.status === 200 && Array.isArray(aliasResponse.data) ? aliasResponse.data : [];
+        if (aliasResponse.status !== 200) {
+            logWarningOnce(client, `aliases:${id}`,
+                client.intlGet(null, 'failedToScrapeProfileName', { link: aliasLink }));
+        }
+        const aliases = [];
+        const seen = new Set([currentName]);
+        for (const row of rows) {
+            const rawName = row && typeof row.newname === 'string' ? Utils.decodeHtml(row.newname) : '';
+            const name = rawName.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim();
+            if (!name || Array.from(name).length > 128 || seen.has(name)) continue;
+            seen.add(name);
+            aliases.push(Object.freeze({
+                name,
+                timeChanged: row && typeof row.timechanged === 'string' ? row.timechanged : null
+            }));
+        }
+        const identity = Object.freeze({
+            steamId: id,
+            currentName,
+            pastAliases: Object.freeze(aliases),
+            aliasesComplete: aliasResponse.status === 200 && Array.isArray(aliasResponse.data)
+        });
+        profileIdentityCache.set(id, Object.freeze({
+            identity,
+            complete: identity.aliasesComplete,
+            cachedAt: Date.now()
+        }));
+        return identity;
     },
 }

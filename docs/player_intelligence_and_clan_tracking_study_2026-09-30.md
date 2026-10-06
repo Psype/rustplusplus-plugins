@@ -206,6 +206,22 @@ hypothèses internes. Au plus trois requêtes par lot ciblent d'abord les SteamI
 WarBandits déjà sérialisé/caché puis le nom public du profil Steam. Une corroboration externe unique peut lever une
 collision ; deux réponses compatibles restent ambiguës. Aucun credential Steam ni clé Web API n'est requis.
 
+Depuis la version 1.22.29, ce résolveur de recherche reste séparé de la consolidation qui a le droit d'écrire.
+`identityConsolidator.js` est l'unique frontière locale `SteamID64/BattleMetrics ID/pseudo exact -> identité enrichie`.
+Elle consulte la projection existante et ne complète un champ manquant qu'à partir d'un identifiant déjà lié ou d'un
+seul nom exact fiable d'au moins trois caractères. Elle renvoie explicitement les personnes correspondantes, les
+liaisons proposées, les ambiguïtés et les conflits. Les imports Discord et leurs remplacements, le hook BattleMetrics,
+les identités tracker, les lignes WarBandits, les enregistrements manuels et les candidats OCR passent par ce même
+contrat. Une correspondance partielle/floue, un nom OCR à casse non fiable, plusieurs identités exactes ou deux IDs
+stables contradictoires ne peuvent jamais produire un lien automatique. La persistance reste un événement combiné
+Steam+BM append-only ; aucune observation brute n'est réécrite.
+
+Le daemon peut ensuite enrichir chaque SteamID connu, un profil maximum par tick et par wipe, avec le persona public
+courant et l'historique renvoyé par Steam Community. Le persona courant reçoit l'état `current`; chaque ancien nom
+reçoit l'état vérifié `past`. Les anciens alias sont attachés uniquement par le SteamID interrogé : ils ne servent pas
+de preuve exacte pour joindre un BattleMetrics ID et ne remplacent jamais le nom courant dans l'affichage. Cette
+collecte ne produit aucun événement de présence.
+
 Avant chaque OCR, ces alias persistants alimentent aussi un fichier UTF-8 Tesseract `--user-words`, limité et supprimé
 après le processus. Pour chaque image, le bot produit une seule variante noir-sur-blanc agrandie, en conservant les
 pixels texte neutres, jaunes/orange, verts et cyan/bleus puis en rejetant un ratio de premier plan pathologique. La

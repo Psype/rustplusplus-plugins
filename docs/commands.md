@@ -174,7 +174,7 @@ Subcommand | Options | Description | Required
 ---------- | ------- | ----------- | --------
 `pending` | `page` | List every exact alias whose projected identity still has no verified SteamID64. | `False`
 `links` | `page` | List active manual alias reconciliations. | `False`
-`history` | `target`, `page` | List only verified aliases, with first/last dates, for one exact local identity. | `target`
+`history` | `target`, `page` | List only verified aliases, with first/last dates and current/past Steam labels, for one exact local identity. | `target`
 `link` | `alias`, `steamid` | Attach one exact pending alias to a SteamID64. | `alias`, `steamid`
 `merge` | `alias`, `target` | Merge one exact pending alias into a verified local target selected by exact alias, SteamID64, or BattleMetrics ID. | `alias`, `target`
 `unlink` | `alias` | Revoke every active reconciliation for one exact alias. | `True`
@@ -184,6 +184,10 @@ latest display name. If Steam is unavailable, only an already Steam/API-verified
 manual name override. Existing verified Steam/API aliases remain in their dated history. An OCR-only spelling
 such as `ChiCo` is retained as pending correction evidence and as the key used to reinterpret old captures, but it is
 never promoted into the verified alias history of `Ch1co`.
+
+The background daemon also checks one known SteamID64 profile per existing tick, at most once per wipe. The public
+Steam persona is stored as the current verified name and the profile's returned alias history is stored as verified
+past names. These aliases are never inferred from OCR, never prove presence and never outrank the current Steam name.
 
 Reprojection is immediate and applies to every retained confirmed `/cinfo` capture. Occurrences from different captures
 are added; two spellings merged to the same Steam identity inside one capture count only once. `unlink` restores the
@@ -199,7 +203,7 @@ Goal | Example | Expected effect
 Review unresolved identities | `/intel pending page:1` | Lists one row per projected identity which still has no verified SteamID64, grouping aliases that already share a BattleMetrics ID.
 Correct against a known local player | `/intel merge alias:ChiCo target:Ch1co` | Reprojects `ChiCo` observations onto the verified `Ch1co` identity.
 Correct with a known SteamID64 | `/intel link alias:ChiCo steamid:76561198154738095` | Uses that Steam identity after reading its current public persona or a previously verified local alias.
-Review real past names | `/intel history target:Ch1co page:1` | Shows dated Steam/API-verified names only.
+Review real past names | `/intel history target:Ch1co page:1` | Shows dated Steam/API-verified names only, marking Steam names as current or past.
 Audit corrections | `/intel links page:1` | Lists active reversible reconciliation rules.
 Undo a wrong correction | `/intel unlink alias:ChiCo` | Revokes the rule and reconstructs the evidence-only projection.
 
@@ -751,6 +755,9 @@ Subcommand | Description | Required
 > the existing 60-second BattleMetrics update; it never creates a second poller. A failed/censored update changes
 > provider state to `unknown`, never to a false logout. Exact SteamID64 is the strong identity; name-only links remain
 > reversible. Read-only lookup ranking never creates or merges identity evidence.
+> Every write path uses one local consolidator for SteamID64, BattleMetrics ID and exact name observations. It fills
+> missing fields only from an existing stable link or one unique trusted exact name, and fails closed on collision,
+> conflicting IDs, fuzzy text or low-fidelity OCR. A proven combined Steam+BM observation is the durable link.
 > The immutable per-server journal and its derived projections are reused between commands and invalidated after an
 > append. SteamID64, BattleMetrics ID, exact names and `Played with` relations have direct indexes; a normal repeated
 > `!affinity` therefore does not reread/rebuild the complete history. Shard metadata is still checked so an external
@@ -763,6 +770,9 @@ Subcommand | Description | Required
 > player-intelligence server directory survives restarts. A completed WarBandits sweep waits twelve hours before a
 > conservative rescan for players who joined the wipe later. Names and WarBandits cumulative hours are retained, but
 > neither a leaderboard row nor increasing playtime creates presence or login/logout events.
+> The same daemon refreshes at most one known Steam profile per tick and per wipe. It journals the current persona and
+> returned former names separately, so `/intel history` can label verified `[current Steam name]` and
+> `[past Steam alias]` entries without delaying a Discord command.
 > Name lookups share one provider-neutral reconciler. `!intel`, `!steamid`, `!who`, `!affinity` and `!activity` use
 > its read-only `first` mode: exact identifier/name, prefix and contained partial matches are ranked, then the closest
 > deterministic result is returned without a selector. For example, `!intel tree` can select `Cockornut Tree`.
@@ -806,7 +816,8 @@ correction command for an OCR typo and should not be used to make `ChiCo` histor
 
 <br>`!intel` is the canonical complete compact lookup. It returns the current display name, available
 SteamID64/primary BattleMetrics ID, reliable compact presence, the latest collected cumulative WarBandits hours,
-verified Steam/API aliases, `Known tags`, `Played with`, and rolling 30-day activity. OCR-only spellings remain pending
+verified Steam/API aliases (including current and past Steam profile names), `Known tags`, `Played with`, and rolling
+30-day activity. OCR-only spellings remain pending
 and are managed privately with `/intel pending`; they are not presented as historical aliases. WarBandits hours use a lower-bound display such
 as `WB hours:7500+`: it means at least 7,500 hours at the last successful collection, not a live counter.
 `!steamid` returns the same result and no longer searches only Rust+ teammates. `!who` is the alias-only
@@ -827,7 +838,9 @@ priority lookup set for pasted SteamIDs. With 100 pasted IDs, exact lookups ther
 `wipe=0`, then the newest completed wipe returned by the server's `/wipes` catalogue, and only then `all-time` if both
 scopes are empty. When a unique response name exactly matches one and only one local BattleMetrics identity without a
 conflicting SteamID, the journal records the combined Steam+BM identity and all aliases on that BM leave `pending`
-together. An ambiguous response remains manual. `!scanplayers` can reset the current wipe's completed priority set so
+together. Every such observation passes through the same local consolidator used by imports, BattleMetrics and manual
+records. An ambiguous response remains manual. Steam profile history is collected separately one ID per tick and does
+not use all-time WarBandits guesses. `!scanplayers` can reset the current wipe's completed priority set so
 IDs imported before this behavior are reconsidered. Provider cooldowns extend
 that delay safely. The command does not manufacture online/offline presence.
 

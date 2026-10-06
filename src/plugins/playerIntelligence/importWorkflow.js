@@ -10,6 +10,7 @@ const CinfoPanelRefinement = require('./cinfoPanelRefinement.js');
 const CinfoRoles = require('./cinfoRoles.js');
 const F7IdentityValidation = require('./f7IdentityValidation.js');
 const F7RowRefinement = require('./f7RowRefinement.js');
+const IdentityConsolidator = require('./identityConsolidator.js');
 const Layout = require('./ocrLayout.js');
 const OcrImagePreprocess = require('./ocrImagePreprocess.js');
 const { detectImportKind } = require('./detectImportKind.js');
@@ -914,23 +915,17 @@ async function corroborateCandidateAliases(context, items, client, dependencies)
 function joinCorroboratedStableIds(known, corroborated) {
     const joined = [];
     for (const proof of corroborated) {
-        const steamId = /^7656119\d{10}$/u.test(`${proof && proof.steamId || ''}`) ? `${proof.steamId}` : null;
-        const name = Layout.cleanText(proof && proof.name || '');
-        if (!steamId || !name) continue;
-        const key = name.normalize('NFKC').toLocaleLowerCase('en');
-        const exact = known.filter(candidate => Layout.cleanText(candidate && candidate.name || '')
-            .normalize('NFKC').toLocaleLowerCase('en') === key);
-        if (exact.some(candidate => /^7656119\d{10}$/u.test(`${candidate.steamId || ''}`) &&
-            `${candidate.steamId}` !== steamId)) continue;
-        const battlemetricsIds = [...new Set(exact.map(candidate => `${candidate.battlemetricsPlayerId || ''}`)
-            .filter(value => /^\d{1,32}$/u.test(value)))];
-        if (battlemetricsIds.length !== 1) continue;
+        const result = IdentityConsolidator.consolidateCandidates(known, proof);
+        if (result.status === 'conflict' || !result.identity.steamId ||
+            !result.identity.battlemetricsPlayerId ||
+            (!result.changedFields.includes('steamId') &&
+                !result.changedFields.includes('battlemetricsPlayerId'))) continue;
         joined.push(Object.freeze({
             ...proof,
-            name,
-            steamId,
-            battlemetricsPlayerId: battlemetricsIds[0],
-            caseFidelity: proof.caseFidelity !== false,
+            name: result.identity.name,
+            steamId: result.identity.steamId,
+            battlemetricsPlayerId: result.identity.battlemetricsPlayerId,
+            caseFidelity: result.identity.caseFidelity,
             corroborated: true
         }));
     }
@@ -1386,7 +1381,8 @@ async function resolveCorrectedItem(context, pendingItem, itemIndex, corrected, 
         }
     }
     if (corroborated.length > 0) {
-        parsed = resolveCinfo(raw, Object.freeze([...persisted, ...batch, ...corroborated]),
+        const joined = joinCorroboratedStableIds(Object.freeze([...persisted, ...batch]), corroborated);
+        parsed = resolveCinfo(raw, Object.freeze([...persisted, ...batch, ...joined]),
             dependencies.nameSimilarityOptions);
     }
     return Object.freeze({

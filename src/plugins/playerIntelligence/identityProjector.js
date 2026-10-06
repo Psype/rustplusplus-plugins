@@ -129,6 +129,8 @@ function projectIdentities(events) {
     }
 
     const people = new Map();
+    const steamCurrentNames = new Map();
+    const steamPastNames = new Map();
     /** @param {string} personId */
     function ensurePerson(personId) {
         if (!people.has(personId)) people.set(personId, {
@@ -144,6 +146,22 @@ function projectIdentities(events) {
         if (event.kind !== 'identity_observed') continue;
         const resolution = resolveSubject(event.subject);
         const person = ensurePerson(resolution.personId);
+        if (event.subject.exactName !== null && resolution.personId.startsWith('steam:')) {
+            if (event.provenance.source === 'steam-profile-current') {
+                const previous = steamCurrentNames.get(resolution.personId);
+                if (!previous || `${previous.observedAt}\u0000${previous.eventId}` <
+                    `${event.observedAt}\u0000${event.eventId}`) {
+                    steamCurrentNames.set(resolution.personId, {
+                        name: event.subject.exactName, observedAt: event.observedAt, eventId: event.eventId
+                    });
+                }
+            }
+            else if (event.provenance.source === 'steam-profile-alias-history') {
+                const values = steamPastNames.get(resolution.personId) || new Set();
+                values.add(event.subject.exactName);
+                steamPastNames.set(resolution.personId, values);
+            }
+        }
         if (event.subject.battlemetricsPlayerId !== null) {
             person.battlemetricsPlayerIds.add(event.subject.battlemetricsPlayerId);
         }
@@ -176,6 +194,15 @@ function projectIdentities(events) {
             battlemetricsPlayerId: link.payload.targetBattlemetricsPlayerId
         }, bmToSteam);
         const person = ensurePerson(personId);
+        if (link.payload.targetNameSource === 'steam-profile') {
+            const previousCurrent = steamCurrentNames.get(personId);
+            if (!previousCurrent || `${previousCurrent.observedAt}\u0000${previousCurrent.eventId}` <
+                `${link.observedAt}\u0000${link.eventId}`) {
+                steamCurrentNames.set(personId, {
+                    name: link.payload.targetName, observedAt: link.observedAt, eventId: link.eventId
+                });
+            }
+        }
         const previous = person.names.get(link.payload.targetName) || {
             name: link.payload.targetName, firstObservedAt: link.observedAt,
             lastObservedAt: link.observedAt, caseFidelity: true, verified: true,
@@ -196,7 +223,11 @@ function projectIdentities(events) {
         personId: person.personId,
         steamId: person.steamId,
         battlemetricsPlayerIds: [...person.battlemetricsPlayerIds].sort(),
-        names: [...person.names.values()].sort((left, right) =>
+        names: [...person.names.values()].map(alias => ({
+            ...alias,
+            steamStatus: steamCurrentNames.get(person.personId)?.name === alias.name ? 'current' :
+                steamPastNames.get(person.personId)?.has(alias.name) ? 'past' : null
+        })).sort((left, right) =>
             left.firstObservedAt.localeCompare(right.firstObservedAt) || left.name.localeCompare(right.name))
     })).sort((left, right) => left.personId.localeCompare(right.personId));
     const personById = new Map(persons.map(person => [person.personId, person]));
@@ -227,7 +258,9 @@ function projectIdentities(events) {
         const person = personById.get(personId);
         if (!person || person.names.length === 0) return personId;
         const verified = person.names.filter(alias => alias.verified);
-        return (verified.length > 0 ? verified : person.names).slice().sort((left, right) =>
+        const current = verified.filter(alias => alias.steamStatus === 'current');
+        return (current.length > 0 ? current : verified.length > 0 ? verified : person.names).slice()
+        .sort((left, right) =>
             `${right.lastVerifiedAt || right.lastObservedAt}`.localeCompare(
                 `${left.lastVerifiedAt || left.lastObservedAt}`) ||
             right.lastObservedAt.localeCompare(left.lastObservedAt) || left.name.localeCompare(right.name))[0].name;

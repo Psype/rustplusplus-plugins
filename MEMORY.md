@@ -20,12 +20,14 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   `d327e7d`, which contains the `1.22.24` tightly-spaced `/cinfo` fixes, the `1.22.25` reusable player-name reconciler,
   and the `1.22.26` private Discord identity-correction workflow. Release `1.22.27`, immediately after that commit,
   contains the interaction/translation latency bounds and documentation updates. Release `1.22.28` groups pending
-  aliases by known BattleMetrics identity and adds date-selected recent-wipe WarBandits fallback. At the latest audit,
-  `master`, `origin/master` and `origin/HEAD` were aligned on `1.22.28`, the worktree was clean, and only `master` plus
+  aliases by known BattleMetrics identity and adds date-selected recent-wipe WarBandits fallback. Release `1.22.29`
+  centralizes local identity consolidation and imports verified current/past Steam profile names in the background. At
+  the latest audit, `master`, `origin/master` and `origin/HEAD` were aligned on `1.22.29`, the worktree was clean, and
+  only `master` plus
   the useful
   `origin/master`/`upstream/master` remote-tracking references remained. Do not reset, overwrite, reimplement or
   discard these changes. Re-audit `git status --short` and `git diff` if the observed state differs.
-- Canonical package version is `1.22.28`. The complete local validation on 2026-10-06 passed `259/259` unit tests and
+- Canonical package version is `1.22.29`. The complete local validation on 2026-10-06 passed `266/266` unit tests and
   `tsc --noEmit`; `git diff --check` was clean. This is local deterministic evidence only. Deployment/restart and a
   new Discord import of the reported KIRK screenshot remain unconfirmed, so do not claim production success.
 - Primary unresolved production fact: raid and **Pair with Server** notifications were observed on the Rust+ phone but not on the bot. The 2026-09-23/24 journal showed accepted MCS logins and quick reconnects but no inbound notification. Phone receipt proves Facepunch delivery to the phone only; MCS login proves Google accepted the bot's GCM identity only. Facepunch delivery to the bot's virtual device still requires a live capture. Canonical transport audit: `docs/fcm_transport_audit_2026-09-23.md`.
@@ -205,6 +207,19 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   The 2026-10-06 live catalogue placed `8467` at 2026-10-02 through the 2026-10-06 wipe and `8398` at the earlier
   2026-10-01 through 2026-10-02 interval. A `FUNTIK` lookup was empty in current/8467/8398 but returned four distinct
   all-time Steam identities, so it is deliberately left for manual resolution.
+- Release `1.22.29` adds `identityConsolidator.js` as the single conservative local boundary used when an observation
+  supplies any combination of SteamID64, BattleMetrics ID and exact name. It queries the current projection, fills a
+  missing stable ID from an existing stable link or from one unique trusted exact name, fills a missing display name,
+  and returns matched/link/conflict/ambiguity metadata. Fuzzy or partial command matching remains read-only and can
+  never mutate identity history; low-fidelity OCR, ambiguous names and conflicting stable IDs fail closed. Runtime
+  BattleMetrics/tracker ingestion, Discord imports and replacements, WarBandits daemon rows, exact import
+  corroboration, manual records and identity-candidate projection now use this boundary instead of parallel join code.
+  A combined Steam+BM `identity_observed` event is the durable link; no destructive row merge is required.
+  The background daemon also reads the public Steam Community current persona plus `/ajaxaliases/` history for one
+  known SteamID per tick and at most once per wipe. The current persona is marked `current`; returned former names are
+  stored as verified `past` aliases and displayed as such by `/intel history`. Past aliases never perform exact-name
+  stable-ID joining and never outrank the current Steam name. Steam failure is warning-only/cached and creates no
+  presence evidence.
 - Release `1.22.27` makes `/intel` call Discord's ephemeral `deferReply()` before logging, context loading, permission
   work or player-intelligence journal reads. The command remains administrator-only; this removes local processing
   from Discord's initial response window. AutoTranslate now allows at most two seconds per provider and five seconds
@@ -297,6 +312,11 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   name-only `/cinfo` candidates remaining pending, strict wipe-catalogue parsing, numeric wipe cache isolation,
   Established-selected historical lookup, all-time ambiguity, daemon use of the recent-scope resolver and safe
   SteamID/BattleMetrics joining from unique exact WarBandits evidence.
+- Superseding QA for release `1.22.29` on 2026-10-06: `npm.cmd test` passes 266/266 including `tsc --noEmit`, and
+  `git diff --check` is clean. New checks cover bidirectional missing-ID consolidation, exact-name ambiguity and stable
+  conflicts, rejection of low-fidelity/unverified OCR as automatic link evidence, immutable results, daemon persistence
+  of verified current/past Steam names, current-name display priority, once-per-wipe Steam refresh and bounded Steam
+  alias parsing/caching.
 - Performance check for `1.22.3`: the dedicated glyph benchmark recalls the target among 2,000 aliases with 104 stored
   glyph variants and eight graphemes in a 20.797 ms median. The existing 200-player pipeline measured before/after at
   41.702/39.357 ms initial load, 0.044/0.030 ms quiet-poll mean and 51.356/50.742 ms for ten transitions; no measured

@@ -8,6 +8,7 @@ const { projectMetrics } = require('./metricProjector.js');
 const { projectClans } = require('./clanProjector.js');
 const { projectPresence } = require('./presenceProjector.js');
 const { projectWipes } = require('./wipeProjector.js');
+const IdentityConsolidator = require('./identityConsolidator.js');
 
 /** @typedef {Readonly<{
  * identities:ReturnType<typeof projectIdentities>,
@@ -63,6 +64,7 @@ function rebuild(events) {
 module.exports = Object.freeze({
     ...Contracts,
     ...HistoryStore,
+    ...IdentityConsolidator,
     effectiveEvents,
     rebuild
 });

@@ -46,6 +46,14 @@ This can prove target activity when that target's WarBandits counters advance, a
 
 The existing `https://steamcommunity.com/profiles/<SteamID64>?xml=1` endpoint was verified live. A public profile can expose persona name, visibility, avatar, Steam online/in-game state, current game label, profile age/location, groups, and playtime/recent-game data. It needs no key, but it is not a documented stable Web API and is controlled by profile privacy. The tracker currently consumes only the validated persona name.
 
+On 2026-10-06, the public Steam Community route
+`https://steamcommunity.com/profiles/<SteamID64>/ajaxaliases/` was also verified live. It returned a bounded JSON array
+of former persona names plus human-formatted change labels. This route is not part of the documented Steam Web API, so
+the labels are not parsed as canonical timestamps and failure is non-blocking. The player-intelligence daemon consumes
+at most one known profile per existing tick and once per wipe: XML supplies the current name, while this route supplies
+verified past aliases attached to that exact SteamID64. Past aliases cannot create a BattleMetrics link by name and
+cannot prove presence.
+
 Steam presence is at most secondary evidence: `In-Game: Rust` does not prove presence on WarBandits, invisible/private users disappear, and server address presence is not guaranteed. Facepunch explicitly notes that an invisible Steam status hides the game, IP, and port in its [server privacy guidance](https://wiki.facepunch.com/rust/Creating_a_hidden_whitelisted_server#UsersVisibility).
 
 ### Official Steam Web API
@@ -166,7 +174,7 @@ commands then keep their numbered selector. Several high-confidence fragments ca
 alias and reconciled locally. The OCR workflow does not yet split names into fragments automatically: doing so requires
 explicit high-confidence evidence for every fragment and cannot be inferred merely from one uncertain OCR string.
 
-The provider persists `data/warbandits/servers.json` and `data/warbandits/<guildId>-<serverSlug>.json` atomically with LF endings. The sidecar records sourced identity fields, aliases, statistics, observation times, and deltas between explicit resolutions. Its presence field is `unknown` until the identity is linked to a reliable BattleMetrics observation; WarBandits data can never set it. No periodic WarBandits hook is exported. `data/player-intelligence/<guild>/<battlemetricsServerId>/scan-daemon.json` separately records the current-wipe cursor and already-seen/refreshed SteamIDs so restart and quiet polls do not repeat completed work.
+The provider persists `data/warbandits/servers.json` and `data/warbandits/<guildId>-<serverSlug>.json` atomically with LF endings. The sidecar records sourced identity fields, aliases, statistics, observation times, and deltas between explicit resolutions. Its presence field is `unknown` until the identity is linked to a reliable BattleMetrics observation; WarBandits data can never set it. No periodic WarBandits hook is exported. `data/player-intelligence/<guild>/<battlemetricsServerId>/scan-daemon.json` separately records the current-wipe cursor and already-seen/refreshed/profiled SteamIDs so restart and quiet polls do not repeat completed work. The same daemon uses the bounded Steam Community profile readers for one known SteamID per tick; current and past names retain distinct provenance and neither changes presence.
 
 `src/plugins/battlemetrics/index.js` now owns the read-only Premium API boundary used by `playerTracker`. It provides server-scoped search, optional SteamID enrichment, server-player summaries, recent sessions, and co-play with a five-second timeout, fixed origin, bounded immutable parsing, short caches, coalescing, and 429 cooldown without retry. `!trackinfo`, `!trackhistory`, and `!trackrelated` persist only bounded sanitized summaries in the schema-2 tracker projection. The actual online/offline transition path remains the existing BattleMetrics poller.
 

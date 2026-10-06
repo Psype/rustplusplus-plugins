@@ -7,8 +7,8 @@ const Path = require('node:path');
 
 const Core = require('./index.js');
 
-const STATE_SCHEMA_VERSION = 2;
-const COLLECTOR_VERSION = 'player-scan-daemon-2';
+const STATE_SCHEMA_VERSION = 3;
+const COLLECTOR_VERSION = 'player-scan-daemon-3';
 const STATE_FILE = 'scan-daemon.json';
 const MAX_LOCAL_REFRESHES_PER_CYCLE = 100;
 const RESCAN_DELAY_MS = 12 * 60 * 60 * 1000;
@@ -16,6 +16,8 @@ const MANUAL_RESCAN_COOLDOWN_MS = 5 * 60 * 1000;
 const ONLINE_SOURCE = 'battlemetrics-online-wipe-daemon';
 const WARBANDITS_SOURCE = 'warbandits-current-wipe-daemon';
 const WARBANDITS_LOOKUP_SOURCE = 'warbandits-direct-lookup-daemon';
+const STEAM_CURRENT_SOURCE = 'steam-profile-current';
+const STEAM_ALIAS_SOURCE = 'steam-profile-alias-history';
 const inFlight = new Map();
 const forcedReruns = new Map();
 const manualTriggerTimes = new Map();
@@ -61,6 +63,11 @@ function wipeToken(wipeId) {
     return Crypto.createHash('sha256').update(wipeId).digest('hex').slice(0, 20);
 }
 
+/** @param {string} value */
+function shortToken(value) {
+    return Crypto.createHash('sha256').update(value).digest('hex').slice(0, 16);
+}
+
 /** @param {string} directory */
 function statePath(directory) {
     return Path.join(directory, STATE_FILE);
@@ -79,6 +86,7 @@ function emptyState(options, now) {
         seenWarBanditsSteamIds: [],
         targetedLookupSteamIds: [],
         refreshedSteamIds: [],
+        profiledSteamIds: [],
         updatedAt: now.toISOString()
     };
 }
@@ -89,7 +97,7 @@ function validateState(value, options) {
         throw new TypeError('state must be an object');
     }
     const state = /** @type {any} */ (value);
-    if (![1, STATE_SCHEMA_VERSION].includes(state.schemaVersion) ||
+    if (![1, 2, STATE_SCHEMA_VERSION].includes(state.schemaVersion) ||
         `${state.guildId}` !== `${options.context.guildId}` ||
         typeof state.serverKey !== 'string' || typeof state.wipeId !== 'string' ||
         !Number.isSafeInteger(state.nextWarBanditsPage) || state.nextWarBanditsPage < 1 ||
@@ -101,15 +109,17 @@ function validateState(value, options) {
         throw new TypeError('state fields are invalid');
     }
     const targetedLookupSteamIds = state.schemaVersion === 1 ? [] : state.targetedLookupSteamIds;
+    const profiledSteamIds = state.schemaVersion < 3 ? [] : state.profiledSteamIds;
     if (!Array.isArray(targetedLookupSteamIds)) throw new TypeError('state targeted lookup set is invalid');
+    if (!Array.isArray(profiledSteamIds)) throw new TypeError('state Steam profile set is invalid');
     for (const values of /** @type {any[][]} */ ([state.seenWarBanditsSteamIds, state.refreshedSteamIds,
-        targetedLookupSteamIds])) {
+        targetedLookupSteamIds, profiledSteamIds])) {
         if (values.length > 200000 || new Set(values).size !== values.length ||
             values.some(value => !/^7656119\d{10}$/u.test(`${value}`))) {
             throw new TypeError('state SteamID set is invalid');
         }
     }
-    return { ...state, schemaVersion: STATE_SCHEMA_VERSION, targetedLookupSteamIds };
+    return { ...state, schemaVersion: STATE_SCHEMA_VERSION, targetedLookupSteamIds, profiledSteamIds };
 }
 
 /** @param {any} options @param {Date} now */
@@ -260,19 +270,18 @@ function onlineSteamMatches(projection, online) {
         nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
     }
     return online.map(player => {
-        const directlyLinked = projection.identities.findByIdentifier(player.battlemetricsPlayerId)
-            .filter((/** @type {any} */ person) => person.steamId);
-        const directSteamIds = [...new Set(directlyLinked.map((/** @type {any} */ person) => person.steamId))];
-        if (directSteamIds.length === 1) return { ...player, steamId: directSteamIds[0], inferred: false };
-
         const key = normalize(player.name);
-        if (Array.from(key).length < 3 || nameCounts.get(key) !== 1) return null;
-        const byName = projection.identities.findByExactName(player.name)
-            .filter((/** @type {any} */ person) => person.steamId &&
-                (person.battlemetricsPlayerIds.length === 0 ||
-                    person.battlemetricsPlayerIds.includes(player.battlemetricsPlayerId)));
-        const steamIds = [...new Set(byName.map((/** @type {any} */ person) => person.steamId))];
-        return steamIds.length === 1 ? { ...player, steamId: steamIds[0], inferred: true } : null;
+        const result = Core.consolidateProjection(projection, {
+            ...player,
+            caseFidelity: true,
+            allowExactName: Array.from(key).length >= 3 && nameCounts.get(key) === 1
+        });
+        if (result.status === 'conflict' || !result.identity.steamId) return null;
+        return {
+            ...player,
+            steamId: result.identity.steamId,
+            inferred: result.links.some((/** @type {any} */ link) => link.via === 'exact-name')
+        };
     }).filter(Boolean);
 }
 
@@ -287,30 +296,6 @@ function uniqueOnlineNames(online) {
         values.set(key, list);
     }
     return values;
-}
-
-/** @param {any} projection @param {string} steamId @param {string} battlemetricsPlayerId */
-function hasConflictingBattlemetricsLink(projection, steamId, battlemetricsPlayerId) {
-    const steamMatches = projection.identities.findByIdentifier(steamId);
-    const steamConflict = steamMatches.some((/** @type {any} */ person) =>
-        person.battlemetricsPlayerIds.length > 0 &&
-        !person.battlemetricsPlayerIds.includes(battlemetricsPlayerId));
-    const battlemetricsMatches = projection.identities.findByIdentifier(battlemetricsPlayerId);
-    const battlemetricsConflict = battlemetricsMatches.some((/** @type {any} */ person) =>
-        person.steamId && person.steamId !== steamId);
-    return steamConflict || battlemetricsConflict;
-}
-
-/** @param {any} projection @param {string} steamId @param {string} name */
-function exactHistoricalBattlemetricsMatch(projection, steamId, name) {
-    if (Array.from(normalize(name)).length < 3) return null;
-    const matches = projection.identities.findByExactName(name);
-    if (matches.some((/** @type {any} */ person) => person.steamId && person.steamId !== steamId)) return null;
-    const battlemetricsIds = [...new Set(matches.flatMap((/** @type {any} */ person) =>
-        person.battlemetricsPlayerIds))];
-    if (battlemetricsIds.length !== 1 ||
-        hasConflictingBattlemetricsLink(projection, steamId, battlemetricsIds[0])) return null;
-    return battlemetricsIds[0];
 }
 
 /** @param {readonly any[]} events @param {any} scope @param {Set<string>} seen @param {Set<string>} refreshed */
@@ -347,6 +332,7 @@ async function runCycle(options) {
     const seen = new Set(state.seenWarBanditsSteamIds);
     const refreshed = new Set(state.refreshedSteamIds);
     const targeted = new Set(state.targetedLookupSteamIds);
+    const profiled = new Set(state.profiledSteamIds);
     const existing = await options.store.readAll();
     recoverSetsFromJournal(existing, options.scope, seen, refreshed);
     const projection = Core.rebuild(existing);
@@ -360,6 +346,7 @@ async function runCycle(options) {
     const newlySeen = new Set();
     let targetedLookups = 0;
     let metricsObserved = 0;
+    let steamProfilesRefreshed = 0;
     const latestPlaytimes = new Map(projection.metrics.observations
         .filter(value => value.serverKey === options.scope.serverKey && value.provider === 'warbandits' &&
             value.metric === 'playtime' && value.personId.startsWith('steam:'))
@@ -380,6 +367,72 @@ async function runCycle(options) {
         }));
         latestPlaytimes.set(steamId, playtime);
         metricsObserved += 1;
+    }
+
+    const steamProfileIdentity = dependencies.steamProfileIdentity;
+    if (typeof steamProfileIdentity === 'function') {
+        const profileSteamId = projection.identities.persons
+            .map((/** @type {any} */ person) => person.steamId)
+            .filter((/** @type {any} */ steamId) => steamId && !profiled.has(steamId))
+            .sort()[0];
+        if (profileSteamId) {
+            let profile = null;
+            try {
+                profile = await steamProfileIdentity(profileSteamId);
+            }
+            catch (error) {
+                logWarningOnce(options.context, `steam-profile:${profileSteamId}`,
+                    `Steam profile history unavailable for ${profileSteamId}: ${error instanceof Error ?
+                        error.message : error}.`);
+            }
+            const currentName = sanitize(profile && profile.currentName);
+            if (profile && `${profile.steamId}` === profileSteamId && currentName) {
+                let current = Core.consolidateProjection(projection, {
+                    steamId: profileSteamId, battlemetricsPlayerId: null,
+                    name: currentName, caseFidelity: true
+                });
+                if (current.status === 'conflict') {
+                    current = Core.consolidateProjection(projection, {
+                        steamId: profileSteamId, battlemetricsPlayerId: null,
+                        name: currentName, caseFidelity: true, allowExactName: false
+                    });
+                }
+                const knownProfile = projection.identities.getPerson(`steam:${profileSteamId}`);
+                const currentAlreadyKnown = knownProfile && knownProfile.names.some((/** @type {any} */ alias) =>
+                    alias.name === currentName && alias.steamStatus === 'current');
+                if (!currentAlreadyKnown) {
+                    events.push(identityEvent(options.scope, current.identity, {
+                        guildId: options.context.guildId,
+                        observedAt: recordedAt,
+                        recordedAt,
+                        source: STEAM_CURRENT_SOURCE,
+                        sourceEventId: `steam-current:${token}:${profileSteamId}:${shortToken(currentName)}`,
+                        confidence: 'verified'
+                    }));
+                }
+                const pastNames = new Set((Array.isArray(profile.pastAliases) ? profile.pastAliases : [])
+                    .map((/** @type {any} */ alias) => sanitize(alias && alias.name || alias))
+                    .filter((/** @type {string} */ name) => name && name !== currentName));
+                for (const name of pastNames) {
+                    const historical = Core.consolidateProjection(projection, {
+                        steamId: profileSteamId, battlemetricsPlayerId: null,
+                        name, caseFidelity: true, allowExactName: false
+                    });
+                    events.push(identityEvent(options.scope, historical.identity, {
+                        guildId: options.context.guildId,
+                        observedAt: recordedAt,
+                        recordedAt,
+                        source: STEAM_ALIAS_SOURCE,
+                        sourceEventId: `steam-alias:${token}:${profileSteamId}:${shortToken(name)}`,
+                        confidence: 'verified'
+                    }));
+                }
+                if (profile.aliasesComplete !== false) {
+                    profiled.add(profileSteamId);
+                    steamProfilesRefreshed = 1;
+                }
+            }
+        }
     }
 
     for (const match of onlineSteamMatches(projection, online)) {
@@ -412,20 +465,26 @@ async function runCycle(options) {
                     const observedAt = canonicalIso(lookup.observedAt) || recordedAt;
                     if (name) {
                         const live = uniqueOnlineNames(online).get(normalize(name)) || [];
-                        const liveBattlemetricsPlayerId = Array.from(normalize(name)).length >= 3 && live.length === 1 &&
-                            !hasConflictingBattlemetricsLink(projection, steamId, live[0].battlemetricsPlayerId) ?
+                        const liveBattlemetricsPlayerId = Array.from(normalize(name)).length >= 3 && live.length === 1 ?
                             live[0].battlemetricsPlayerId : null;
-                        const battlemetricsPlayerId = liveBattlemetricsPlayerId ||
-                            exactHistoricalBattlemetricsMatch(projection, steamId, name);
-                        events.push(identityEvent(options.scope, { steamId, battlemetricsPlayerId, name }, {
+                        let consolidated = Core.consolidateProjection(projection, {
+                            steamId, battlemetricsPlayerId: liveBattlemetricsPlayerId, name, caseFidelity: true
+                        });
+                        if (consolidated.status === 'conflict') {
+                            consolidated = Core.consolidateProjection(projection, {
+                                steamId, battlemetricsPlayerId: null, name,
+                                caseFidelity: true, allowExactName: false
+                            });
+                        }
+                        events.push(identityEvent(options.scope, consolidated.identity, {
                             guildId: options.context.guildId,
                             observedAt,
                             recordedAt,
                             source: WARBANDITS_LOOKUP_SOURCE,
                             sourceEventId: `warbandits-lookup:${token}:${steamId}`,
-                            confidence: battlemetricsPlayerId ? 'probable' : 'verified'
+                            confidence: consolidated.identity.battlemetricsPlayerId ? 'probable' : 'verified'
                         }));
-                        if (battlemetricsPlayerId) newlyRefreshed.add(steamId);
+                        if (consolidated.identity.battlemetricsPlayerId) newlyRefreshed.add(steamId);
                     }
                     observePlaytime(player, WARBANDITS_LOOKUP_SOURCE, observedAt);
                 }
@@ -445,21 +504,27 @@ async function runCycle(options) {
                 const observedAt = canonicalIso(scan.observedAt) || recordedAt;
                 if (!seen.has(steamId) && !newlySeen.has(steamId)) {
                     const live = onlineNames.get(normalize(name)) || [];
-                    let battlemetricsPlayerId = null;
-                    if (Array.from(normalize(name)).length >= 3 && live.length === 1 &&
-                        !hasConflictingBattlemetricsLink(projection, steamId, live[0].battlemetricsPlayerId)) {
-                        battlemetricsPlayerId = live[0].battlemetricsPlayerId;
+                    const liveBattlemetricsPlayerId = Array.from(normalize(name)).length >= 3 && live.length === 1 ?
+                        live[0].battlemetricsPlayerId : null;
+                    let consolidated = Core.consolidateProjection(projection, {
+                        steamId, battlemetricsPlayerId: liveBattlemetricsPlayerId, name, caseFidelity: true
+                    });
+                    if (consolidated.status === 'conflict') {
+                        consolidated = Core.consolidateProjection(projection, {
+                            steamId, battlemetricsPlayerId: null, name,
+                            caseFidelity: true, allowExactName: false
+                        });
                     }
-                    events.push(identityEvent(options.scope, { steamId, battlemetricsPlayerId, name }, {
+                    events.push(identityEvent(options.scope, consolidated.identity, {
                         guildId: options.context.guildId,
                         observedAt,
                         recordedAt,
                         source: WARBANDITS_SOURCE,
                         sourceEventId: `warbandits:${token}:${steamId}`,
-                        confidence: battlemetricsPlayerId ? 'probable' : 'verified'
+                        confidence: consolidated.identity.battlemetricsPlayerId ? 'probable' : 'verified'
                     }));
                     newlySeen.add(steamId);
-                    if (battlemetricsPlayerId) newlyRefreshed.add(steamId);
+                    if (consolidated.identity.battlemetricsPlayerId) newlyRefreshed.add(steamId);
                 }
                 observePlaytime(row, WARBANDITS_SOURCE, observedAt);
             }
@@ -471,7 +536,7 @@ async function runCycle(options) {
     newlyRefreshed.forEach(value => refreshed.add(value));
     let changed = forcedRescan || events.length > 0 || seen.size !== state.seenWarBanditsSteamIds.length ||
         targeted.size !== state.targetedLookupSteamIds.length ||
-        refreshed.size !== state.refreshedSteamIds.length;
+        refreshed.size !== state.refreshedSteamIds.length || profiled.size !== state.profiledSteamIds.length;
     if (scan && scan.available) {
         changed = true;
         if (scan.complete || scan.nextPage === null) {
@@ -487,6 +552,7 @@ async function runCycle(options) {
     state.seenWarBanditsSteamIds = [...seen].sort();
     state.targetedLookupSteamIds = [...targeted].sort();
     state.refreshedSteamIds = [...refreshed].sort();
+    state.profiledSteamIds = [...profiled].sort();
     state.updatedAt = recordedAt;
     if (changed || !Fs.existsSync(statePath(options.directory))) {
         await writeStateAtomic(statePath(options.directory), validateState(state, options));
@@ -498,6 +564,7 @@ async function runCycle(options) {
         warBanditsSeen: newlySeen.size,
         targetedLookups,
         metricsObserved,
+        steamProfilesRefreshed,
         nextWarBanditsPage: state.nextWarBanditsPage,
         warBanditsResumeAt: state.warBanditsResumeAt
     });

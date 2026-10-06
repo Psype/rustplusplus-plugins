@@ -21,7 +21,9 @@ review/correction output to Rust team chat.
   panels are detected semantically; every image or text batch still requires a Discord confirmation. Renaming the
   configured channel (for example to `intel-reports`) is safe because routing uses its Discord ID. Confirmed text IDs
   receive restart-safe, one-per-tick exact WarBandits enrichment; the background wipe leaderboard also collects names
-  and cumulative hours without treating them as online presence.
+  and cumulative hours without treating them as online presence. The same background cycle refreshes at most one
+  known Steam profile per tick and per wipe, preserving its current persona and returned past aliases as verified
+  history without making them presence evidence.
 - **/item** - Get the details of an item.
 - **/leader** - Transfer leadership.
 - **/map** - Display the In-Game Map.
@@ -43,8 +45,9 @@ review/correction output to Rust team chat.
   example `FUNTIK`, `gus`, and `+=import&**` on `BM:1192585926` count as one identity and three aliases.
 - `/intel merge alias:ChiCo target:Ch1co` performs an exact, reversible correction against an existing verified target.
 - `/intel link alias:ChiCo steamid:76561198154738095` performs the same correction when the SteamID64 is known directly.
-- `/intel history target:Ch1co page:1` lists only dated Steam/API-verified names; it never promotes `ChiCo` merely
-  because that typo was merged.
+- `/intel history target:Ch1co page:1` lists only dated Steam/API-verified names. Steam Community names are labelled
+  `[current Steam name]` or `[past Steam alias]`; the command never promotes `ChiCo` merely because that typo was
+  merged.
 - `/intel links page:1` audits active rules, and `/intel unlink alias:ChiCo` revokes a wrong rule without deleting data.
 - `/intelimport cinfo image:<file>` and `/intelimport f7 image:<file>` create private previews that must be confirmed.
   F7 never proves presence; each `/cinfo` panel uses its own GMT `Established`, not the upload date, to derive its wipe.
@@ -65,7 +68,7 @@ review/correction output to Rust team chat.
 - **decay** - `!decay [item]` - Display the decay time of an item.
 - **despawn** - `!despawn [item]` - Display the despawn time of an item.
 - **language** - `!language [code]` - Show or change the bot language for this server.
-- **intel** - `!intel [SteamID64|BattleMetrics ID|partial name]` - Return the closest known identity without a selector and show its complete compact local profile: current identity, verified aliases, reliable presence, known tags, repeated clanmates, and rolling activity.
+- **intel** - `!intel [SteamID64|BattleMetrics ID|partial name]` - Return the closest known identity without a selector and show its complete compact local profile: current identity, verified current/past aliases, reliable presence, known tags, repeated clanmates, and rolling activity.
 - **leader** - `!leader [teammate]` - Transfer leadership.
 - **logs** - `!logs [on|off]` - Show, enable, or disable bot file/debug logging.
 - **marker/markers** - `!marker [name]` or `!markers` - Set markers to navigate to.

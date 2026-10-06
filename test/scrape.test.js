@@ -85,3 +85,38 @@ Test('a transient Steam profile failure expires after thirty seconds without an 
         Scrape.scrape = originalScrape;
     }
 });
+
+Test('Steam identity lookup returns the current persona separately from verified past aliases', async () => {
+    const original = Scrape.scrape;
+    const calls = [];
+    Scrape.scrape = async url => {
+        calls.push(url);
+        if (url.endsWith('?xml=1')) {
+            return { status: 200, data: '<profile><steamID><![CDATA[FUNTIK]]></steamID></profile>' };
+        }
+        return { status: 200, data: [
+            { newname: '+=import&amp;**', timechanged: '6 Oct, 2026 @ 1:00pm' },
+            { newname: 'gus', timechanged: '5 Oct, 2026 @ 1:00pm' },
+            { newname: 'FUNTIK', timechanged: '4 Oct, 2026 @ 1:00pm' },
+            { newname: 'gus', timechanged: '3 Oct, 2026 @ 1:00pm' }
+        ] };
+    };
+    try {
+        Assert.deepEqual(await Scrape.scrapeSteamProfileIdentity(client([]), '76561199237622445'), {
+            steamId: '76561199237622445',
+            currentName: 'FUNTIK',
+            pastAliases: [
+                { name: '+=import&**', timeChanged: '6 Oct, 2026 @ 1:00pm' },
+                { name: 'gus', timeChanged: '5 Oct, 2026 @ 1:00pm' }
+            ],
+            aliasesComplete: true
+        });
+        Assert.deepEqual(calls.sort(), [
+            `${Constants.STEAM_PROFILES_URL}76561199237622445?xml=1`,
+            `${Constants.STEAM_PROFILES_URL}76561199237622445/ajaxaliases/`
+        ].sort());
+    }
+    finally {
+        Scrape.scrape = original;
+    }
+});

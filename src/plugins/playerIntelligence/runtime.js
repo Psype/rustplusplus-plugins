@@ -2,6 +2,7 @@
 const Crypto = require('node:crypto');
 const Path = require('node:path');
 
+const Scrape = require('../../util/scrape.js');
 const Core = require('./index.js');
 const F7IdentityValidation = require('./f7IdentityValidation.js');
 const IdentityAdministration = require('./identityAdministration.js');
@@ -176,12 +177,17 @@ function getStore(context, scope) {
 
 /** @param {any} context @param {any} scope @param {any} store @param {any} dependencies */
 function playerScanOptions(context, scope, store, dependencies) {
+    const scanDependencies = { ...dependencies };
+    if (!Object.hasOwn(scanDependencies, 'steamProfileIdentity')) {
+        scanDependencies.steamProfileIdentity = (/** @type {string} */ steamId) =>
+            Scrape.scrapeSteamProfileIdentity(context.client, steamId);
+    }
     return Object.freeze({
         context,
         scope,
         store,
         directory: typeof store.directory === 'string' ? store.directory : getDataDirectory(context, scope),
-        dependencies,
+        dependencies: Object.freeze(scanDependencies),
         warBanditsProvider: dependencies.warBanditsProvider || null
     });
 }
@@ -234,6 +240,21 @@ function identityEvent(scope, identity, details) {
         battlemetricsPlayerId: identity.battlemetricsPlayerId || null,
         exactName: identity.name || null
     }, { caseFidelity: identity.caseFidelity !== false }, details);
+}
+
+/** @param {any} projection @param {any} identity */
+function consolidateIdentity(projection, identity) {
+    const result = Core.consolidateProjection(projection, identity);
+    return Object.freeze({
+        ...result,
+        identity: Object.freeze({
+            ...identity,
+            steamId: result.identity.steamId,
+            battlemetricsPlayerId: result.identity.battlemetricsPlayerId,
+            name: result.identity.name,
+            caseFidelity: result.identity.caseFidelity
+        })
+    });
 }
 
 /** @param {any} scope @param {any} identity @param {string} state @param {any} details */
@@ -332,14 +353,16 @@ async function identityCandidates(context) {
     }
     const unique = new Map();
     for (const value of values) {
-        if (!value.name) continue;
-        const key = `${value.steamId || ''}\u0000${value.battlemetricsPlayerId || ''}\u0000${value.name}`;
+        const consolidated = consolidateIdentity(projection, value);
+        if (consolidated.status === 'conflict' || !consolidated.identity.name) continue;
+        const identity = consolidated.identity;
+        const key = `${identity.steamId || ''}\u0000${identity.battlemetricsPlayerId || ''}\u0000${identity.name}`;
         const previous = unique.get(key);
         unique.set(key, Object.freeze({
-            name: value.name,
-            steamId: value.steamId || null,
-            battlemetricsPlayerId: value.battlemetricsPlayerId || null,
-            caseFidelity: Boolean(previous && previous.caseFidelity) || value.caseFidelity !== false,
+            name: identity.name,
+            steamId: identity.steamId || null,
+            battlemetricsPlayerId: identity.battlemetricsPlayerId || null,
+            caseFidelity: Boolean(previous && previous.caseFidelity) || identity.caseFidelity !== false,
             knownClanTags: Object.freeze([...new Set([
                 ...(previous && previous.knownClanTags || []), ...(value.knownClanTags || [])
             ])].sort())
@@ -401,8 +424,9 @@ async function onBattlemetricsUpdated(context) {
         confidence: 'verified', evidence: null };
     const events = [];
     for (const identity of legacyRows) {
-        if (hasIdentity(projection, identity)) continue;
-        events.push(identityEvent(scope, identity, {
+        const consolidated = consolidateIdentity(projection, identity);
+        if (consolidated.status === 'conflict' || hasIdentity(projection, consolidated.identity)) continue;
+        events.push(identityEvent(scope, consolidated.identity, {
             guildId: context.guildId,
             observedAt: identity.observedAt,
             recordedAt,
@@ -460,22 +484,27 @@ async function onBattlemetricsUpdated(context) {
     const identityIds = new Set([...presenceStates.keys(),
         ...changedIds.map((/** @type {any} */ id) => `${id}`)]);
     for (const playerId of identityIds) {
-        const identity = bmPlayer(scope.battlemetrics, playerId);
-        if (!identity) continue;
-        events.push(identityEvent(scope, identity, {
+        const observed = bmPlayer(scope.battlemetrics, playerId);
+        if (!observed) continue;
+        const consolidated = consolidateIdentity(projection, observed);
+        if (consolidated.status === 'conflict') continue;
+        events.push(identityEvent(scope, consolidated.identity, {
             ...common, sourceEventId: `poll:${observedAt}:identity:${playerId}`
         }));
     }
     for (const [playerId, state] of presenceStates) {
-        const identity = bmPlayer(scope.battlemetrics, playerId);
-        if (!identity) continue;
-        events.push(presenceEvent(scope, identity, state, {
+        const observed = bmPlayer(scope.battlemetrics, playerId);
+        if (!observed) continue;
+        const consolidated = consolidateIdentity(projection, observed);
+        if (consolidated.status === 'conflict') continue;
+        events.push(presenceEvent(scope, consolidated.identity, state, {
             ...common, sourceEventId: `poll:${observedAt}:presence:${state}:${playerId}`
         }));
     }
     for (const identity of trackerIdentities) {
-        if (hasIdentity(projection, identity)) continue;
-        events.push(identityEvent(scope, identity, {
+        const consolidated = consolidateIdentity(projection, identity);
+        if (consolidated.status === 'conflict' || hasIdentity(projection, consolidated.identity)) continue;
+        events.push(identityEvent(scope, consolidated.identity, {
             ...common,
             source: 'player-tracker',
             sourceEventId: `link:${identity.battlemetricsPlayerId}:${identity.steamId}:${identity.name}`,
@@ -527,22 +556,24 @@ function parseManualIdentity(query) {
 /** @param {any} context @param {any} scope @param {any} store @param {any} identity */
 async function recordManualIdentity(context, scope, store, identity) {
     const projection = Core.rebuild(await store.readAll());
-    const battlemetricsMatches = projection.identities.findByIdentifier(identity.battlemetricsPlayerId);
-    const conflictingSteamIds = [...new Set(battlemetricsMatches
-        .map((/** @type {any} */ person) => person.steamId).filter(Boolean))]
-        .filter((/** @type {string} */ steamId) => steamId !== identity.steamId);
-    if (conflictingSteamIds.length > 0) return Object.freeze({
-        appended: false, conflictSteamId: conflictingSteamIds[0]
-    });
-    const exact = projection.identities.findByIdentifier(identity.steamId).some((/** @type {any} */ person) =>
-        person.battlemetricsPlayerIds.includes(identity.battlemetricsPlayerId) &&
-        person.names.some((/** @type {any} */ alias) => alias.name === identity.name));
+    const consolidated = consolidateIdentity(projection, identity);
+    if (consolidated.status === 'conflict') {
+        const battlemetricsMatches = projection.identities.findByIdentifier(identity.battlemetricsPlayerId);
+        const [conflictSteamId] = [...new Set(battlemetricsMatches
+            .map((/** @type {any} */ person) => person.steamId).filter(Boolean))]
+            .filter((/** @type {string} */ steamId) => steamId !== identity.steamId);
+        return Object.freeze({ appended: false, conflictSteamId: conflictSteamId || identity.steamId });
+    }
+    const exact = projection.identities.findByIdentifier(consolidated.identity.steamId)
+        .some((/** @type {any} */ person) =>
+            person.battlemetricsPlayerIds.includes(consolidated.identity.battlemetricsPlayerId) &&
+            person.names.some((/** @type {any} */ alias) => alias.name === consolidated.identity.name));
     if (exact) return Object.freeze({ appended: false, conflictSteamId: null });
     const recordedAt = nowIso(getDependencies(context));
     const sourceEventId = `manual:${Crypto.createHash('sha256').update([
         identity.steamId, identity.battlemetricsPlayerId, identity.name
     ].join('\u0000')).digest('hex')}`;
-    const event = identityEvent(scope, { ...identity, caseFidelity: true }, {
+    const event = identityEvent(scope, { ...consolidated.identity, caseFidelity: true }, {
         guildId: context.guildId,
         observedAt: recordedAt,
         recordedAt,
@@ -707,6 +738,7 @@ function affinityLines(projection, person) {
 function aliasesLine(person) {
     return boundedList('Aliases', person.names.filter((/** @type {any} */ alias) => alias.verified)
     .sort((/** @type {any} */ left, /** @type {any} */ right) =>
+        Number(right.steamStatus === 'current') - Number(left.steamStatus === 'current') ||
         `${right.lastVerifiedAt || right.lastObservedAt}`.localeCompare(
             `${left.lastVerifiedAt || left.lastObservedAt}`) || left.name.localeCompare(right.name))
     .map((/** @type {any} */ alias) => alias.name));
@@ -907,9 +939,20 @@ function scopeForReplacement(activeScope, events) {
     return Object.freeze({ ...activeScope, wipeStart, wipeId: wipeIds[0] });
 }
 
+/** @param {any} projection @param {any} identity */
+function consolidatedImportIdentity(projection, identity) {
+    const result = consolidateIdentity(projection, identity);
+    if (result.status === 'conflict') {
+        throw new Error(`Imported identity conflicts with local stable-ID history: ${identity.name ||
+            identity.steamId || identity.battlemetricsPlayerId}.`);
+    }
+    return result.identity;
+}
+
 /** @param {any} context @param {any} scope @param {any} parsed @param {any} metadata @param {string} recordedAt
- * @param {string|null} revision */
-function importEvents(context, scope, parsed, metadata, recordedAt, revision = null) {
+ * @param {string|null} revision @param {any} projection */
+function importEvents(context, scope, parsed, metadata, recordedAt, revision = null,
+    projection = Core.rebuild(Object.freeze([]))) {
     const hash = `${metadata.sha256}`.toLowerCase();
     const sourceBase = revision === null ? hash : `${hash}:revision:${revision}`;
     const observedAt = canonicalIso(metadata.observedAt) || recordedAt;
@@ -920,17 +963,20 @@ function importEvents(context, scope, parsed, metadata, recordedAt, revision = n
         evidence: { hash, reference: metadata.reference || null, expiresAt: null } };
     const events = [];
     if (parsed.kind === 'f7') {
-        parsed.entries.forEach((/** @type {any} */ entry, /** @type {number} */ index) =>
-            events.push(identityEvent(scope, {
-            steamId: entry.steamId,
-            battlemetricsPlayerId: textSteamIdList ? entry.battlemetricsPlayerId || null : null,
-            name: entry.name,
-            caseFidelity: textSteamIdList ? entry.caseFidelity !== false : false
-        }, { ...common, confidence: entry.identityConfidence || common.confidence,
-            sourceEventId: `${sourceBase}:${textSteamIdList ? 'steamid-list' : 'f7'}:${index}:${entry.steamId}` })));
+        parsed.entries.forEach((/** @type {any} */ entry, /** @type {number} */ index) => {
+            const identity = consolidatedImportIdentity(projection, {
+                steamId: entry.steamId,
+                battlemetricsPlayerId: textSteamIdList ? entry.battlemetricsPlayerId || null : null,
+                name: entry.name,
+                caseFidelity: textSteamIdList ? entry.caseFidelity !== false : false
+            });
+            events.push(identityEvent(scope, identity,
+                { ...common, confidence: entry.identityConfidence || common.confidence,
+                    sourceEventId: `${sourceBase}:${textSteamIdList ? 'steamid-list' : 'f7'}:${index}:${entry.steamId}` }));
+        });
     }
     else {
-        const resolvedMembers = Array.isArray(parsed.resolvedMembers) ? parsed.resolvedMembers :
+        const sourceMembers = Array.isArray(parsed.resolvedMembers) ? parsed.resolvedMembers :
             parsed.members.map((/** @type {any} */ member) => ({
                 observedText: member.name,
                 name: member.name,
@@ -938,6 +984,15 @@ function importEvents(context, scope, parsed, metadata, recordedAt, revision = n
                 battlemetricsPlayerId: null,
                 role: member.role
             }));
+        const resolvedMembers = sourceMembers.map((/** @type {any} */ member) => ({
+            ...member,
+            ...consolidatedImportIdentity(projection, {
+                steamId: member.steamId,
+                battlemetricsPlayerId: member.battlemetricsPlayerId,
+                name: member.name,
+                caseFidelity: member.caseFidelity !== false
+            })
+        }));
         const unresolvedMembers = Array.isArray(parsed.unresolvedMembers) ? parsed.unresolvedMembers : [];
         resolvedMembers.forEach((/** @type {any} */ member, /** @type {number} */ index) =>
             events.push(identityEvent(scope, {
@@ -1083,8 +1138,11 @@ async function commitParsedImports(context, imports, options = {}) {
                 observedAt: canonicalIso(item.metadata.observedAt) || previousEvents[0].observedAt };
             const replacementScope = item.metadata.observedAt ? scopeForImport(scope, item.metadata) :
                 scopeForReplacement(scope, previousEvents);
+            const replacedIds = new Set(previousEvents.map((/** @type {any} */ event) => event.eventId));
+            const replacementProjection = Core.rebuild(Object.freeze(
+                [...effective, ...events].filter((/** @type {any} */ event) => !replacedIds.has(event.eventId))));
             events.push(...importEvents(context, replacementScope, item.parsed, replacementMetadata, recordedAt,
-                revision));
+                revision, replacementProjection));
             events.push(supersessionEvent(context, replacementScope, replacementMetadata, recordedAt, revision,
                 previousEvents));
             replaced += 1;
@@ -1094,8 +1152,9 @@ async function commitParsedImports(context, imports, options = {}) {
         hashes.add(hash);
         imported += 1;
         committedHashes.push(hash);
+        const importProjection = Core.rebuild(Object.freeze([...effective, ...events]));
         events.push(...importEvents(context, scopeForImport(scope, item.metadata), item.parsed, item.metadata,
-            recordedAt));
+            recordedAt, null, importProjection));
     }
     const results = events.length > 0 ? await store.appendMany(events) : [];
     return Object.freeze({
@@ -1138,9 +1197,13 @@ async function recordWarBanditsIdentity(context, player, observedAt) {
     const name = sanitize(player.name);
     const time = canonicalIso(observedAt);
     if (!name || !time) return false;
-    const event = identityEvent(scope, {
+    const store = getStore(context, scope);
+    const projection = Core.rebuild(await store.readAll());
+    const consolidated = consolidateIdentity(projection, {
         steamId: `${player.steamId}`, battlemetricsPlayerId: null, name, caseFidelity: true
-    }, {
+    });
+    if (consolidated.status === 'conflict') return false;
+    const event = identityEvent(scope, consolidated.identity, {
         guildId: context.guildId,
         observedAt: time,
         recordedAt: nowIso(getDependencies(context)),
@@ -1149,7 +1212,7 @@ async function recordWarBanditsIdentity(context, player, observedAt) {
         confidence: 'verified',
         evidence: null
     });
-    return (await getStore(context, scope).append(event)).appended;
+    return (await store.append(event)).appended;
 }
 
 module.exports = Object.freeze({
@@ -1157,6 +1220,7 @@ module.exports = Object.freeze({
     boundedList,
     commitParsedImport,
     commitParsedImports,
+    consolidateIdentity,
     getDataDirectory,
     getScope,
     handleCommand,

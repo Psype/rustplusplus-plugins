@@ -227,11 +227,14 @@ module.exports = Object.freeze({
             if (!target.person) return editReply(client, interaction, failure(target.reason));
             const values = target.person.names.filter((/** @type {any} */ alias) => alias.verified)
                 .sort((/** @type {any} */ left, /** @type {any} */ right) =>
+                    Number(right.steamStatus === 'current') - Number(left.steamStatus === 'current') ||
                     `${right.lastVerifiedAt || right.lastObservedAt}`.localeCompare(
                         `${left.lastVerifiedAt || left.lastObservedAt}`));
             const page = interaction.options.getInteger('page') || 1;
             return editReply(client, interaction, paginated(values, page, value =>
-                `- ${JSON.stringify(truncate(value.name, 80))} - first ${value.firstObservedAt.slice(0, 10)} ` +
+                `- ${JSON.stringify(truncate(value.name, 80))}${value.steamStatus === 'current' ?
+                    ' [current Steam name]' : value.steamStatus === 'past' ? ' [past Steam alias]' : ''}` +
+                    ` - first ${value.firstObservedAt.slice(0, 10)} ` +
                     `- last ${(value.lastVerifiedAt || value.lastObservedAt).slice(0, 10)}`,
             `Verified alias history for ${target.displayName} (Steam:${target.steamId})`,
             'No verified alias exists for that identity.'));

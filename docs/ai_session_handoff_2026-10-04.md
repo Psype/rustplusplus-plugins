@@ -17,17 +17,18 @@ Avant toute modification :
 4. ne fais ni reset, ni checkout destructif, ni réécriture globale du worktree ;
 5. ne prétends jamais qu’un comportement fonctionne en production sur la seule base des tests locaux.
 
-État observé au dernier audit : branche master, HEAD/origin/master alignés sur la release 1.22.28 et worktree propre.
+État observé au dernier audit : branche master, HEAD/origin/master alignés sur la release 1.22.29 et worktree propre.
 Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; `a308c0a` ajoute la
 1.22.27. La release suivante 1.22.28 groupe les alias pending par identité BattleMetrics et ajoute le fallback
-WarBandits courant -> intervalle historique pertinent -> all-time.
+WarBandits courant -> intervalle historique pertinent -> all-time. La release 1.22.29 centralise toute consolidation
+locale SteamID/BattleMetrics/pseudo et collecte en arrière-plan le nom Steam courant plus ses alias Steam passés.
 La première conserve les identifiants de ligne TSV
 Tesseract pour empêcher un pseudo /cinfo replié (U Got Kirkified) d’absorber Established, accepte la confusion l/I/1
 uniquement dans l’ancre et garde une date illisible éditable avec Confirm désactivé. La seconde ajoute la
 réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
 d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La suivante borne les délais de réponse
 Discord/traduction et la dernière fiabilise la sémantique des identités connues et des wipes WarBandits. La dernière
-validation complète a passé 259/259 tests et tsc --noEmit ; le déploiement et la
+validation complète a passé 266/266 tests et tsc --noEmit ; le déploiement et la
 nouvelle capture Discord restent à valider réellement.
 
 Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
@@ -44,8 +45,8 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 - Dépôt : `rustplusplus-plugins`.
 - Branche au moment de la passation : `master`.
-- `HEAD`, `origin/master` et `origin/HEAD` : alignés sur la release `1.22.28` au dernier audit du 6 octobre 2026.
-- Version canonique du worktree : `1.22.28` dans `package.json` et `package-lock.json`.
+- `HEAD`, `origin/master` et `origin/HEAD` : alignés sur la release `1.22.29` au dernier audit du 6 octobre 2026.
+- Version canonique du worktree : `1.22.29` dans `package.json` et `package-lock.json`.
 - Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
   métrique d’heures WarBandits.
 - Le commit utilisateur `d327e7d` regroupe les releases `1.22.24` à `1.22.26`, notamment dans :
@@ -83,12 +84,34 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
   - les tests WarBandits, import, résolution, daemon, runtime et Discord associés ;
   - `package.json`, `package-lock.json`, `MEMORY.md` et les documentations player-intelligence/commandes/sources.
 
+- La release `1.22.29` ajoute la consolidation locale unique et l'historique d'alias Steam, notamment dans :
+
+  - `src/plugins/playerIntelligence/identityConsolidator.js`, `runtime.js`, `scanDaemon.js`, `identityProjector.js`,
+    `importWorkflow.js` et `index.js` ;
+  - `src/util/scrape.js` et `src/commands/intel.js` ;
+  - les tests de consolidation, daemon, Steam et les documentations d'architecture/commandes/sources.
+
 - Il ne reste qu'une branche locale `master`. Les deux anciennes branches `origin/codex/*`, déjà entièrement intégrées,
   ont été supprimées ; le suivi de l'amont est limité à `upstream/master`, avec pruning automatique des références.
 
 Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
 
-## Dernière correction : release 1.22.28
+## Dernière correction : release 1.22.29
+
+Toute observation contenant un SteamID64, un BattleMetrics ID ou un pseudo exact traverse désormais la même frontière
+locale avant journalisation. Elle consulte la projection existante, complète les champs manquants lorsqu'un identifiant
+stable ou un unique nom exact fiable suffit, renvoie les correspondances/conflits/ambiguïtés et produit un événement
+Steam+BM lorsqu'une liaison est prouvée. Les correspondances partielles/floues servent uniquement aux consultations ;
+elles ne peuvent jamais écrire un lien. Une faute OCR non vérifiée, une collision de noms ou un couple stable
+contradictoire reste pending ou manuel.
+
+Le daemon utilise aussi le profil Steam Community lié au SteamID64. Une fois par SteamID et par wipe, à raison d'un
+profil maximum par tick existant, il conserve le persona actuel comme `current` et les noms renvoyés par
+`/ajaxaliases/` comme alias vérifiés `past`. Ces anciens noms n'effectuent aucune liaison exacte et ne peuvent jamais
+remplacer le persona courant comme nom d'affichage. `/intel history` les étiquette explicitement. Cette collecte reste
+hors du délai initial Discord et ne constitue jamais une preuve de présence.
+
+## Correction précédente : release 1.22.28
 
 `/intel pending` compte désormais les personnes séparément de leurs alias. Une identité BattleMetrics sans SteamID64
 produit une seule ligne, avec son nom d'affichage courant et ses autres pseudos : `FUNTIK`, `gus` et `+=import&**`
@@ -196,9 +219,9 @@ inventer ni commiter silencieusement.
 
 ## Validation déjà effectuée
 
-Le 6 octobre 2026, après les releases 1.22.24 à 1.22.28 :
+Le 6 octobre 2026, après les releases 1.22.24 à 1.22.29 :
 
-- `npm.cmd test` : `259/259` tests unitaires réussis ;
+- `npm.cmd test` : `266/266` tests unitaires réussis ;
 - `tsc --noEmit -p .` : réussi dans la même commande ;
 - `git diff --check` : aucune erreur ;
 - `npm.cmd run test:autotranslate:live` : réussi en 8,9 s pour six scénarios cumulés ; Bing a atteint sa borne de deux
@@ -208,7 +231,8 @@ Le 6 octobre 2026, après les releases 1.22.24 à 1.22.28 :
   agrégation inter-captures/déduplication intra-capture, séparation alias vérifiés/OCR pending, persona Steam courant,
   réponses Discord éphémères, historique filtré, révocation, accusé `/intel` avant tout travail, budget total de
   traduction, regroupement des alias BattleMetrics pending, liens `/cinfo` adossés à un identifiant et fallback de
-  wipes WarBandits avec ambiguïté manuelle et jointure Steam/BM exacte non conflictuelle.
+  wipes WarBandits avec ambiguïté manuelle et jointure Steam/BM exacte non conflictuelle, consolidation locale unique,
+  conflits/ambiguïtés fermés et alias Steam courants/passés vérifiés.
 
 Ces résultats ne prouvent ni le comportement du binaire Tesseract installé sur Linux, ni le téléchargement Discord, ni
 les fournisseurs externes, ni le processus de déploiement.
@@ -243,6 +267,8 @@ les fournisseurs externes, ni le processus de déploiement.
 ### Journal, requêtes et daemon
 
 - `src/plugins/playerIntelligence/historyStore.js` : journal JSONL mensuel, append sérialisé, corruption bloquante.
+- `src/plugins/playerIntelligence/identityConsolidator.js` : frontière unique SteamID/BattleMetrics/pseudo exact vers
+  une identité locale enrichie ; aucune correspondance floue ne peut muter le journal.
 - `src/plugins/playerIntelligence/runtime.js` et les projecteurs : reconstruction
   identité/clan/activité/présence/métriques.
 - `src/plugins/playerIntelligence/scanDaemon.js` : une page WarBandits bornée par tick BattleMetrics existant, état
@@ -286,7 +312,7 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
 
 ## Vérifications de production encore ouvertes
 
-1. Déployer/redémarrer `1.22.28`, vérifier le message `RUSTPLUS v1.22.28 OPERATIONAL`, puis réimporter l’image KIRK
+1. Déployer/redémarrer `1.22.29`, vérifier le message `RUSTPLUS v1.22.29 OPERATIONAL`, puis réimporter l’image KIRK
    originale dans le canal d’intelligence. Exiger `U Got Kirkified` et un `Established` séparé.
 2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent
    des boîtes déterministes et ne remplacent pas ce contrôle.
