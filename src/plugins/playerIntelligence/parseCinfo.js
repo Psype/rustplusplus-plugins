@@ -2,6 +2,7 @@
 const Layout = require('./ocrLayout.js');
 
 const ROLE_VALUES = Object.freeze(['leader', 'moderator', 'member', 'unknown']);
+const ESTABLISHED_ANCHOR = /estab[l1i][i1l]shed\s*:/iu;
 
 /** @param {Record<string, unknown>[]} values */
 function freezeArray(values) {
@@ -17,6 +18,21 @@ function normalized(value) {
 function valueAfterAnchor(text, expression) {
     const match = expression.exec(text);
     return match ? Layout.cleanText(text.slice(match.index + match[0].length)) : null;
+}
+
+/** @param {unknown} value */
+function establishedAnchorMatch(value) {
+    return ESTABLISHED_ANCHOR.exec(`${value || ''}`);
+}
+
+/** @param {unknown} value */
+function hasEstablishedAnchor(value) {
+    return establishedAnchorMatch(value) !== null;
+}
+
+/** @param {unknown} value */
+function hasEstablishedLabel(value) {
+    return /^estab[l1i][i1l]shed:?$/iu.test(Layout.cleanText(value));
 }
 
 /** @param {string} value */
@@ -97,7 +113,8 @@ function parseCinfoWords(inputWords, options = {}) {
     const countIndex = lines.findIndex(line => /^.*?members\s*:\s*\d+/iu.test(line.text) &&
         !/clan\s+members\s*:/iu.test(line.text));
     const rosterIndex = lines.findIndex(line => /clan\s+members\s*:/iu.test(line.text));
-    const establishedIndex = lines.findIndex(line => /established\s*:/iu.test(line.text));
+    const establishedIndex = lines.findIndex((line, index) => index >= Math.max(0, rosterIndex) &&
+        hasEstablishedAnchor(line.text));
     const errors = [];
 
     if (tagIndex === -1) errors.push('ClanTag anchor not found.');
@@ -118,10 +135,17 @@ function parseCinfoWords(inputWords, options = {}) {
 
     let rosterText = '';
     if (rosterIndex !== -1) {
-        rosterText = valueAfterAnchor(lines[rosterIndex].text, /clan\s+members\s*:/iu) || '';
-        const rosterEnd = establishedIndex > rosterIndex ? establishedIndex : lines.length;
-        for (let index = rosterIndex + 1; index < rosterEnd; index += 1) {
-            rosterText = Layout.cleanText(`${rosterText} ${lines[index].text}`);
+        const firstLine = lines[rosterIndex].text;
+        const rosterAnchor = /clan\s+members\s*:/iu.exec(firstLine);
+        const firstBoundary = establishedAnchorMatch(firstLine);
+        const rosterStart = rosterAnchor ? rosterAnchor.index + rosterAnchor[0].length : firstLine.length;
+        const rosterEnd = firstBoundary && firstBoundary.index >= rosterStart ? firstBoundary.index : firstLine.length;
+        rosterText = Layout.cleanText(firstLine.slice(rosterStart, rosterEnd));
+        for (let index = rosterIndex + 1; index < lines.length; index += 1) {
+            const boundary = establishedAnchorMatch(lines[index].text);
+            const continuation = boundary ? lines[index].text.slice(0, boundary.index) : lines[index].text;
+            rosterText = Layout.cleanText(`${rosterText} ${continuation}`);
+            if (boundary) break;
         }
     }
     const memberNames = splitMembers(rosterText, declaredCount);
@@ -131,7 +155,7 @@ function parseCinfoWords(inputWords, options = {}) {
     if (!complete) errors.push(`Roster count mismatch: expected ${declaredCount || '?'}, read ${memberNames.length}.`);
 
     const establishedRaw = establishedIndex === -1 ? '' :
-        valueAfterAnchor(lines[establishedIndex].text, /established\s*:/iu) || '';
+        valueAfterAnchor(lines[establishedIndex].text, ESTABLISHED_ANCHOR) || '';
     const establishedAtUtc = parseEstablished(establishedRaw);
     if (!establishedAtUtc) errors.push('Established timestamp is invalid.');
 
@@ -157,6 +181,9 @@ function parseCinfoWords(inputWords, options = {}) {
 
 module.exports = Object.freeze({
     applyRoleHints,
+    establishedAnchorMatch,
+    hasEstablishedAnchor,
+    hasEstablishedLabel,
     parseCinfoWords,
     parseEstablished,
     splitCinfoWordBlocks,

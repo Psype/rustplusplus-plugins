@@ -46,7 +46,7 @@ function clanSnapshot(options = {}) {
             tag: options.tag || 'BEHO',
             establishedAt: options.establishedAt || '2026-09-29T16:02:03.000Z',
             complete: true,
-            declaredMemberCount: 2,
+            declaredMemberCount: Object.hasOwn(options, 'declaredMemberCount') ? options.declaredMemberCount : 2,
             members: options.members || [
                 { name: 'Alice', steamId: STEAM_A, battlemetricsPlayerId: null, role: 'leader' },
                 { name: 'Bob', steamId: STEAM_B, battlemetricsPlayerId: null, role: 'member' }
@@ -184,6 +184,75 @@ Test('identity projection joins stable IDs and keeps name-only links reversible'
     Assert.equal(revoked.activeLinks.length, 0);
     Assert.equal(revoked.resolveSubject({
         steamId: null, battlemetricsPlayerId: null, exactName: 'Alice'
+    }).personId.startsWith('name:'), true);
+});
+
+Test('manual reconciliation reprojects clan history without promoting an OCR error to verified alias', () => {
+    const events = [
+        identity({ observedAt: '2026-09-30T10:00:00.000Z',
+            subject: { steamId: STEAM_A, battlemetricsPlayerId: null, exactName: 'Psype' } }),
+        identity({ observedAt: '2026-09-30T10:00:01.000Z',
+            subject: { steamId: STEAM_B, battlemetricsPlayerId: null, exactName: 'Ch1co' } }),
+        identity({ observedAt: '2026-09-30T10:00:02.000Z',
+            subject: { steamId: null, battlemetricsPlayerId: null, exactName: 'ChiCo' } }),
+        clanSnapshot({ observedAt: '2026-09-30T10:01:00.000Z', hash: '1'.repeat(64),
+            members: [
+                { name: 'Psype', steamId: STEAM_A, battlemetricsPlayerId: null, role: 'leader' },
+                { name: 'ChiCo', steamId: null, battlemetricsPlayerId: null, role: 'member' }
+            ] }),
+        clanSnapshot({ observedAt: '2026-09-30T10:02:00.000Z', hash: '2'.repeat(64),
+            members: [
+                { name: 'Psype', steamId: STEAM_A, battlemetricsPlayerId: null, role: 'leader' },
+                { name: 'Ch1co', steamId: STEAM_B, battlemetricsPlayerId: null, role: 'member' }
+            ] }),
+        clanSnapshot({ observedAt: '2026-09-30T10:03:00.000Z', hash: '3'.repeat(64),
+            members: [
+                { name: 'Psype', steamId: STEAM_A, battlemetricsPlayerId: null, role: 'leader' },
+                { name: 'ChiCo', steamId: null, battlemetricsPlayerId: null, role: 'member' },
+                { name: 'Ch1co', steamId: STEAM_B, battlemetricsPlayerId: null, role: 'member' }
+            ], declaredMemberCount: 3 })
+    ];
+    const link = event('identity_linked', {
+        observedAt: '2026-09-30T10:04:00.000Z',
+        subject: { steamId: null, battlemetricsPlayerId: null, exactName: 'ChiCo' },
+        payload: {
+            linkId: 'discord-chico', targetSteamId: STEAM_B, targetBattlemetricsPlayerId: null,
+            targetName: 'Ch1co', targetNameSource: 'verified-history', reason: 'operator correction'
+        }
+    });
+    const unverifiedTargetName = event('identity_linked', {
+        observedAt: '2026-09-30T10:04:01.000Z',
+        subject: { steamId: null, battlemetricsPlayerId: null, exactName: 'Another OCR error' },
+        payload: {
+            linkId: 'discord-unverified-name', targetSteamId: STEAM_B, targetBattlemetricsPlayerId: null,
+            targetName: 'Invented alias', reason: 'legacy link without name provenance'
+        }
+    });
+
+    const projection = PlayerIntelligence.rebuild([...events, link, unverifiedTargetName]);
+    const target = projection.identities.getPerson(`steam:${STEAM_B}`);
+    const affinity = projection.clans.getAffinity({
+        steamId: STEAM_A, battlemetricsPlayerId: null, exactName: null
+    });
+
+    Assert.equal(projection.identities.displayName(`steam:${STEAM_B}`), 'Ch1co');
+    Assert.deepEqual(target.names.map(alias => [alias.name, alias.verified]), [
+        ['Ch1co', true], ['ChiCo', false]
+    ]);
+    Assert.equal(target.names.some(alias => alias.name === 'Invented alias'), false);
+    Assert.deepEqual(affinity.playedWith, [{
+        personId: `steam:${STEAM_B}`, name: 'Ch1co', count: 3
+    }]);
+    Assert.equal(projection.clans.snapshots[2].members.length, 2);
+
+    const revoke = event('identity_link_revoked', {
+        observedAt: '2026-09-30T10:05:00.000Z',
+        subject: { steamId: null, battlemetricsPlayerId: null, exactName: 'ChiCo' },
+        payload: { linkId: 'discord-chico', reason: 'operator correction' }
+    });
+    const restored = PlayerIntelligence.rebuild([...events, link, revoke]);
+    Assert.equal(restored.identities.resolveSubject({
+        steamId: null, battlemetricsPlayerId: null, exactName: 'ChiCo'
     }).personId.startsWith('name:'), true);
 });
 

@@ -301,9 +301,10 @@ Test('SteamID64 uses WarBandits identity before the generic Steam profile and li
     };
     harness.dependencies.httpClient = { get: async () => steamProfile(steamId) };
     harness.dependencies.warBanditsProvider = {
-        resolvePlayer: async (_context, scope, query) => {
+        resolvePlayer: async (_context, scope, query, options) => {
             Assert.equal(scope.battlemetricsId, '42');
             Assert.equal(query, steamId);
+            Assert.deepEqual(options, { wipe: 0 });
             return {
                 available: true,
                 player: {

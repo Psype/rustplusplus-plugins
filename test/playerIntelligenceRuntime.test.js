@@ -260,6 +260,71 @@ Test('record writes one durable server-wide Steam/BattleMetrics/name identity an
     Assert.equal(who.response, `Aliases: ${name}`);
 });
 
+Test('intel-family name lookups return the closest partial identity without a selector', async t => {
+    const value = harness(t);
+    const steamId = '76561198000000004';
+    await Runtime.handleCommand(value.command(`!record ${steamId} 778 Cockornut Tree`));
+
+    const intel = await Runtime.handleCommand(value.command('!intel tree'));
+    const who = await Runtime.handleCommand(value.command('!who cockornut'));
+
+    Assert.match(intel.response[0], new RegExp(`^Cockornut Tree \\| Steam:${steamId} \\| BM:778`));
+    Assert.equal(who.response, 'Aliases: Cockornut Tree');
+});
+
+Test('Discord identity administration lists pending aliases and keeps OCR corrections out of alias history',
+    async t => {
+        const value = harness(t);
+        const targetSteamId = '76561198154738095';
+        const scope = { guildId: 'guild', serverKey: 'battlemetrics:42',
+            wipeId: 'wipe:2026-09-29T14:00:00.000Z' };
+        const makeIdentity = (subject, observedAt, sourceEventId) => Core.createEvent({
+            schemaVersion: Core.SCHEMA_VERSION,
+            kind: 'identity_observed', observedAt, recordedAt: observedAt, scope, subject,
+            payload: { caseFidelity: true },
+            provenance: { source: 'test', sourceEventId, collectorVersion: 'test-1' },
+            confidence: 'verified', evidence: null
+        });
+        await value.store().appendMany([
+            makeIdentity({ steamId: targetSteamId, battlemetricsPlayerId: null, exactName: 'Ch1co' },
+                '2026-10-01T09:00:00.000Z', 'verified-ch1co'),
+            makeIdentity({ steamId: null, battlemetricsPlayerId: null, exactName: 'ChiCo' },
+                '2026-10-01T09:01:00.000Z', 'pending-chico')
+        ]);
+
+        const pending = await Runtime.listPendingAliases(value.context());
+        Assert.deepEqual(pending.map(item => item.name), ['ChiCo']);
+        const target = await Runtime.resolveIdentityTarget(value.context(), 'Ch1co');
+        Assert.equal(target.steamId, targetSteamId);
+
+        value.setNow('2026-10-01T10:01:00.000Z');
+        const linked = await Runtime.linkIdentityAlias(value.context(), {
+            alias: 'ChiCo', targetSteamId, targetName: 'Ch1co', targetNameSource: 'verified-history',
+            actorId: 'discord-admin'
+        });
+        Assert.equal(linked.changed, true);
+        Assert.deepEqual(linked.verifiedAliases, ['Ch1co']);
+        Assert.deepEqual(await Runtime.listPendingAliases(value.context()), []);
+        Assert.equal((await Runtime.listIdentityLinks(value.context()))[0].exactName, 'ChiCo');
+        Assert.equal((await Runtime.handleCommand(value.command(`!who ${targetSteamId}`))).response,
+            'Aliases: Ch1co');
+
+        const refreshed = await Runtime.linkIdentityAlias(value.context(), {
+            alias: 'ChiCo', targetSteamId, targetName: 'Ch1co Current', targetNameSource: 'steam-profile',
+            actorId: 'discord-admin'
+        });
+        Assert.equal(refreshed.changed, true);
+        Assert.equal((await Runtime.listIdentityLinks(value.context()))[0].targetName, 'Ch1co Current');
+        Assert.equal((await Runtime.handleCommand(value.command(`!who ${targetSteamId}`))).response,
+            'Aliases: Ch1co Current, Ch1co');
+
+        value.setNow('2026-10-01T10:02:00.000Z');
+        Assert.equal((await Runtime.unlinkIdentityAlias(value.context(), {
+            alias: 'ChiCo', actorId: 'discord-admin'
+        })).changed, true);
+        Assert.deepEqual((await Runtime.listPendingAliases(value.context())).map(item => item.name), ['ChiCo']);
+    });
+
 Test('scanplayers acknowledges a bounded background rescan without awaiting it', async t => {
     const value = harness(t);
     const requests = [];

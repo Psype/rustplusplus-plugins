@@ -5,6 +5,7 @@ const Fs = require('fs');
 const Path = require('path');
 
 const Constants = require('../../util/constants.js');
+const PlayerNameReconciler = require('../../util/playerNameReconciler.js');
 const Utils = require('../../util/utils.js');
 const BattlemetricsProvider = require('../battlemetrics');
 
@@ -234,32 +235,15 @@ function makeCandidate(player, now) {
 }
 
 function selectCandidate(candidates, query) {
-    const unique = [];
-    const ids = new Set();
-    for (const candidate of candidates) {
-        if (!candidate || !/^\d+$/.test(`${candidate.playerId}`) || ids.has(`${candidate.playerId}`)) continue;
-        ids.add(`${candidate.playerId}`);
-        unique.push(candidate);
-    }
-
-    const normalizedQuery = normalize(query);
-    const byId = unique.filter(candidate => `${candidate.playerId}` === query);
-    if (byId.length === 1) return Object.freeze({ candidate: byId[0], candidates: unique });
-
-    const nameMatches = unique.filter(candidate => normalize(candidate.name).includes(normalizedQuery));
-    const onlineMatches = nameMatches.filter(candidate => candidate.status === 'online');
-    const prioritized = onlineMatches.length > 0 ? onlineMatches : nameMatches;
-
-    const exact = prioritized.filter(candidate => normalize(candidate.name) === normalizedQuery);
-    if (exact.length === 1) return Object.freeze({ candidate: exact[0], candidates: unique });
-    if (exact.length > 1) return Object.freeze({ candidate: null, candidates: exact });
-
-    const prefix = prioritized.filter(candidate => normalize(candidate.name).startsWith(normalizedQuery));
-    if (prefix.length === 1) return Object.freeze({ candidate: prefix[0], candidates: unique });
-    if (prefix.length > 1) return Object.freeze({ candidate: null, candidates: prefix });
-
-    const partial = prioritized;
-    return Object.freeze({ candidate: partial.length === 1 ? partial[0] : null, candidates: partial });
+    const valid = candidates.filter(candidate => candidate && /^\d+$/.test(`${candidate.playerId}`));
+    const reconciliation = PlayerNameReconciler.reconcile(query, valid, {
+        mode: PlayerNameReconciler.MODE_PRECISE,
+        getAliases: candidate => candidate.name,
+        getIdentifiers: candidate => `${candidate.playerId}`,
+        getPriority: candidate => candidate.status === 'online' ? 1 : 0,
+        getKey: candidate => `${candidate.playerId}`
+    });
+    return Object.freeze({ candidate: reconciliation.target, candidates: reconciliation.candidates });
 }
 
 function localCandidates(battlemetrics, query, now) {
@@ -330,7 +314,7 @@ async function resolveWarBanditsPlayer(context, scope, query, dependencies) {
         const result = await provider.resolvePlayer(context, {
             battlemetricsId: scope.battlemetricsId,
             server: scope.server
-        }, query);
+        }, query, { wipe: 0 });
         const player = result && result.available === true && result.player;
         if (!player || !/^7656119\d{10}$/.test(`${player.steamId || ''}`) ||
             !/^\d+$/.test(`${player.warBanditsPlayerId || ''}`)) return null;
@@ -1100,15 +1084,13 @@ async function trackList(context, query, dependencies) {
 }
 
 function selectTrackedPlayer(players, query) {
-    const normalizedQuery = normalize(query);
-    const ids = players.filter(player => `${player.playerId}` === query || `${player.steamId}` === query);
-    if (ids.length === 1) return Object.freeze({ player: ids[0], matches: ids });
-    if (ids.length > 1) return Object.freeze({ player: null, matches: ids });
-    const exact = players.filter(player => normalize(player.name) === normalizedQuery);
-    if (exact.length === 1) return Object.freeze({ player: exact[0], matches: exact });
-    if (exact.length > 1) return Object.freeze({ player: null, matches: exact });
-    const partial = players.filter(player => normalize(player.name).includes(normalizedQuery));
-    return Object.freeze({ player: partial.length === 1 ? partial[0] : null, matches: partial });
+    const reconciliation = PlayerNameReconciler.reconcile(query, players, {
+        mode: PlayerNameReconciler.MODE_PRECISE,
+        getAliases: player => player.name,
+        getIdentifiers: player => [player.playerId, player.steamId],
+        getKey: player => `${player.playerId}`
+    });
+    return Object.freeze({ player: reconciliation.target, matches: reconciliation.candidates });
 }
 
 async function untrack(context, query, dependencies) {

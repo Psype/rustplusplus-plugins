@@ -1,9 +1,14 @@
 # Commands Documentation
 
-> Commands can be executed via Discord or In-Game Team Chat. To be able to run Slash Commands in Discord, you need to be part of the designated Discord Role for the bot. If no role is set for the bot then everyone should be able to use the Slash Commands by default. To be able to run In-Game Commands, you need to be in the same In-Game Team as the hoster. In-Game Commands can only be run from Team Chat, not global chat. You can also run In-Game commands from the Discord Text-Channel `commands`.
+> Slash commands beginning with `/` are Discord-only. Commands beginning with the configured prefix (shown as `!`
+> below) work from Rust team chat and from the Discord text channel `commands`; they never work from Rust global chat.
+> Rust team-chat users must be in the hoster's team. Discord permissions still apply to slash commands, and the
+> identity-administration `/intel` command additionally requires a Discord administrator.
 
 - [Discord Slash Commands](commands.md#discord-slash-commands)
+- [Discord-only identity correction examples](commands.md#discord-only-identity-correction-examples)
 - [In-Game and Discord Commands](commands.md#in-game-and-discord-commands)
+- [In-game player-intelligence examples](commands.md#in-game-player-intelligence-examples)
 
 # Discord Slash Commands
 
@@ -18,6 +23,7 @@ Slash Command | Description
 [**/decay**](commands.md#decay) | Display the decay time of an item.
 [**/despawn**](commands.md#despawn) | Display the despawn time of an item.
 [**/help**](commands.md#help) | Display help message.
+[**/intel**](commands.md#intel-discord) | Privately review and reconcile pending player identities.
 [**/intelimport**](commands.md#intelimport) | OCR, preview, and confirm a `/cinfo` or F7 screenshot.
 [**/item**](commands.md#item) | Get the details of an item.
 [**/leader**](commands.md#leader) | Give or take the leadership from/to a team member.
@@ -157,6 +163,60 @@ Options | Description | Required
 ![Discord Slash Command help Image](images/slash_commands/help.png)
 
 
+## **/intel (Discord)**
+
+> **Privately review and correct player identities without sending commands to Rust team chat.** Every response is
+> ephemeral and every subcommand requires a Discord administrator. Corrections append reversible reconciliation
+> events: raw screenshots and journal observations are never edited or deleted.
+
+Subcommand | Options | Description | Required
+---------- | ------- | ----------- | --------
+`pending` | `page` | List every exact alias whose projected identity still has no verified SteamID64. | `False`
+`links` | `page` | List active manual alias reconciliations. | `False`
+`history` | `target`, `page` | List only verified aliases, with first/last dates, for one exact local identity. | `target`
+`link` | `alias`, `steamid` | Attach one exact pending alias to a SteamID64. | `alias`, `steamid`
+`merge` | `alias`, `target` | Merge one exact pending alias into a verified local target selected by exact alias, SteamID64, or BattleMetrics ID. | `alias`, `target`
+`unlink` | `alias` | Revoke every active reconciliation for one exact alias. | `True`
+
+`link` and `merge` first read the target SteamID's current public Steam persona. That verified current name becomes the
+latest display name. If Steam is unavailable, only an already Steam/API-verified local alias may be reused; there is no
+manual name override. Existing verified Steam/API aliases remain in their dated history. An OCR-only spelling
+such as `ChiCo` is retained as pending correction evidence and as the key used to reinterpret old captures, but it is
+never promoted into the verified alias history of `Ch1co`.
+
+Reprojection is immediate and applies to every retained confirmed `/cinfo` capture. Occurrences from different captures
+are added; two spellings merged to the same Steam identity inside one capture count only once. `unlink` restores the
+evidence-only projection without deleting data.
+
+### Discord-only identity correction examples
+
+These commands never send a message to Rust team chat. Options named `alias` are exact and intentionally do not use
+fuzzy matching, so an administrator cannot accidentally merge a similarly named player.
+
+Goal | Example | Expected effect
+---- | ------- | ---------------
+Review unresolved OCR names | `/intel pending page:1` | Lists aliases whose projected identity still has no verified SteamID64.
+Correct against a known local player | `/intel merge alias:ChiCo target:Ch1co` | Reprojects `ChiCo` observations onto the verified `Ch1co` identity.
+Correct with a known SteamID64 | `/intel link alias:ChiCo steamid:76561198154738095` | Uses that Steam identity after reading its current public persona or a previously verified local alias.
+Review real past names | `/intel history target:Ch1co page:1` | Shows dated Steam/API-verified names only.
+Audit corrections | `/intel links page:1` | Lists active reversible reconciliation rules.
+Undo a wrong correction | `/intel unlink alias:ChiCo` | Revokes the rule and reconstructs the evidence-only projection.
+
+For the `ChiCo` OCR-error example, the normal sequence is:
+
+1. `/intel pending`
+2. `/intel merge alias:ChiCo target:Ch1co`
+3. `/intel history target:Ch1co`
+4. `/intel links`
+5. `/intel unlink alias:ChiCo` only if the correction was wrong.
+
+Before step 2, `ChiCo` is unresolved and appears in `pending`. After the merge it leaves the unresolved queue, but its
+stored alias remains unverified correction evidence: `history` and `!who` show `Ch1co` and any other genuinely
+Steam/API-verified names, never `ChiCo`. If Steam currently reports a newer persona, for example `Ch1co Current`, that
+name becomes the display name while the older verified `Ch1co` entry remains in the dated history. A manually typed
+display-name override is deliberately unavailable.
+
+
 ## **/intelimport**
 
 > **Import player intelligence from an original PNG, JPEG, or WebP screenshot.** Use `/intelimport cinfo image:<file>` for a
@@ -200,6 +260,10 @@ Options | Description | Required
 > and the final standalone `and`. OCR output is assigned to its original sheet slot by vertical row, so a missing line
 > cannot shift Marley onto Swizzy. Delimiter pixels are excluded from the member signature. It can correct decorative
 > punctuation only from a uniquely confirmed name/template; member count, indexes and roles remain fixed.
+> Tesseract's own page/block/paragraph/line identifiers are retained throughout parsing. Tightly spaced visual rows
+> therefore stay distinct even when their OCR boxes overlap vertically; a wrapped final player such as
+> `U Got Kirkified` cannot absorb the following `Established` row. Common `l`/`I`/`1` confusion in the
+> `Established:` label is accepted only as an anchor spelling, while the timestamp remains strictly validated.
 > A still-incomplete roster receives one separate roster-field-only read. If any cinfo field remains wrong, use
 > `Edit <tag>`: line 1 is the exact ClanTag, line 2 is `Established` as `MM/DD/YYYY HH:mm:ss` GMT, and every remaining
 > line is one exact player name. The bot validates all three sections, recomputes the inferred wipe when the date
@@ -224,10 +288,11 @@ The bot also creates a private `intel-imports` channel (renaming that configured
 `/cinfo` are detected from semantic OCR anchors. Starting the message with `cinfo` or `f7` remains an optional strict
 hint for all attachments. Repeated `ClanTag` anchors allow several stacked `/cinfo` panels in one image; every panel is
 validated separately, receives its own Established-derived wipe, and the whole preview is confirmed as one batch. A `/cinfo` block needs a valid tag, declared
-count and `Established` timestamp; its roster may remain partial. If OCR leaves the ClanTag empty or invalid while the
-rest of the panel is structurally usable, the preview remains pending with `Edit unknown tag`: confirmation is disabled,
-and a forged/stale confirmation is also refused without writing or discarding the preview. Correct line 1 in the modal;
-the bot reruns strict validation and enables confirmation only after the block is valid. A non-editable malformed block,
+count and `Established` timestamp; its roster may remain partial. If OCR leaves the ClanTag or `Established` empty or
+invalid while the count and roster make the panel safely editable, the preview remains pending with an `Edit` button:
+confirmation is disabled, and a forged/stale confirmation is also refused without writing or discarding the preview.
+Correct line 1 (tag) and line 2 (GMT timestamp) in the modal; the bot reruns strict validation and enables confirmation
+only after the block is valid. A non-editable malformed block,
 or a complete preview that cannot fit safely, is still rejected before confirmation. The human sender alone can confirm. An approved Windows helper
 webhook can post the same messages when its ID is listed in `RPP_INTEL_IMPORT_WEBHOOK_IDS`; because a webhook has no
 human requester, any member with the configured bot role (or an administrator) may confirm it. Unapproved webhooks are
@@ -246,6 +311,17 @@ Subcommand | Options | Description | Required
 ---------- | ------- | ----------- | --------
 `cinfo` | `image` | Original `/cinfo` PNG, JPEG, or WebP. | `True`
 `f7` | `image` | Original F7 PNG, JPEG, or WebP. | `True`
+
+### Discord-only import examples
+
+- `/intelimport cinfo image:<cinfo-screenshot.png>` previews one or more `/cinfo` panels. Confirm only after checking
+  every roster, role and GMT `Established` value.
+- `/intelimport f7 image:<f7-screenshot.png>` previews the recent-player rows. A readable F7 row is identity evidence,
+  never proof that the player is currently online.
+- In the private `intel-imports`/`intel-reports` channel, attach 1-10 screenshots without a slash command for automatic
+  semantic type detection, or paste complete SteamID64 values one per line. Every batch still requires confirmation.
+- If a `/cinfo` screenshot contains several panels, each panel derives its own wipe from its own GMT `Established`.
+  The upload date and caption are ignored.
 
 
 ## **/item**
@@ -656,7 +732,7 @@ Subcommand | Description | Required
 
 > **Get the names and current-session playtime of players online now (based on BattleMetrics).** This is deliberately a
 > live roster view, not a historical player profile. Run `!players` for the online server list or `!player <name or
-> part of name>` to filter it; use `!intel` for everything retained about one exact identity.
+> part of name>` to filter it; use `!intel` for everything retained about the closest known identity.
 
 ![In-Game Command players Image](images/ingame_commands/players_ingame.png)
 ![In-Game Command player Image](images/ingame_commands/player_ingame.png)
@@ -666,8 +742,8 @@ Subcommand | Description | Required
 
 > **Query the append-only player, clan and presence history for the active BattleMetrics server.** The plugin reuses
 > the existing 60-second BattleMetrics update; it never creates a second poller. A failed/censored update changes
-> provider state to `unknown`, never to a false logout. Exact SteamID64 is the strong identity; exact-name-only links
-> remain reversible and ambiguous homonyms are not selected automatically.
+> provider state to `unknown`, never to a false logout. Exact SteamID64 is the strong identity; name-only links remain
+> reversible. Read-only lookup ranking never creates or merges identity evidence.
 > The immutable per-server journal and its derived projections are reused between commands and invalidated after an
 > append. SteamID64, BattleMetrics ID, exact names and `Played with` relations have direct indexes; a normal repeated
 > `!affinity` therefore does not reread/rebuild the complete history. Shard metadata is still checked so an external
@@ -680,19 +756,51 @@ Subcommand | Description | Required
 > player-intelligence server directory survives restarts. A completed WarBandits sweep waits twelve hours before a
 > conservative rescan for players who joined the wipe later. Names and WarBandits cumulative hours are retained, but
 > neither a leaderboard row nor increasing playtime creates presence or login/logout events.
-<br>Command: `!intel <SteamID64|BattleMetrics ID|exact name>`
-<br>Compatibility alias: `!steamid <SteamID64|BattleMetrics ID|exact name>`
-<br>Command: `!who <SteamID64|BattleMetrics ID|exact name>`
+> Name lookups share one provider-neutral reconciler. `!intel`, `!steamid`, `!who`, `!affinity` and `!activity` use
+> its read-only `first` mode: exact identifier/name, prefix and contained partial matches are ranked, then the closest
+> deterministic result is returned without a selector. For example, `!intel tree` can select `Cockornut Tree`.
+> Tracking paths use the same reconciler in `precise` mode and still require the numbered selector whenever the best
+> priority/quality bucket contains several players. The reusable API can require several fragments to occur in one
+> alias, but WarBandits does not accept arrays of `player_name`: `KOH` and `PENG` must be queried separately and
+> reconciled locally. Automatic OCR fragment fan-out must remain disabled until every submitted fragment has explicit
+> high-confidence OCR evidence.
+<br>Command: `!intel <SteamID64|BattleMetrics ID|partial name>`
+<br>Compatibility alias: `!steamid <SteamID64|BattleMetrics ID|partial name>`
+<br>Command: `!who <SteamID64|BattleMetrics ID|partial name>`
 <br>Command: `!record <SteamID64> <BattleMetrics ID> <exact name>`
 <br>Command: `!scanplayers`
-<br>Command: `!affinity <SteamID64|BattleMetrics ID|exact name>`
-<br>Command: `!activity <SteamID64|BattleMetrics ID|exact name> [1mo|all]`
+<br>Command: `!affinity <SteamID64|BattleMetrics ID|partial name>`
+<br>Command: `!activity <SteamID64|BattleMetrics ID|partial name> [1mo|all]`
 <br>Command: `!clan <ClanTag>`
 <br>Command: `!clanhistory <ClanTag>`
 <br>Command: `!clantop [1-10]`
+
+### In-game player-intelligence examples
+
+The following examples use Rust team-chat syntax. The same `!` commands may also be typed in the Discord `commands`
+channel, but they are not Discord slash commands.
+
+Goal | Example | Matching behavior
+---- | ------- | -----------------
+Read the closest complete profile | `!intel tree` | Selects the closest partial alias, such as `Cockornut Tree`, without a selector and without writing evidence.
+Read verified aliases only | `!who ch1` | May return `Ch1co Current, Ch1co`; an OCR-only `ChiCo` spelling is omitted.
+Read confirmed clan affinity | `!affinity tree` | Shows `Known tags` and `Played with` counts from distinct confirmed `/cinfo` captures.
+Read conservative presence | `!activity tree` or `!activity tree all` | Uses the rolling 30 days by default, or all retained known-online segments.
+Read a clan snapshot | `!clan ABC` | Shows the latest stored confirmed snapshot; it does not claim the roster is still current.
+Refresh WarBandits collection | `!scanplayers` | Queues one bounded current-wipe scan without claiming presence.
+
+For example, `!intel tree` can return a compact profile headed by `Cockornut Tree`. `!who tree` returns only that
+identity's verified Steam/API aliases. Both are read-only closest-match commands: they do not create a merge merely
+because one name ranked first.
+
+`!record 76561198154738095 123456 Ch1co` records a proven exact SteamID64/BattleMetrics/name triple. It is not the
+correction command for an OCR typo and should not be used to make `ChiCo` historical. Use the private Discord command
+`/intel merge alias:ChiCo target:Ch1co` for that reversible correction, avoiding unnecessary Rust team-chat messages.
+
 <br>`!intel` is the canonical complete compact lookup. It returns the current display name, available
 SteamID64/primary BattleMetrics ID, reliable compact presence, the latest collected cumulative WarBandits hours,
-exact aliases, `Known tags`, `Played with`, and rolling 30-day activity. WarBandits hours use a lower-bound display such
+verified Steam/API aliases, `Known tags`, `Played with`, and rolling 30-day activity. OCR-only spellings remain pending
+and are managed privately with `/intel pending`; they are not presented as historical aliases. WarBandits hours use a lower-bound display such
 as `WB hours:7500+`: it means at least 7,500 hours at the last successful collection, not a live counter.
 `!steamid` returns the same result and no longer searches only Rust+ teammates. `!who` is the alias-only
 view. The `x` count is the number of distinct confirmed `/cinfo` screenshots, not shared wipes or BattleMetrics
@@ -722,8 +830,11 @@ that delay safely. The command does not manufacture online/offline presence.
 <br>Command: `!trackrelated <tracked player>`
 <br>Command: `!tracklist [all]` (alias: `!tracks [all]`)
 <br>Command: `!untrack <partial player name|BattleMetrics ID|SteamID64>`
+<br>Example: `!track peng` starts tracking immediately only when one precise best match exists.
+<br>Ambiguous example: if `!track peng` returns a numbered list, use `!track #2` or `!track peng 2`; unlike the
+read-only `!intel peng`, tracking never silently selects between equally ranked candidates.
 <br>The plugin creates one native `Enemies` tracker per server. The existing 60-second BattleMetrics poller sends login/logout alerts to Discord and, by default, Rust team chat. `!tracklist` and `!tracks` always queue every tracked player over minimal Rust-safe messages as `name: Online`, `name: <duration> ago`, or `name: Unknown`, without page headers. Adding `all` packs multiple complete `name,BattleMetricsID,SteamID,status` records per message; `-` means the SteamID is unknown and status is `on`, `off:<age>`, or `unk:<age>`. An API failure is never reported as a logout.
-<br>On a recognized WarBandits server, `!track` also invokes the detached WarBandits provider once to enrich the selected identity with its server-specific name, SteamID64, internal WarBandits ID, aliases, rank, playtime, and available statistics. The tracker path performs no background polling. The separate player-intelligence daemon may consume bounded current-wipe pages, but neither path emits an online/offline transition: BattleMetrics remains the sole presence source.
+<br>On a recognized WarBandits server, `!track` also invokes the detached WarBandits provider once with `wipe=0` to enrich the selected current-server identity with its name, SteamID64, internal WarBandits ID, aliases, rank, playtime, and available statistics. OCR corroboration also uses `wipe=0` when that block's `Established` maps to the active wipe, and falls back to `all-time` only for a different or indeterminate wipe. Current-wipe and all-time responses have separate caches. The tracker path performs no background polling. The separate player-intelligence daemon may consume bounded current-wipe pages, but neither path emits an online/offline transition: BattleMetrics remains the sole presence source.
 <br>Presence alerts created by this plugin and their `TRACKER` info logs always use `Tracked player <name> is now online.` and `Tracked player <name> just disconnected.`. The event is logged before the optional Rust/Discord deliveries, whose failures remain isolated.
 <br>For SteamID64 input, the plugin reads the free public Steam Community profile name with a five-second timeout, then requires a strict match on the active server. A leading `[CLAN]` tag is tolerated. If BattleMetrics exposes its own Steam identifier, it must equal the requested SteamID; a mismatch, ambiguous name, private profile, or unproven loose match performs no write.
 <br>Re-adding the same proven identity never creates a second entry. A later `!track <SteamID64>` that resolves to an existing BattleMetrics player with no SteamID atomically enriches that player, preserves its history and aliases, and replies `Tracking updated`.
@@ -798,9 +909,11 @@ that delay safely. The command does not manufacture online/offline presence.
 
 ## **who**
 
-> **List exact aliases known by the active server intelligence database.** The player can be selected by SteamID64,
-> BattleMetrics ID, or exact known name. This is server-wide and no longer reads only the teammate-language CSV.
-<br>Command: `!who <SteamID64|BattleMetrics ID|exact name>`
+> **List verified Steam/API aliases known by the active server intelligence database.** OCR-only spellings stay in the
+> private `/intel pending` correction queue. The player can be selected by SteamID64,
+> BattleMetrics ID, or the closest partial known name. This is server-wide and no longer reads only the
+> teammate-language CSV.
+<br>Command: `!who <SteamID64|BattleMetrics ID|partial name>`
 
 ## **send**
 
@@ -821,7 +934,7 @@ that delay safely. The command does not manufacture online/offline presence.
 
 > **Compatibility alias for `!intel`.** It queries the complete active-server intelligence database rather than the
 > Rust+ team only, and returns the same identity, aliases, reliable presence, clan affinity, and rolling activity.
-<br>Command: `!steamid <SteamID64|BattleMetrics ID|exact name>`
+<br>Command: `!steamid <SteamID64|BattleMetrics ID|partial name>`
 
 ![In-Game Command steamid Image](images/ingame_commands/steamid_ingame.png)
 

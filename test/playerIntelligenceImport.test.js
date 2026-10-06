@@ -727,7 +727,8 @@ Test('an unreadable cinfo tag stays editable and cannot be confirmed until corre
     const preview = value.edits[0];
     Assert.match(preview.content, /OCR \/cinfo — unknown — 3\/3/u);
     Assert.match(preview.content, /ClanTag is empty or too long\./u);
-    Assert.match(preview.content, /Correction required: use Edit to fix the ClanTag before confirmation\./u);
+    Assert.match(preview.content,
+        /Correction required: use Edit to fix every invalid or empty required \/cinfo field before confirmation\./u);
     Assert.equal(preview.components[0].components[0].data.disabled, true);
     Assert.equal(preview.components[1].components[0].data.label, 'Edit unknown tag');
 
@@ -782,6 +783,52 @@ Test('an unreadable cinfo tag stays editable and cannot be confirmed until corre
     const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
     const snapshot = (await store.readAll()).find(event => event.kind === 'clan_snapshot');
     Assert.equal(snapshot.payload.tag, 'kirk');
+});
+
+Test('an unreadable Established value stays editable and is never confirmable before correction', async t => {
+    const value = createHarness(t);
+    value.client.playerIntelligenceImportDependencies.recognize = async () => [
+        word('ClanTag: KIRK', 20), word('Members: 3', 45),
+        word('Clan Members: Nirks, Psype and tom.le.geek.2', 70),
+        word('Established: unreadable', 95)
+    ];
+
+    await ImportWorkflow.beginImport(value.client, value.command);
+
+    const preview = value.edits[0];
+    Assert.match(preview.content,
+        /Wipe pending: correct Established before confirmation \| capture time not used/u);
+    Assert.match(preview.content, /Established timestamp is invalid\./u);
+    Assert.equal(preview.components[0].components[0].data.disabled, true);
+    Assert.equal(preview.components[1].components[0].data.label, 'Edit KIRK');
+
+    let modal;
+    const editId = preview.components[1].components[0].data.custom_id;
+    Assert.equal(await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: {
+            customId: editId, guildId: 'guild', channelId: 'commands', user: { id: 'requester' },
+            showModal: async value => { modal = value; }
+        }
+    }), true);
+    Assert.match(modal.toJSON().components[0].components[0].value,
+        /^KIRK\nunreadable\nNirks/u);
+
+    Assert.equal(await ImportWorkflow.handleModal({
+        client: value.client,
+        interaction: {
+            customId: modal.data.custom_id,
+            guildId: 'guild', channelId: 'commands', user: { id: 'requester' },
+            deferUpdate: async () => {},
+            fields: { getTextInputValue: () => [
+                'KIRK', '09/29/2026 17:01:39', 'Nirks', 'Psype', 'tom.le.geek.2'
+            ].join('\n') }
+        }
+    }), true);
+    const corrected = value.edits.at(-1);
+    Assert.match(corrected.content, /Established: 09\/29\/2026 17:01:39/u);
+    Assert.match(corrected.content, /Wipe inferred from Established: 2026-09-29T14:00:00\.000Z/u);
+    Assert.equal(corrected.components[0].components[0].data.disabled, false);
 });
 
 Test('manual cinfo spelling correction preserves the color-derived role at the same roster slot', () => {
@@ -880,8 +927,8 @@ Test('short-name collision resolves only after bounded SteamID corroboration', a
     value.client.playerIntelligenceImportDependencies.enableExternalCorroboration = true;
     const providerQueries = [];
     value.client.playerIntelligenceImportDependencies.warBanditsProvider = {
-        resolvePlayer: async (_context, _scope, query) => {
-            providerQueries.push(query);
+        resolvePlayer: async (_context, _scope, query, options) => {
+            providerQueries.push({ query, options });
             if (!/^7656119\d{10}$/u.test(query)) return { available: false };
             const matching = query === firstSteamId;
             return {
@@ -899,8 +946,9 @@ Test('short-name collision resolves only after bounded SteamID corroboration', a
     await ImportWorkflow.beginImport(value.client, value.command);
     Assert.match(value.edits[0].content, /1\/1 linked/);
     Assert.equal(providerQueries.length <= 3, true);
-    Assert.equal(providerQueries.includes(firstSteamId), true);
-    Assert.equal(providerQueries.includes(secondSteamId), true);
+    Assert.equal(providerQueries.some(call => call.query === firstSteamId), true);
+    Assert.equal(providerQueries.some(call => call.query === secondSteamId), true);
+    Assert.equal(providerQueries.every(call => call.options.wipe === 0), true);
     Assert.deepEqual(steamQueries.sort(), [firstSteamId, secondSteamId]);
     const customId = value.edits[0].components[0].components[0].data.custom_id;
     await ImportWorkflow.handleButton({
@@ -910,6 +958,27 @@ Test('short-name collision resolves only after bounded SteamID corroboration', a
     const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
     const snapshot = (await store.readAll()).find(event => event.kind === 'clan_snapshot');
     Assert.equal(snapshot.payload.members[0].steamId, firstSteamId);
+});
+
+Test('WarBandits OCR corroboration uses all-time only for an Established value from another wipe', async t => {
+    const value = createHarness(t);
+    value.client.playerIntelligenceImportDependencies.recognize = async () => [
+        word('ClanTag: OLD', 20), word('Members: 1', 45),
+        word('Clan Members: HistoricalName', 70), word('Established: 09/04/2026 14:58:27', 95)
+    ];
+    value.client.playerIntelligenceImportDependencies.identityCandidates = async () => [];
+    value.client.playerIntelligenceImportDependencies.enableExternalCorroboration = true;
+    const calls = [];
+    value.client.playerIntelligenceImportDependencies.warBanditsProvider = {
+        resolvePlayer: async (_context, _scope, query, options) => {
+            calls.push({ query, options });
+            return { available: false };
+        }
+    };
+
+    await ImportWorkflow.beginImport(value.client, value.command);
+
+    Assert.deepEqual(calls, [{ query: 'HistoricalName', options: { wipe: 'all-time' } }]);
 });
 
 Test('dedicated import channel accepts only an approved helper webhook and still requires confirmation', async t => {

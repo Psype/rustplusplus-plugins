@@ -5,6 +5,7 @@ const { parseCinfoWords, splitCinfoWordBlocks } = require('../src/plugins/player
 const { parseF7Words } = require('../src/plugins/playerIntelligence/parseF7.js');
 const { detectImportKind } = require('../src/plugins/playerIntelligence/detectImportKind.js');
 const ImageAttachment = require('../src/plugins/playerIntelligence/imageAttachment.js');
+const OcrLayout = require('../src/plugins/playerIntelligence/ocrLayout.js');
 const TesseractOcr = require('../src/plugins/playerIntelligence/tesseractOcr.js');
 const CinfoRoles = require('../src/plugins/playerIntelligence/cinfoRoles.js');
 const F7IdentityValidation = require('../src/plugins/playerIntelligence/f7IdentityValidation.js');
@@ -45,6 +46,42 @@ Test('cinfo OCR parser handles supplied wrapped rosters and Unicode without pixe
         Assert.equal(Object.isFrozen(result), true);
         Assert.equal(Object.isFrozen(result.members), true);
     }
+});
+
+Test('cinfo keeps a wrapped final member separate from a tightly spaced Established row', () => {
+    const tagged = (text, x, y, lineKey, width = Math.max(8, text.length * 7)) =>
+        ({ text, x, y, width, height: 30, confidence: 95, lineKey });
+    const words = [
+        tagged('ClanTag: KIRK', 20, 10, '1:1:1:1'),
+        tagged('Members: 3', 20, 35, '1:1:1:2'),
+        tagged('Clan Members: Jeffrey Kirkstein The 3rd, Rw and U Got', 20, 60, '1:1:1:3'),
+        tagged('Kirkified', 20, 85, '1:1:1:4'),
+        tagged('EstabIished: 10/03/2026 17:01:39', 20, 94, '1:1:1:5')
+    ];
+
+    Assert.equal(OcrLayout.groupLines(words).length, 5);
+    const parsed = parseCinfoWords(words);
+    Assert.deepEqual(parsed.members.map(member => member.name), [
+        'Jeffrey Kirkstein The 3rd', 'Rw', 'U Got Kirkified'
+    ]);
+    Assert.equal(parsed.establishedRaw, '10/03/2026 17:01:39');
+    Assert.equal(parsed.establishedAtUtc, '2026-10-03T17:01:39.000Z');
+    Assert.equal(parsed.complete, true, parsed.errors.join(' '));
+});
+
+Test('cinfo removes a fuzzy Established anchor merged into a wrapped roster line', () => {
+    const parsed = parseCinfoWords([
+        word('ClanTag: KIRK', 20, 20),
+        word('Members: 3', 20, 45),
+        word('Clan Members: Jeffrey Kirkstein The 3rd, Rw and U Got', 20, 70),
+        word('Kirkified EstabIished: 10/03/2026 17:01:39', 20, 95)
+    ]);
+
+    Assert.deepEqual(parsed.members.map(member => member.name), [
+        'Jeffrey Kirkstein The 3rd', 'Rw', 'U Got Kirkified'
+    ]);
+    Assert.equal(parsed.establishedAtUtc, '2026-10-03T17:01:39.000Z');
+    Assert.equal(parsed.complete, true, parsed.errors.join(' '));
 });
 
 Test('cinfo OCR parser blocks an inconsistent declared roster', () => {
@@ -317,7 +354,8 @@ Test('Tesseract TSV parser returns only validated word boxes', () => {
         '5\t1\t1\t1\t2\t1\t42\t90\t50\t18\t-1\tignored'
     ].join('\n');
     Assert.deepEqual(TesseractOcr.parseTsv(tsv), [Object.freeze({
-        text: '76561197976022895', x: 42, y: 70, width: 130, height: 18, confidence: 94.5
+        text: '76561197976022895', x: 42, y: 70, width: 130, height: 18, confidence: 94.5,
+        lineKey: '1:1:1:1'
     })]);
 });
 

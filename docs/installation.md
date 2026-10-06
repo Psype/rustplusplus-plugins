@@ -57,6 +57,9 @@ The private `intel-imports` channel is created automatically when the guild is s
 manual message may contain 1 to 10 PNG/JPEG/WebP images. The bot detects F7 versus `/cinfo` from OCR anchors; an optional
 leading `cinfo` or `f7` acts as a strict hint for every attached image. One image may contain several vertically
 stacked `/cinfo` panels: repeated `ClanTag` anchors are split and validated independently, without fixed coordinates.
+Tesseract TSV line identifiers are preserved, so close or vertically overlapping OCR boxes cannot merge a wrapped
+player name with the next `Established` row. The anchor tolerates only common `l`/`I`/`1` OCR confusion; the date
+itself still requires exact `MM/DD/YYYY HH:mm:ss` GMT syntax.
 For a complete roster, comma and final standalone `and` separators isolate one temporary image row per member before
 one additional bounded OCR pass. Comma pixels are excluded, and OCR lines are assigned by their sheet row rather than
 array order, preventing a missing row from shifting later members. A changed spelling is accepted only through a unique
@@ -76,6 +79,9 @@ identity proof and cannot train a visual/glyph sample without an independently s
 If the first pass loses the `Members` or `Established` label, the bot separately rereads the relative count/date row
 with a numeric alphabet. A polluted multi-word tag is likewise reread from only the value area. All recovered fields
 pass the same strict validators; no absolute screen position is assumed.
+If the tag or date remains unreadable but the declared count and roster are editable, Discord keeps the preview and
+shows `Edit <tag>` with Confirm disabled. The modal accepts tag on line 1, GMT `Established` on line 2, then exactly one
+player per line; invalid data is rejected only at correction/confirmation boundaries and is never committed.
 For `/cinfo`, capture/upload dates are ignored. Every panel independently infers the Tuesday/Friday 14:00 GMT regular
 wipe from its own `Established`; forced wipes and intermediate observed boundaries are deliberately ignored. One image
 may contain panels assigned to different wipes, and the preview exposes each assignment before the grouped Confirm.

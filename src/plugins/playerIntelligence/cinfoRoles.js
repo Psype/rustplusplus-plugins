@@ -2,6 +2,7 @@
 const Jimp = require('jimp');
 
 const Layout = require('./ocrLayout.js');
+const { hasEstablishedAnchor } = require('./parseCinfo.js');
 
 /** @typedef {Readonly<{text:string,x:number,y:number,width:number,height:number,confidence:number|null}>} OcrWord */
 
@@ -15,7 +16,7 @@ function token(value) {
 function rosterWords(words) {
     const lines = Layout.groupLines(words);
     const start = lines.findIndex(line => /clan\s+members\s*:/iu.test(line.text));
-    const end = lines.findIndex(line => /established\s*:/iu.test(line.text));
+    const end = lines.findIndex(line => hasEstablishedAnchor(line.text));
     if (start === -1) return Object.freeze([]);
     const result = [];
     for (let index = start; index < (end > start ? end : lines.length); index += 1) {

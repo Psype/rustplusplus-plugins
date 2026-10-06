@@ -24,7 +24,8 @@ function parseTsv(tsv) {
         const [x, y, width, height, confidence] = columns.slice(6, 11).map(Number);
         const text = columns.slice(11).join('\t').trim();
         if (!text || ![x, y, width, height, confidence].every(Number.isFinite) || confidence < 0) continue;
-        words.push(Object.freeze({ text, x, y, width, height, confidence }));
+        const lineKey = columns.slice(1, 5).join(':');
+        words.push(Object.freeze({ text, x, y, width, height, confidence, lineKey }));
     }
     return Object.freeze(words);
 }

@@ -151,18 +151,24 @@ async function resolveImportTiming(context, items, scope, captureTime) {
     const itemTimings = items.map(item => {
         if (item.parsed.kind !== 'cinfo') {
             return Object.freeze({ wipeId: scope.wipeId, wipeStart: scope.wipeStart, observedAt: null,
-                historical: false });
+                historical: false, pendingCorrection: false });
+        }
+        if (!item.parsed.establishedAtUtc) {
+            return Object.freeze({ wipeId: null, wipeStart: null, observedAt: null,
+                historical: true, pendingCorrection: true });
         }
         const inferred = Runtime.resolveEstablishedScope(context, item.parsed.establishedAtUtc);
         return Object.freeze({ wipeId: inferred.wipeId, wipeStart: inferred.wipeStart,
-            observedAt: item.parsed.establishedAtUtc, historical: true });
+            observedAt: item.parsed.establishedAtUtc, historical: true, pendingCorrection: false });
     });
     const cinfoTimings = items.map((item, index) => ({ item, timing: itemTimings[index] }))
         .filter(value => value.item.parsed.kind === 'cinfo');
     const timingText = cinfoTimings.length === 0 ? null : cinfoTimings.length === 1 ?
-        `Wipe inferred from Established: ${cinfoTimings[0].timing.wipeStart} | capture time not used` :
+        (cinfoTimings[0].timing.pendingCorrection ?
+            'Wipe pending: correct Established before confirmation | capture time not used' :
+            `Wipe inferred from Established: ${cinfoTimings[0].timing.wipeStart} | capture time not used`) :
         `Wipes inferred independently from Established: ${cinfoTimings.map(value => `${value.item.parsed.tag}=${
-            value.timing.wipeStart}`).join('; ')}`;
+            value.timing.pendingCorrection ? 'pending correction' : value.timing.wipeStart}`).join('; ')}`;
     return Object.freeze({
         activeWipeId: scope.wipeId,
         itemTimings: Object.freeze(itemTimings),
@@ -223,7 +229,7 @@ function editableCinfo(item) {
 
 /** @param {any} item */
 function recoverableCinfo(item) {
-    return editableCinfo(item) && Boolean(item.parsed.establishedAtUtc);
+    return editableCinfo(item);
 }
 
 /** @param {string} token @param {readonly any[]} items @param {'confirm'|'replace'} mode */
@@ -782,29 +788,47 @@ async function parseAttachment(client, kindHint, attachment, reference, attachme
     }));
 }
 
-/** @param {readonly {parsed:any}[]} items @param {number} limit */
-function corroborationQueries(items, limit) {
+/** @param {any} context @param {any} scope @param {{parsed:any}} item */
+function corroborationWipe(context, scope, item) {
+    if (!item || !item.parsed || item.parsed.kind !== 'cinfo' || !item.parsed.establishedAtUtc) {
+        return 'all-time';
+    }
+    try {
+        return Runtime.resolveEstablishedScope(context, item.parsed.establishedAtUtc).wipeId === scope.wipeId ?
+            0 : 'all-time';
+    }
+    catch (_error) {
+        return 'all-time';
+    }
+}
+
+/** @param {any} context @param {any} scope @param {readonly {parsed:any}[]} items @param {number} limit */
+function corroborationQueries(context, scope, items, limit) {
     const steamScores = new Map();
-    /** @type {string[]} */
-    const observedNames = [];
+    const observedNames = new Map();
     for (const item of items) {
         if (item.parsed.kind !== 'cinfo') continue;
+        const wipe = corroborationWipe(context, scope, item);
         for (const member of item.parsed.unresolvedMembers || []) {
             for (const candidate of member.candidates || []) {
                 if (!/^7656119\d{10}$/u.test(`${candidate.steamId || ''}`) || candidate.score < 0.55) continue;
-                steamScores.set(candidate.steamId, Math.max(steamScores.get(candidate.steamId) || 0,
-                    candidate.score));
+                const key = `${wipe}\u0000${candidate.steamId}`;
+                const previous = steamScores.get(key);
+                if (!previous || candidate.score > previous.score) {
+                    steamScores.set(key, { value: candidate.steamId, score: candidate.score, wipe });
+                }
             }
-            if (member.observedText && !observedNames.includes(member.observedText)) {
-                observedNames.push(member.observedText);
+            if (member.observedText) {
+                const key = `${wipe}\u0000${member.observedText}`;
+                if (!observedNames.has(key)) observedNames.set(key, { value: member.observedText, wipe });
             }
         }
     }
-    const queries = [...steamScores.entries()].sort((left, right) => right[1] - left[1] ||
-        left[0].localeCompare(right[0])).map(([value]) => ({ kind: 'steam', value }));
-    for (const value of observedNames) {
+    const queries = [...steamScores.values()].sort((left, right) => right.score - left.score ||
+        left.value.localeCompare(right.value)).map(({ value, wipe }) => ({ kind: 'steam', value, wipe }));
+    for (const { value, wipe } of observedNames.values()) {
         if (queries.length >= limit) break;
-        queries.push({ kind: 'name', value });
+        queries.push({ kind: 'name', value, wipe });
     }
     return Object.freeze(queries.slice(0, limit).map(query => Object.freeze(query)));
 }
@@ -817,10 +841,11 @@ async function corroborateCandidateAliases(context, items, client, dependencies)
     if (!Number.isSafeInteger(configuredLimit) || configuredLimit < 0) {
         throw new TypeError('maxCorroborationQueries must be a non-negative integer.');
     }
-    const queries = corroborationQueries(items, Math.min(MAX_CORROBORATION_QUERIES, configuredLimit));
-    if (queries.length === 0) return Object.freeze([]);
     const scope = Runtime.getScope(context);
     if (!scope) return Object.freeze([]);
+    const queries = corroborationQueries(
+        context, scope, items, Math.min(MAX_CORROBORATION_QUERIES, configuredLimit));
+    if (queries.length === 0) return Object.freeze([]);
     const provider = dependencies.warBanditsProvider === null ? null :
         dependencies.warBanditsProvider || WarBandits;
     const steamProfileName = dependencies.steamProfileName ||
@@ -843,7 +868,7 @@ async function corroborateCandidateAliases(context, items, client, dependencies)
         if (query.kind === 'steam') steamIds.add(query.value);
         if (!provider || typeof provider.resolvePlayer !== 'function') continue;
         try {
-            const result = await provider.resolvePlayer(context, scope, query.value);
+            const result = await provider.resolvePlayer(context, scope, query.value, { wipe: query.wipe });
             const player = result && result.available && !result.ambiguous && result.player;
             if (!player || !/^7656119\d{10}$/u.test(`${player.steamId || ''}`) ||
                 (query.kind === 'steam' && `${player.steamId}` !== query.value)) continue;
@@ -1055,7 +1080,7 @@ async function prepareImports(client, source, requests, requesterUserId, referen
     }
     const timing = await resolveImportTiming(context, items, scope, captureTime);
     const correctionFooter = blockedItems.length > 0 ?
-        '\nCorrection required: use Edit to fix the ClanTag before confirmation.' : '';
+        '\nCorrection required: use Edit to fix every invalid or empty required /cinfo field before confirmation.' : '';
     const preview = `${timedPreview(items, timing.timingText)}${correctionFooter}`;
     if (Array.from(preview).length > 1900) {
         return Object.freeze({

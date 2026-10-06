@@ -1,7 +1,8 @@
 // @ts-check
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
 
-/** @typedef {Readonly<{text:string,x:number,y:number,width:number,height:number,confidence:number|null}>} OcrWord */
+/** @typedef {Readonly<{text:string,x:number,y:number,width:number,height:number,confidence:number|null,
+ * lineKey?:string}>} OcrWord */
 
 /** @param {unknown} value */
 function cleanText(value) {
@@ -26,6 +27,8 @@ function validateWord(word) {
     const width = Number(record.width);
     const height = Number(record.height);
     const confidence = Number(record.confidence);
+    const lineKey = typeof record.lineKey === 'string' && /^[a-z0-9_.:-]{1,128}$/iu.test(record.lineKey) ?
+        record.lineKey : null;
     if (!text || ![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 ||
         width <= 0 || height <= 0) return null;
     return Object.freeze({
@@ -34,7 +37,8 @@ function validateWord(word) {
         y,
         width,
         height,
-        confidence: Number.isFinite(confidence) ? confidence : null
+        confidence: Number.isFinite(confidence) ? confidence : null,
+        ...(lineKey ? { lineKey } : {})
     });
 }
 
@@ -53,21 +57,23 @@ function groupLines(inputWords) {
         const vertical = (left.y + left.height / 2) - (right.y + right.height / 2);
         return Math.abs(vertical) > typicalHeight * 0.35 ? vertical : left.x - right.x;
     });
-    /** @type {{words: OcrWord[], center:number}[]} */
+    /** @type {{words: OcrWord[], center:number, lineKey:string|null}[]} */
     const lines = [];
     for (const word of ordered) {
         const center = word.y + word.height / 2;
-        let target = null;
+        let target = word.lineKey ? lines.find(line => line.lineKey === word.lineKey) || null : null;
         let distance = Infinity;
-        for (const line of lines) {
-            const candidateDistance = Math.abs(center - line.center);
-            if (candidateDistance <= typicalHeight * 0.7 && candidateDistance < distance) {
-                target = line;
-                distance = candidateDistance;
+        if (!target && !word.lineKey) {
+            for (const line of lines) {
+                const candidateDistance = Math.abs(center - line.center);
+                if (candidateDistance <= typicalHeight * 0.7 && candidateDistance < distance) {
+                    target = line;
+                    distance = candidateDistance;
+                }
             }
         }
         if (!target) {
-            target = { words: [], center };
+            target = { words: [], center, lineKey: word.lineKey || null };
             lines.push(target);
         }
         target.words.push(word);

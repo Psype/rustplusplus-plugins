@@ -12,7 +12,7 @@ const ROLE_WEIGHT = Object.freeze({ leader: 3, moderator: 2, member: 1, unknown:
 function identityCandidates(events, identities) {
     const values = [];
     for (const person of identities.persons) {
-        for (const alias of person.names) values.push({
+        for (const alias of person.names.filter((/** @type {any} */ alias) => alias.verified)) values.push({
             name: alias.name,
             steamId: person.steamId,
             battlemetricsPlayerId: person.battlemetricsPlayerIds[0] || null,

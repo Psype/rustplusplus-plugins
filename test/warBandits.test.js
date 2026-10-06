@@ -168,6 +168,22 @@ Test('requests are serialized, gap-controlled and identical player lookups coale
     Assert.equal(test.calls[1].config.params.player_name, 'Psype');
 });
 
+Test('player lookups isolate current-wipe and all-time caches', async t => {
+    const test = harness(t);
+    const scope = { battlemetricsId: '42' };
+
+    const current = await test.provider.resolvePlayer(null, scope, 'Psype', { wipe: 0 });
+    const allTime = await test.provider.resolvePlayer(null, scope, 'Psype');
+    const currentCached = await test.provider.resolvePlayer(null, scope, 'Psype', { wipe: '0' });
+
+    Assert.equal(current.wipe, 0);
+    Assert.equal(allTime.wipe, 'all-time');
+    Assert.strictEqual(currentCached, current);
+    Assert.deepEqual(test.calls.slice(1).map(call => call.config.params.wipe), [0, 'all-time']);
+    Assert.equal((await test.provider.resolvePlayer(null, scope, 'Psype', { wipe: 1 })).reason,
+        'invalid wipe');
+});
+
 Test('current-wipe pages are bounded, deterministic and expose a resumable cursor', async t => {
     const rows = Array.from({ length: 100 }, (_, index) => statsRow({
         player: {

@@ -306,9 +306,9 @@ Le contrat `clan_snapshot` accepte désormais, sans casser les événements sche
 des slots `unresolvedMembers`. Une structure tag/compteur/date valide peut donc être confirmée malgré un roster
 incomplet. Les slots ne créent ni alias exact, ni relation `Played with`; chaque reconstruction de la projection les
 réévalue contre les nouvelles observations, y compris les noms F7 liés à un SteamID mais marqués non fidèles à la
-casse. La confirmation Discord reste un clic transactionnel et non une transcription. Les lectures isolées du
-tag/compteur, les lectures numériques indépendantes restantes et le moteur multilingue local restent à implémenter et
-à mesurer sur des PNG originaux.
+casse. La confirmation Discord reste un clic transactionnel et non une transcription. Les lectures isolées du tag,
+du compteur et de la date sont implémentées et strictement revalidées. Le moteur multilingue local reste à implémenter
+et à mesurer sur des PNG originaux.
 
 Les exemples F7 réels ajoutés le 1er octobre combinent décorations autour d'un nom latin, lettres volontairement
 espacées, `İ` turc, caractères cyrilliques, coréens et chaînes visuellement ambiguës mélangeant potentiellement
@@ -809,13 +809,17 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
    mémoire visuelle persistante sont également implémentés. Les rosters complets sont désormais redécoupés relativement
    aux virgules/`and`, avec une ligne image isolée par membre et une seule lecture bornée par panneau. Un roster
    incomplet reçoit aussi une lecture de champ dédiée ; le fallback Edit/Confirm apprend un lexique textuel persistant
-   sans transformer la correction en preuve d’identité ou de glyphe. Un ClanTag OCR vide ou invalide ne détruit plus un
-   panneau autrement exploitable : l’aperçu reste éditable, Confirm demeure désactivé, et toute confirmation forgée est
-   refusée sans écriture jusqu’à ce que la correction manuelle passe la validation stricte. Les décisions Discord sont acquittées avant tout
+   sans transformer la correction en preuve d’identité ou de glyphe. Un ClanTag ou un `Established` OCR vide/invalide
+   ne détruit plus un panneau autrement exploitable : l’aperçu reste éditable, Confirm demeure désactivé, et toute
+   confirmation forgée est refusée sans écriture jusqu’à ce que la correction manuelle passe la validation stricte.
+   Depuis `1.22.24`, les identifiants de ligne TSV natifs de Tesseract sont conservés afin qu’un pseudo replié ne puisse
+   plus fusionner avec la ligne `Established` suivante ; la confusion d’ancre `l`/`I`/`1` est tolérée sans assouplir la
+   date GMT. Les décisions Discord sont acquittées avant tout
    traitement durable, verrouillées par token et sérialisées par serveur ; le message affiche temporairement
    `Import processing…` ou `Import queued…` au lieu de dépasser la fenêtre de réponse Discord.
 3. **À calibrer et étendre** : corpus de PNG originaux, précision champ par champ et seuils couleur/OCR sur Linux,
-   lectures isolées du tag/compteur, modèle synthétique multi-fontes et moteur de scène multilingue ; les tests
+   robustesse réelle des lectures isolées tag/compteur/date, modèle synthétique multi-fontes et moteur de scène
+   multilingue ; les tests
    déterministes utilisent actuellement les textes et boîtes correspondant aux exemples fournis.
 4. **À ajouter si utile** : import legacy en lecture seule, Rust+ own-clan, vue d'historique détaillée et outil audité
    de liaison/révocation ; aucune de ces étapes ne doit modifier les bases existantes.
@@ -827,8 +831,8 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale finale après remplacement d'import, lecture de champ et correction confirmée du roster :
-`npm.cmd test` passe 193/193,
+QA locale la plus récente après séparation native des lignes Tesseract et édition d’un `Established` illisible :
+`npm.cmd test` passe 241/241 le 3 octobre 2026,
 dont le typage strict `tsc --noEmit`. Une
 couverture déterministe reproduit la mauvaise attribution `』Marley』`/`Swizzy`, vérifie le découpage relatif aux
 virgules, la fusion `n444shj, spirit_monger19`, le rejet des comptes/doublons manuels et l'absence d'apprentissage avant
@@ -852,10 +856,57 @@ bigrammes rares bornés pour les seules hypothèses floues, réduit la médiane 
 pas créer un lien définitif : une hypothèse seulement floue reste provisoire tant qu'une source externe unique ne la
 corrobore pas. Le coût réel sur le corpus de captures reste à mesurer.
 
+### Réconciliation de pseudo réutilisable (6 octobre 2026)
+
+`src/util/playerNameReconciler.js` centralise désormais la réconciliation `pseudo/fragments -> cible` sans dépendre
+d'un fournisseur. Une cible peut exposer plusieurs alias, identifiants stables et une priorité contextuelle. Le mode
+`first` classe correspondance exacte, forme canonique sans accents/ponctuation, préfixe puis sous-chaîne et renvoie la
+cible la plus proche de manière déterministe. Il alimente les commandes de consultation `!intel`, `!steamid`, `!who`,
+`!affinity` et `!activity`; ainsi `!intel tree` peut retourner `Cockornut Tree` sans sélecteur. Cette décision de lecture
+seule ne crée aucune preuve, aucun alias et aucune fusion.
+
+Le mode `precise` conserve le comportement du tracking : une identité BattleMetrics directe gagne, les observations
+en ligne restent prioritaires, puis exact/préfixe/partiel déterminent le meilleur groupe. Si plusieurs cibles partagent
+ce groupe, aucune n'est choisie et le sélecteur numéroté existant reste obligatoire. Le provider WarBandits réutilise
+le même mode conservateur.
+
+Le réconciliateur accepte également plusieurs fragments qui doivent tous apparaître dans le même alias, par exemple
+`KOH` + `PENG` pour `KOH PENG 🕷`. L'API WarBandits ne sait pas effectuer ce ET en un appel : le 6 octobre, les formes
+paramètre répété, crochets, index, virgule et tableau JSON ont toutes renvoyé zéro ligne, alors que la chaîne normale
+`KOH PENG` renvoyait le joueur. Une future recherche OCR multi-fragments devra donc lancer des appels bornés séparés,
+recouper localement les SteamID et n'utiliser que des fragments dont la confiance OCR individuelle est explicitement
+élevée.
+
+Enfin, la corroboration OCR existante utilise `wipe=0` lorsque le `Established` GMT du bloc appartient au wipe actif,
+et `all-time` seulement si le bloc appartient à un autre wipe ou si son wipe est indéterminable. Les caches sont
+séparés par serveur, portée de wipe et requête, afin qu'une recherche historique bruitée ne contamine pas une recherche
+du wipe courant.
+
 La recherche visuelle a été mesurée séparément sur 20 crops et la limite de 2 000 signatures. La validation/décodage
 répétée de chaque signature prenait une médiane de `600,386 ms` sur sept exécutions. Un cache faible des features
 validées/décodées et du nombre de pixels actifs ramène la médiane à `115,941 ms` (`-80,7 %`) sans changer le score Dice
 de forme ni la pénalité d'aspect. Le premier chargement valide toujours intégralement le sidecar.
+
+### Correction Discord et historique d'alias vérifiés (6 octobre 2026)
+
+La commande slash administrateur `/intel` fournit une interface privée et éphémère au-dessus des événements
+`identity_linked`/`identity_link_revoked`. `/intel pending` pagine tous les pseudos dont la projection n'a encore aucun
+SteamID64 vérifié ; `/intel link` associe un pseudo exact à un SteamID64 ; `/intel merge` utilise comme cible un
+SteamID64, un BattleMetrics ID ou un alias local exact déjà vérifié ; `/intel links` audite les règles actives et
+`/intel unlink` les révoque sans effacer la moindre observation. Une liaison peut également couvrir le BattleMetrics ID
+de la source, afin que les observations historiques liées à cet ID soient reprojetées vers le SteamID cible.
+
+Avant une liaison, le bot lit le persona public Steam actuel du SteamID cible. Ce nom devient l'alias vérifié le plus
+récent et donc le nom d'affichage. Si Steam est indisponible, seul un alias local déjà vérifié par Steam/API peut être
+réutilisé : une saisie opérateur ne peut pas créer un alias historique. `/intel history` liste, avec leurs
+premières/dernières dates, uniquement les alias
+réellement rattachés à un SteamID/API stable. Les lectures OCR name-only restent consultables dans `pending` et dans le
+journal, mais ne sont ni proposées comme historique valide ni réinjectées comme candidats canoniques OCR.
+
+Ainsi, relier l'erreur OCR `ChiCo` au SteamID de `Ch1co` réinterprète les anciennes captures et additionne les occurrences
+entre captures sous `Ch1co`. Si les deux orthographes figuraient dans la même capture, la map par `personId` ne compte
+la personne qu'une fois. `ChiCo` reste une preuve de correction technique, pas un ancien pseudo attribué au joueur.
+La révocation restaure intégralement la projection fondée sur les preuves brutes.
 
 ## Tests déterministes indispensables
 

@@ -154,14 +154,33 @@ function validatePlayerMetricObserved(value) {
 
 /** @param {unknown} value */
 function validateIdentityLinked(value) {
-    assertExactKeys(/** @type {object} */ (value),
-        ['linkId', 'targetSteamId', 'targetBattlemetricsPlayerId', 'reason'], 'identity_linked payload');
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new TypeError('identity_linked payload must be an object.');
+    }
+    const required = ['linkId', 'targetSteamId', 'targetBattlemetricsPlayerId', 'reason'];
+    const allowed = [...required, 'targetName', 'targetNameSource'];
+    const keys = Object.keys(/** @type {object} */ (value));
+    if (required.some(key => !keys.includes(key)) || keys.some(key => !allowed.includes(key))) {
+        throw new TypeError('identity_linked payload has unsupported or missing fields.');
+    }
     const payload = /** @type {{linkId: unknown, targetSteamId: unknown,
-        targetBattlemetricsPlayerId: unknown, reason: unknown}} */ (value);
+        targetBattlemetricsPlayerId: unknown, targetName?:unknown, targetNameSource?:unknown,
+        reason: unknown}} */ (value);
     assertString(payload.linkId, 'identity_linked payload.linkId', 128);
     optionalSteamId(payload.targetSteamId, 'identity_linked payload.targetSteamId');
     optionalBattlemetricsId(payload.targetBattlemetricsPlayerId,
         'identity_linked payload.targetBattlemetricsPlayerId');
+    if (payload.targetName !== undefined) {
+        optionalString(payload.targetName, 'identity_linked payload.targetName', 128);
+    }
+    if (payload.targetNameSource !== undefined &&
+        !['steam-profile', 'warbandits', 'verified-history'].includes(
+            /** @type {string} */ (payload.targetNameSource))) {
+        throw new TypeError('identity_linked payload.targetNameSource is unsupported.');
+    }
+    if (payload.targetNameSource !== undefined && payload.targetName === undefined) {
+        throw new TypeError('identity_linked payload.targetNameSource requires targetName.');
+    }
     assertString(payload.reason, 'identity_linked payload.reason', 256);
     if (payload.targetSteamId === null && payload.targetBattlemetricsPlayerId === null) {
         throw new TypeError('identity_linked payload must contain a target identity.');

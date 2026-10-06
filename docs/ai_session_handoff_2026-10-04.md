@@ -1,0 +1,251 @@
+# Passation de session IA — 4 octobre 2026
+
+Ce document est le point d’entrée compact d’une nouvelle session IA. Il ne remplace pas `MEMORY.md`, qui reste la
+mémoire détaillée et l’autorité en cas de doute. L’objectif est de reprendre le dépôt sans réinitialiser, dupliquer ou
+contredire le travail déjà effectué.
+
+## Introduction prête à copier
+
+```text
+Nous reprenons le projet Rust+/Discord situé dans
+C:\Users\Psype\Desktop\IA\Projects\Rust\rustplusplus-plugins.
+
+Avant toute modification :
+1. lis intégralement MEMORY.md puis docs/ai_session_handoff_2026-10-04.md ;
+2. inspecte git status --short, git diff --check et le diff utile ;
+3. préserve toutes les modifications existantes : elles sont intentionnelles et appartiennent à l’utilisateur ;
+4. ne fais ni reset, ni checkout destructif, ni réécriture globale du worktree ;
+5. ne prétends jamais qu’un comportement fonctionne en production sur la seule base des tests locaux.
+
+État attendu au départ : branche master, HEAD/origin/master a3a71a8, package 1.22.26. Le worktree contient les releases
+1.22.24 à 1.22.26 non commitées avec leurs documentations/tests. La première conserve les identifiants de ligne TSV
+Tesseract pour empêcher un pseudo /cinfo replié (U Got Kirkified) d’absorber Established, accepte la confusion l/I/1
+uniquement dans l’ancre et garde une date illisible éditable avec Confirm désactivé. La seconde ajoute la
+réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
+d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La dernière validation complète a passé
+252/252 tests et tsc --noEmit ; le déploiement et la nouvelle capture Discord restent à valider réellement.
+
+Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
+la date de capture Discord est ignorée ; ce calendrier mardi/vendredi 14:00 GMT ne vaut que pour WarBandits EU 5x
+NoBPs ; F7 ne prouve jamais la présence ; aucune similarité floue ne doit inventer une identité ; les données et
+dictionnaires persistants sous data/player-intelligence ne doivent jamais être supprimés.
+
+Pour toute nouvelle modification de code ou de configuration runtime, incrémente le SemVer dans package.json et
+package-lock.json, mets à jour MEMORY.md et les docs concernées, puis exécute npm.cmd test et git diff --check.
+Commence par résumer l’état réellement observé, puis poursuis la nouvelle demande sans refaire l’étude depuis zéro.
+```
+
+## État Git et release en cours
+
+- Dépôt : `rustplusplus-plugins`.
+- Branche au moment de la passation : `master`.
+- `HEAD`, `origin/master` et `origin/HEAD` : `a3a71a8`.
+- Version canonique du worktree : `1.22.26` dans `package.json` et `package-lock.json`.
+- Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
+  métrique d’heures WarBandits.
+- Le delta local non commité est volontaire. Il contient les releases `1.22.24` à `1.22.26`, notamment dans :
+
+  - `src/plugins/playerIntelligence/tesseractOcr.js` ;
+  - `src/plugins/playerIntelligence/ocrLayout.js` ;
+  - `src/plugins/playerIntelligence/parseCinfo.js` ;
+  - `src/plugins/playerIntelligence/cinfoPanelRefinement.js` ;
+  - `src/plugins/playerIntelligence/cinfoRoles.js` ;
+  - `src/plugins/playerIntelligence/detectImportKind.js` ;
+  - `src/plugins/playerIntelligence/importWorkflow.js` ;
+  - `src/plugins/playerIntelligence/runtime.js`, `src/plugins/playerIntelligence/identityAdministration.js`,
+    `src/plugins/playerTracker/index.js` et
+    `src/plugins/warBandits/index.js` ;
+  - `src/util/playerNameReconciler.js` ;
+  - `test/playerIntelligenceOcr.test.js` et `test/playerIntelligenceImport.test.js` ;
+  - `test/playerIntelligenceRuntime.test.js`, `test/playerIntelligenceDiscord.test.js`,
+    `test/playerTracker.test.js`, `test/warBandits.test.js` et `test/playerNameReconciler.test.js` ;
+  - `src/commands/intel.js` ;
+  - `package.json`, `package-lock.json`, `MEMORY.md`, `docs/commands.md` et `docs/installation.md` ;
+  - le présent document, son lien dans `docs/documentation.md` et la mise à jour de l’étude player-intelligence.
+
+Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
+
+## Dernière correction : release 1.22.26
+
+La commande slash `/intel`, réservée aux administrateurs et toujours éphémère, expose la correction d'identité sans
+polluer le chat Rust : `pending` liste les pseudos sans SteamID vérifié, `link` les associe directement, `merge` cible
+un alias/SteamID/BattleMetrics ID vérifié, `history` affiche uniquement l'historique d'alias vérifiés, `links` audite
+les règles actives et `unlink` les révoque. Chaque action reste append-only ; aucune capture ni donnée persistante n'est
+réécrite ou supprimée.
+
+`link`/`merge` consultent le persona Steam public courant et l'utilisent comme nom d'affichage le plus récent. Si Steam
+est indisponible, seul un alias local déjà vérifié par Steam/API peut être réutilisé : aucune saisie manuelle ne peut
+entrer dans l'historique vérifié. La projection distingue désormais les alias liés à un SteamID/API
+stable des lectures OCR name-only. Une faute telle que `ChiCo` peut donc reprojeter les anciennes captures vers le
+SteamID de `Ch1co`, additionner les occurrences entre captures et dédupliquer les deux formes dans une même capture,
+sans faire apparaître `ChiCo` dans l'historique d'alias vérifiés ni dans les candidats OCR canoniques. La révocation
+restaure la projection fondée uniquement sur les preuves d'origine.
+
+La documentation canonique sépare maintenant les exemples de consultation avec le préfixe in-game (`!intel`, `!who`,
+`!affinity`, `!activity`, `!track`) des opérations Discord-only (`/intel pending|merge|link|history|links|unlink` et
+`/intelimport`). Elle précise notamment que `!record` exige un triplet exact prouvé et ne sert pas à promouvoir une
+faute OCR : la correction `ChiCo` -> `Ch1co` doit rester privée, exacte et réversible via `/intel merge`.
+
+## Correction précédente : release 1.22.25
+
+`src/util/playerNameReconciler.js` fournit une frontière indépendante `pseudo/fragments -> cible`. Le mode `first`,
+utilisé par `!intel`, `!steamid`, `!who`, `!affinity` et `!activity`, classe exact/canonique/préfixe/sous-chaîne et
+retourne la cible la plus proche sans sélecteur ; `!intel tree` peut ainsi choisir `Cockornut Tree`. Cette résolution
+est strictement en lecture et ne crée aucune preuve d’identité. Le mode `precise`, utilisé par le tracker et
+WarBandits, conserve la priorité des profils en ligne et le sélecteur numéroté lorsque plusieurs meilleures cibles
+restent possibles.
+
+Le même composant accepte plusieurs fragments devant appartenir au même alias. L’API WarBandits ne les accepte pas en
+tableau : le test live `KOH` + `PENG` du 6 octobre a renvoyé zéro pour les formes répétée, crochets, index, virgule et
+JSON, alors que `player_name=KOH PENG` renvoyait `KOH PENG 🕷`. Toute future recherche OCR multi-fragments doit donc
+faire des requêtes séparées bornées, exiger une forte confiance individuelle et réconcilier localement.
+
+La recherche WarBandits du tracker utilise maintenant `wipe=0`. La corroboration OCR utilise `wipe=0` lorsque le GMT
+`Established` du bloc dérive le wipe actif, sinon `all-time`; les caches sont séparés par portée. Cela évite le bruit
+observé avec `peng` : un résultat sur le wipe courant contre dix en all-time.
+
+## Correction antérieure : release 1.22.24
+
+Le cas réel à reproduire était un panneau KIRK de trois joueurs :
+
+```text
+Jeffrey Kirkstein The 3rd
+Rw
+U Got Kirkified
+Established: 10/03/2026 17:01:39
+```
+
+Le pipeline avait produit `U Got Established: ...`, puis `Established: unread`, parce qu’il supprimait les identifiants
+de ligne fournis par le TSV Tesseract et reconstruisait les lignes uniquement par proximité verticale. Avec une police
+serrée, deux boîtes de lignes différentes pouvaient fusionner.
+
+Le correctif :
+
+- conserve `page:block:paragraph:line` comme `lineKey` sur chaque mot Tesseract ;
+- privilégie cette frontière native et n’utilise la géométrie qu’en secours pour les mots sans `lineKey` ;
+- namespace les identifiants des OCR de crops avant de les recombiner avec un panneau afin d’éviter les collisions
+  entre deux exécutions Tesseract ;
+- sépare le préfixe roster d’une ancre `Established` accidentellement fusionnée ;
+- tolère `l`, `I` ou `1` dans le mot-ancre seulement ;
+- continue d’exiger exactement `MM/DD/YYYY HH:mm:ss` en GMT pour la valeur ;
+- conserve un bloc avec date invalide dans le workflow si son compteur et son roster rendent le formulaire éditable ;
+- affiche `Wipe pending`, laisse `Edit <tag>` disponible et bloque Confirm jusqu’à une correction valide ;
+- recalcule le wipe et les identités après soumission du formulaire corrigé.
+
+Résultat déterministe attendu pour cette capture : `3/3 names read`, `U Got Kirkified`, date
+`10/03/2026 17:01:39`, puis le wipe propre à ce bloc. Une lecture qui reste incertaine doit proposer l’édition, jamais
+inventer ni commiter silencieusement.
+
+## Validation déjà effectuée
+
+Le 6 octobre 2026, après les releases 1.22.24 à 1.22.26 :
+
+- `npm.cmd test` : `252/252` tests unitaires réussis ;
+- `tsc --noEmit -p .` : réussi dans la même commande ;
+- `git diff --check` : aucune erreur ;
+- tests ajoutés : séparation de lignes malgré géométrie chevauchante, récupération du membre replié avec ancre
+  `EstabIished`, workflow d’édition obligatoire d’une date illisible, reprojection réversible `ChiCo` -> `Ch1co`,
+  agrégation inter-captures/déduplication intra-capture, séparation alias vérifiés/OCR pending, persona Steam courant,
+  réponses Discord éphémères, historique filtré et révocation.
+
+Ces résultats ne prouvent ni le comportement du binaire Tesseract installé sur Linux, ni le téléchargement Discord, ni
+les fournisseurs externes, ni le processus de déploiement.
+
+## Carte d’architecture utile
+
+### Import Discord et OCR
+
+- `src/plugins/playerIntelligence/importWorkflow.js` : téléchargement validé, OCR multi-passes, aperçu,
+  Edit/Confirm/Reject/Replace, files de décisions
+  et commit atomique.
+- `src/commands/intel.js` et `src/plugins/playerIntelligence/identityAdministration.js` : revue privée des pseudos sans
+  SteamID, liaison/fusion append-only, persona Steam courant, historique vérifié, audit et révocation.
+- `src/plugins/playerIntelligence/tesseractOcr.js` : processus local sérialisé, TSV, user words temporaires, délais et
+  limites de sortie.
+- `src/plugins/playerIntelligence/ocrLayout.js` : validation des mots, lignes natives/fallback géométrique et clusters
+  relatifs.
+- `src/plugins/playerIntelligence/parseCinfo.js` / `src/plugins/playerIntelligence/parseF7.js` : parsing sémantique
+  strict sans coordonnées absolues.
+- `src/plugins/playerIntelligence/cinfoPanelRefinement.js` / `src/plugins/playerIntelligence/f7RowRefinement.js` :
+  crops relatifs bornés et lectures spécialisées.
+- `src/plugins/playerIntelligence/cinfoRoles.js` : beige = membre, jaune vif = leader, bleu = modérateur, sinon
+  `unknown`.
+- `src/plugins/playerIntelligence/resolveCinfo.js` / `src/plugins/playerIntelligence/nameSimilarity.js` : résolution
+  Unicode conservatrice et affectation globale un-à-un.
+- `src/util/playerNameReconciler.js` : sélection pseudo/fragments réutilisable, `first` pour les consultations et
+  `precise` pour les mutations de tracking.
+- `src/plugins/playerIntelligence/visualAliasLibrary.js` et
+  `src/plugins/playerIntelligence/ocrCorrectionMemory.js` : dictionnaires persistants séparés du code ; ils ne
+  constituent pas à eux seuls une preuve d’identité.
+
+### Journal, requêtes et daemon
+
+- `src/plugins/playerIntelligence/historyStore.js` : journal JSONL mensuel, append sérialisé, corruption bloquante.
+- `src/plugins/playerIntelligence/runtime.js` et les projecteurs : reconstruction
+  identité/clan/activité/présence/métriques.
+- `src/plugins/playerIntelligence/scanDaemon.js` : une page WarBandits bornée par tick BattleMetrics existant, état
+  reprenable, aucune seconde boucle de présence.
+- `!intel` est la vue complète ; `!steamid` est son alias exact ; `!who` expose les alias ; `!record` ajoute une liaison
+  manuelle stricte ; `!scanplayers` force un passage borné en arrière-plan.
+
+## Invariants métier à ne pas casser
+
+- Le serveur concerné est actuellement **WarBandits EU 5x NoBPs**. Son calendrier régulier connu est mardi et vendredi
+  à 14:00 GMT. Ne pas appliquer cette règle à un autre serveur.
+- `Established` est une heure serveur GMT et l’unique ancre temporelle d’un `/cinfo`. La date/heure de capture ou
+  d’upload Discord est sans effet.
+- Chaque panneau d’une même image calcule son wipe indépendamment. Deux panneaux d’une image peuvent donc appartenir
+  à des wipes différents.
+- Les forced wipes et frontières intermédiaires sont volontairement ignorés pour ce calcul historique.
+- Un snapshot `/cinfo` partiel peut être confirmé si tag, compteur et date sont structurellement valides. Les identités
+  non résolues restent exclues des alias exacts et affinités jusqu’à une preuve ultérieure.
+- F7 est une liste opaque de rencontres/auteurs de chat, pas une preuve de connexion actuelle.
+- Un SteamID64 complet peut survivre sans nom sûr. Un ID partiel, ambigu ou hors plage doit être rejeté.
+- Une similarité textuelle ou visuelle floue classe des hypothèses mais ne suffit pas à créer une identité définitive.
+- Les rôles `/cinfo` viennent des couleurs relatives dans les boîtes prouvées. Ne jamais promouvoir une couleur
+  illisible en leader.
+- BattleMetrics Premium est la source de présence principale. Une panne vaut `unknown`, jamais une déconnexion.
+- WarBandits enrichit identité et compteur d’heures mais ne prouve jamais la présence.
+
+## Persistance, secrets et sécurité
+
+Ne jamais supprimer ou réinitialiser les fichiers ignorés nécessaires à la continuité :
+
+- `data/player-intelligence/<guild>/<battlemetricsServerId>/*.jsonl` ;
+- `visual-alias-library.json` ;
+- `ocr-correction-memory.json` ;
+- `scan-daemon.json` ;
+- les sidecars sous `data/warbandits/` et les trackers existants.
+
+`rustplus.config.json`, `.env`, `credentials/` et les logs FCM peuvent contenir des secrets, SteamID, adresses serveur,
+tokens et messages. Ils ne doivent jamais être commités, publiés ou recopiés en entier dans une réponse. L’override
+local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non reproductible après réinstallation ; voir
+`docs/credentials.md`.
+
+## Vérifications de production encore ouvertes
+
+1. Déployer/redémarrer `1.22.26`, vérifier le message `RUSTPLUS v1.22.26 OPERATIONAL`, puis réimporter l’image KIRK
+   originale dans le canal d’intelligence. Exiger `U Got Kirkified` et un `Established` séparé.
+2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent
+   des boîtes déterministes et ne remplacent pas ce contrôle.
+3. Vérifier en conditions réelles l’enrichissement progressif WarBandits, les SteamID `[name pending]`, les heures
+   affichées comme borne basse et `!scanplayers` sans inférence de présence.
+4. Le transport raid/Pair FCM reste non prouvé côté Facepunch malgré une authentification MCS acceptée. Suivre
+   `docs/fcm_transport_audit_2026-09-23.md`; `!raidtest` ne valide que la sortie Rust chat.
+5. Continuer à constituer un corpus de PNG originaux variés avant toute affirmation de précision OCR générale ou ajout
+   d’un moteur multilingue/modèle synthétique.
+
+Ne déploie, ne redémarre et ne contacte aucun service externe sans que la demande courante l’autorise.
+
+## Routine de fin pour les prochaines modifications
+
+Pour toute évolution de code ou de configuration runtime :
+
+1. préserver les changements existants et modifier avec un patch ciblé ;
+2. incrémenter le SemVer dans `package.json` et les deux occurrences racines de `package-lock.json` ;
+3. mettre à jour `MEMORY.md` et la documentation utilisateur/architecture concernée ;
+4. ajouter des tests déterministes couvrant la régression réelle ;
+5. exécuter `npm.cmd test` puis `git diff --check` ;
+6. annoncer séparément ce qui est validé localement et ce qui reste à vérifier en production.
+
+Une modification exclusivement documentaire ne nécessite pas de nouvelle version applicative.

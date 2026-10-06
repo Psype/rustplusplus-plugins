@@ -4,7 +4,8 @@ const Jimp = require('jimp');
 const Layout = require('./ocrLayout.js');
 const OcrImagePreprocess = require('./ocrImagePreprocess.js');
 const OcrCorrectionMemory = require('./ocrCorrectionMemory.js');
-const { parseCinfoWords, parseEstablished, splitCinfoWordBlocks } = require('./parseCinfo.js');
+const { hasEstablishedAnchor, hasEstablishedLabel, parseCinfoWords, parseEstablished,
+    splitCinfoWordBlocks } = require('./parseCinfo.js');
 
 const MAX_ISOLATED_ROSTER_MEMBERS = 32;
 const MAX_ISOLATED_SHEET_PIXELS = 8 * 1024 * 1024;
@@ -22,7 +23,7 @@ function blockQuality(block) {
 function panelBounds(image, block) {
     const lines = Layout.groupLines(block.words);
     const start = lines.findIndex(line => /clan\s*tag\s*:/iu.test(line.text));
-    const established = lines.findIndex(line => /established\s*:/iu.test(line.text));
+    const established = lines.findIndex(line => hasEstablishedAnchor(line.text));
     if (start === -1 || established < start) return null;
     const relevant = lines.slice(start, established + 1);
     const typicalHeight = Math.max(1, Layout.median(relevant.map(line => line.height)));
@@ -39,9 +40,9 @@ function panelBounds(image, block) {
 
 /** @param {any} image @param {{words:unknown}} block */
 function establishedBounds(image, block) {
-    const line = Layout.groupLines(block.words).find(candidate => /established\s*:/iu.test(candidate.text));
+    const line = Layout.groupLines(block.words).find(candidate => hasEstablishedAnchor(candidate.text));
     if (!line) return null;
-    const anchor = line.words.find(word => /established/iu.test(word.text));
+    const anchor = line.words.find(word => hasEstablishedAnchor(word.text) || hasEstablishedLabel(word.text));
     if (!anchor) return null;
     const colon = anchor.text.indexOf(':');
     const valueFraction = colon === -1 ? 1 : Math.min(1, (colon + 1) / Math.max(1, anchor.text.length));
@@ -142,7 +143,7 @@ function missingEstablishedBounds(image, block) {
     if (rosterIndex === -1) return null;
     const candidates = lines.slice(rosterIndex + 1);
     if (candidates.length === 0) return projectedBoundsAfter(image, lines[rosterIndex]);
-    const plausible = candidates.filter(line => /[\/:]/u.test(line.text) || /establ/iu.test(line.text) ||
+    const plausible = candidates.filter(line => /[\/:]/u.test(line.text) || hasEstablishedAnchor(line.text) ||
         (line.text.match(/\d/gu) || []).length >= 8);
     if (plausible.length === 0) return projectedBoundsAfter(image, candidates.at(-1));
     const line = [...plausible].sort((left, right) =>
@@ -210,7 +211,7 @@ async function refineMissingFields(image, block, recognize, ocrOptions, dependen
         }
     }
     if (!selected.parsed.establishedAtUtc &&
-        !Layout.groupLines(selected.words).some(line => /established\s*:/iu.test(line.text))) {
+        !Layout.groupLines(selected.words).some(line => hasEstablishedAnchor(line.text))) {
         const bounds = missingEstablishedBounds(image, selected);
         if (bounds) {
             const raw = await readIsolatedField(image, bounds, recognize, ocrOptions, dependencies, JimpImpl,
@@ -229,7 +230,7 @@ async function refineMissingFields(image, block, recognize, ocrOptions, dependen
 function rosterBounds(image, block) {
     const lines = Layout.groupLines(block.words);
     const start = lines.findIndex(line => /clan\s+members\s*:/iu.test(line.text));
-    const end = lines.findIndex(line => /established\s*:/iu.test(line.text));
+    const end = lines.findIndex(line => hasEstablishedAnchor(line.text));
     if (start === -1 || end <= start) return null;
     const relevant = lines.slice(start, end);
     const typicalHeight = Math.max(1, Layout.median(relevant.map(line => line.height)));
@@ -254,6 +255,7 @@ function mapCropWords(words, scale, bounds) {
     }
     return Object.freeze(words.map(word => Object.freeze({
         ...word,
+        ...(word.lineKey ? { lineKey: `crop:${bounds.left}:${bounds.top}:${word.lineKey}` } : {}),
         x: word.x / scale + bounds.left,
         y: word.y / scale + bounds.top,
         width: word.width / scale,
@@ -321,7 +323,7 @@ function rosterMemberFragments(image, block) {
         count > MAX_ISOLATED_ROSTER_MEMBERS) return null;
     const lines = Layout.groupLines(block.words);
     const start = lines.findIndex(line => /clan\s+members\s*:/iu.test(line.text));
-    const end = lines.findIndex(line => /established\s*:/iu.test(line.text));
+    const end = lines.findIndex(line => hasEstablishedAnchor(line.text));
     if (start === -1 || end <= start) return null;
     const rosterLines = lines.slice(start, end);
     const members = [];

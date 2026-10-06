@@ -4,7 +4,9 @@ const Path = require('node:path');
 
 const Core = require('./index.js');
 const F7IdentityValidation = require('./f7IdentityValidation.js');
+const IdentityAdministration = require('./identityAdministration.js');
 const PlayerScanDaemon = require('./scanDaemon.js');
+const PlayerNameReconciler = require('../../util/playerNameReconciler.js');
 
 const COLLECTOR_VERSION = 'player-intelligence-1';
 const DATA_DIRECTORY = Path.join(__dirname, '..', '..', '..', 'data', 'player-intelligence');
@@ -295,7 +297,7 @@ async function identityCandidates(context) {
             battlemetricsPlayerId: person.battlemetricsPlayerIds[0] || null,
             exactName: person.names[0] ? person.names[0].name : null
         }).knownTags.map((/** @type {any} */ tag) => normalize(tag.tag));
-        for (const alias of person.names) values.push({
+        for (const alias of person.names.filter((/** @type {any} */ alias) => alias.verified)) values.push({
             name: alias.name,
             steamId: person.steamId,
             battlemetricsPlayerId: person.battlemetricsPlayerIds[0] || null,
@@ -553,6 +555,71 @@ async function recordManualIdentity(context, scope, store, identity) {
 }
 
 /** @param {any} context */
+async function identityAdministrationState(context) {
+    const scope = getScope(context);
+    if (!scope) throw new Error('BattleMetrics must be configured for the active server.');
+    const store = getStore(context, scope);
+    const projection = Core.rebuild(await store.readAll());
+    return Object.freeze({ scope, store, projection });
+}
+
+/** @param {any} context */
+async function listPendingAliases(context) {
+    const state = await identityAdministrationState(context);
+    return IdentityAdministration.pendingAliases(state.projection);
+}
+
+/** @param {any} context */
+async function listIdentityLinks(context) {
+    const state = await identityAdministrationState(context);
+    return IdentityAdministration.activeLinks(state.projection);
+}
+
+/** @param {any} context @param {string} query */
+async function resolveIdentityTarget(context, query) {
+    const clean = sanitize(query);
+    if (!clean || clean.length > MAX_QUERY_LENGTH) {
+        return Object.freeze({ person: null, requestedAlias: null, reason: 'invalid-target' });
+    }
+    const state = await identityAdministrationState(context);
+    const result = IdentityAdministration.resolveVerifiedSteamTarget(state.projection, clean);
+    if (!result.person) return result;
+    return Object.freeze({
+        person: result.person,
+        steamId: result.person.steamId,
+        requestedAlias: result.requestedAlias,
+        displayName: state.projection.identities.displayName(result.person.personId),
+        reason: null
+    });
+}
+
+/** @param {any} context @param {{alias:string,targetSteamId:string,targetName:string,
+ * targetNameSource:string,actorId:string}} request */
+async function linkIdentityAlias(context, request) {
+    const state = await identityAdministrationState(context);
+    return IdentityAdministration.linkAlias(state.store, state.scope, {
+        guildId: `${context.guildId}`,
+        recordedAt: nowIso(getDependencies(context)),
+        alias: request.alias,
+        targetSteamId: request.targetSteamId,
+        targetName: request.targetName,
+        targetNameSource: request.targetNameSource,
+        actorId: `${request.actorId}`
+    });
+}
+
+/** @param {any} context @param {{alias:string,actorId:string}} request */
+async function unlinkIdentityAlias(context, request) {
+    const state = await identityAdministrationState(context);
+    return IdentityAdministration.unlinkAlias(state.store, state.scope, {
+        guildId: `${context.guildId}`,
+        recordedAt: nowIso(getDependencies(context)),
+        alias: request.alias,
+        actorId: `${request.actorId}`
+    });
+}
+
+/** @param {any} context */
 function commandAllowed(context) {
     if (context.source !== 'inGame') return true;
     if (context.rustplus.isOperational === false) return false;
@@ -570,13 +637,16 @@ function resolveQuery(projection, query) {
     if (!query || query.length > MAX_QUERY_LENGTH) return Object.freeze({ person: null, matches: [] });
     const exactId = projection.identities.findByIdentifier(query);
     if (exactId.length === 1) return Object.freeze({ person: exactId[0], matches: exactId });
-    const names = projection.identities.findByExactName(query);
-    if (names.length > 0) return Object.freeze({ person: names.length === 1 ? names[0] : null, matches: names });
-    const inferred = projection.identities.resolveSubject({
-        steamId: null, battlemetricsPlayerId: null, exactName: query
+    if (exactId.length > 1) return Object.freeze({ person: null, matches: exactId });
+    const reconciliation = PlayerNameReconciler.reconcile(query, projection.identities.persons, {
+        mode: PlayerNameReconciler.MODE_FIRST,
+        getAliases: person => person.names.map((/** @type {any} */ alias) => alias.name),
+        getKey: person => person.personId
     });
-    const person = inferred.ambiguous ? null : projection.identities.getPerson(inferred.personId);
-    return Object.freeze({ person, matches: person ? [person] : [] });
+    return Object.freeze({
+        person: reconciliation.target,
+        matches: reconciliation.candidates
+    });
 }
 
 /** @param {string} label @param {string[]} values @param {number} budget */
@@ -635,8 +705,10 @@ function affinityLines(projection, person) {
 
 /** @param {any} person */
 function aliasesLine(person) {
-    return boundedList('Aliases', person.names.slice().sort((/** @type {any} */ left, /** @type {any} */ right) =>
-        right.lastObservedAt.localeCompare(left.lastObservedAt) || left.name.localeCompare(right.name))
+    return boundedList('Aliases', person.names.filter((/** @type {any} */ alias) => alias.verified)
+    .sort((/** @type {any} */ left, /** @type {any} */ right) =>
+        `${right.lastVerifiedAt || right.lastObservedAt}`.localeCompare(
+            `${left.lastVerifiedAt || left.lastObservedAt}`) || left.name.localeCompare(right.name))
     .map((/** @type {any} */ alias) => alias.name));
 }
 
@@ -757,7 +829,7 @@ async function handleCommand(context) {
         }
         if (!query || query.length > MAX_QUERY_LENGTH) {
             const suffix = effectiveName === 'activity' ? ' [1mo|all]' : '';
-            return handled(`Usage: ${context.prefix}${parsed.name} <SteamID64|BM ID|exact name>${suffix}.`);
+            return handled(`Usage: ${context.prefix}${parsed.name} <SteamID64|BM ID|partial name>${suffix}.`);
         }
         const resolved = resolveQuery(projection, query);
         if (!resolved.person) return handled(ambiguousResponse(resolved.matches));
@@ -1089,6 +1161,9 @@ module.exports = Object.freeze({
     getScope,
     handleCommand,
     identityCandidates,
+    linkIdentityAlias,
+    listIdentityLinks,
+    listPendingAliases,
     linkedClanSteamCandidates,
     onBattlemetricsUpdated,
     parseCommand,
@@ -1099,5 +1174,7 @@ module.exports = Object.freeze({
     regularWipeStart,
     resolveEstablishedScope,
     resolveHistoricalScope,
-    resolveQuery
+    resolveIdentityTarget,
+    resolveQuery,
+    unlinkIdentityAlias
 });

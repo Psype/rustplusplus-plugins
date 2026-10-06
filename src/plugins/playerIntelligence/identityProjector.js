@@ -42,20 +42,12 @@ function projectIdentities(events) {
     }
 
     for (const event of ordered) {
-        if (event.kind === 'identity_observed') {
-            if (event.subject.exactName !== null &&
-                (event.subject.steamId !== null || event.subject.battlemetricsPlayerId !== null)) {
-                const key = nameKey(event.subject.exactName);
-                const values = observedNameTargets.get(key) || new Set();
-                values.add(targetPersonId(event.subject, bmToSteam));
-                observedNameTargets.set(key, values);
-            }
-        }
-        else if (event.kind === 'identity_linked') activeLinks.set(event.payload.linkId, event);
-        else activeLinks.delete(event.payload.linkId);
+        if (event.kind === 'identity_linked') activeLinks.set(event.payload.linkId, event);
+        else if (event.kind === 'identity_link_revoked') activeLinks.delete(event.payload.linkId);
     }
 
     const explicitNameTargets = new Map();
+    const explicitBattlemetricsTargets = new Map();
     for (const link of activeLinks.values()) {
         const key = nameKey(link.subject.exactName);
         const target = targetPersonId({
@@ -65,6 +57,31 @@ function projectIdentities(events) {
         const values = explicitNameTargets.get(key) || new Set();
         values.add(target);
         explicitNameTargets.set(key, values);
+        if (link.subject.battlemetricsPlayerId !== null) {
+            const battlemetricsValues = explicitBattlemetricsTargets.get(link.subject.battlemetricsPlayerId) ||
+                new Set();
+            battlemetricsValues.add(target);
+            explicitBattlemetricsTargets.set(link.subject.battlemetricsPlayerId, battlemetricsValues);
+        }
+    }
+
+    /** @param {{steamId: string|null, battlemetricsPlayerId: string|null}} subject */
+    function resolveStableSubject(subject) {
+        if (subject.steamId !== null) return `steam:${subject.steamId}`;
+        if (subject.battlemetricsPlayerId !== null) {
+            const explicit = explicitBattlemetricsTargets.get(subject.battlemetricsPlayerId);
+            if (explicit && explicit.size === 1) return [...explicit][0];
+        }
+        return targetPersonId(subject, bmToSteam);
+    }
+
+    for (const event of ordered) {
+        if (event.kind !== 'identity_observed' || event.subject.exactName === null ||
+            (event.subject.steamId === null && event.subject.battlemetricsPlayerId === null)) continue;
+        const key = nameKey(event.subject.exactName);
+        const values = observedNameTargets.get(key) || new Set();
+        values.add(resolveStableSubject(event.subject));
+        observedNameTargets.set(key, values);
     }
 
     /** @param {{steamId: string|null, battlemetricsPlayerId: string|null, exactName: string|null}} subject */
@@ -73,6 +90,14 @@ function projectIdentities(events) {
             personId: `steam:${subject.steamId}`, confidence: 'authoritative', ambiguous: false
         });
         if (subject.battlemetricsPlayerId !== null) {
+            const explicit = explicitBattlemetricsTargets.get(subject.battlemetricsPlayerId);
+            if (explicit && explicit.size === 1) return deepFreeze({
+                personId: [...explicit][0], confidence: 'verified', ambiguous: false
+            });
+            if (explicit && explicit.size > 1) return deepFreeze({
+                personId: `battlemetrics:${subject.battlemetricsPlayerId}`,
+                confidence: 'ambiguous', ambiguous: true
+            });
             const steamIds = bmToSteam.get(subject.battlemetricsPlayerId);
             if (steamIds && steamIds.size === 1) return deepFreeze({
                 personId: `steam:${[...steamIds][0]}`, confidence: 'verified', ambiguous: false
@@ -125,15 +150,46 @@ function projectIdentities(events) {
         if (event.subject.exactName !== null && event.payload.caseFidelity) {
             const previous = person.names.get(event.subject.exactName) || {
                 name: event.subject.exactName, firstObservedAt: event.observedAt,
-                lastObservedAt: event.observedAt, caseFidelity: event.payload.caseFidelity
+                lastObservedAt: event.observedAt, caseFidelity: event.payload.caseFidelity,
+                verified: false, lastVerifiedAt: null
             };
+            const verified = resolution.personId.startsWith('steam:') &&
+                (event.subject.steamId !== null || event.subject.battlemetricsPlayerId !== null);
             previous.firstObservedAt = previous.firstObservedAt < event.observedAt ?
                 previous.firstObservedAt : event.observedAt;
             previous.lastObservedAt = previous.lastObservedAt > event.observedAt ?
                 previous.lastObservedAt : event.observedAt;
             previous.caseFidelity = previous.caseFidelity && event.payload.caseFidelity;
+            previous.verified = previous.verified || verified;
+            if (verified && (previous.lastVerifiedAt === null || previous.lastVerifiedAt < event.observedAt)) {
+                previous.lastVerifiedAt = event.observedAt;
+            }
             person.names.set(event.subject.exactName, previous);
         }
+    }
+
+    for (const link of activeLinks.values()) {
+        if (typeof link.payload.targetName !== 'string' || link.payload.targetName === '') continue;
+        if (!['steam-profile', 'warbandits', 'verified-history'].includes(link.payload.targetNameSource)) continue;
+        const personId = targetPersonId({
+            steamId: link.payload.targetSteamId,
+            battlemetricsPlayerId: link.payload.targetBattlemetricsPlayerId
+        }, bmToSteam);
+        const person = ensurePerson(personId);
+        const previous = person.names.get(link.payload.targetName) || {
+            name: link.payload.targetName, firstObservedAt: link.observedAt,
+            lastObservedAt: link.observedAt, caseFidelity: true, verified: true,
+            lastVerifiedAt: link.observedAt
+        };
+        previous.firstObservedAt = previous.firstObservedAt < link.observedAt ?
+            previous.firstObservedAt : link.observedAt;
+        previous.lastObservedAt = previous.lastObservedAt > link.observedAt ?
+            previous.lastObservedAt : link.observedAt;
+        previous.caseFidelity = true;
+        previous.verified = true;
+        previous.lastVerifiedAt = previous.lastVerifiedAt !== null && previous.lastVerifiedAt > link.observedAt ?
+            previous.lastVerifiedAt : link.observedAt;
+        person.names.set(link.payload.targetName, previous);
     }
 
     const persons = [...people.values()].map(person => deepFreeze({
@@ -170,7 +226,10 @@ function projectIdentities(events) {
     function displayName(personId) {
         const person = personById.get(personId);
         if (!person || person.names.length === 0) return personId;
-        return person.names.slice().sort((left, right) =>
+        const verified = person.names.filter(alias => alias.verified);
+        return (verified.length > 0 ? verified : person.names).slice().sort((left, right) =>
+            `${right.lastVerifiedAt || right.lastObservedAt}`.localeCompare(
+                `${left.lastVerifiedAt || left.lastObservedAt}`) ||
             right.lastObservedAt.localeCompare(left.lastObservedAt) || left.name.localeCompare(right.name))[0].name;
     }
 
@@ -194,6 +253,9 @@ function projectIdentities(events) {
         activeLinks: [...activeLinks.values()].map(event => ({
             linkId: event.payload.linkId,
             exactName: event.subject.exactName,
+            sourceBattlemetricsPlayerId: event.subject.battlemetricsPlayerId,
+            targetName: event.payload.targetName || null,
+            targetNameSource: event.payload.targetNameSource || null,
             targetPersonId: targetPersonId({
                 steamId: event.payload.targetSteamId,
                 battlemetricsPlayerId: event.payload.targetBattlemetricsPlayerId

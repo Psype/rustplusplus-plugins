@@ -1,6 +1,10 @@
 # Full list of Features
 
 ## Discord Slash Commands
+
+All commands in this section are Discord-only. Player-identity administration replies ephemerally and never sends its
+review/correction output to Rust team chat.
+
 - **/alarm** - Change image of paired Smart Alarms.
 - **/alias** - Create an alias for a command/sequence of characters.
 - **/blacklist** - Blacklist a user from using the bot.
@@ -10,6 +14,7 @@
 - **/decay** - Display the decay time of an item.
 - **/despawn** - Display the despawn time of an item.
 - **/help** - Get help message.
+- **/intel** - Privately list aliases without a verified SteamID, reconcile them to a verified identity, inspect verified alias history, review links, or revoke a correction.
 - **/intelimport** - OCR, preview, and confirm `/cinfo` or F7 screenshots without fixed pixel coordinates.
 - **intel-imports channel** - Drop 1–10 screenshots manually or through the allowlisted Windows region-capture
   webhook, or paste 1–100 complete SteamID64 values with one ID per line. F7 versus `/cinfo` and repeated `/cinfo`
@@ -32,14 +37,25 @@
 - **/uptime** - Get the current uptime for rustplusplus.
 - **/voice** - Let rustplusplus join voicechat.
 
+### Discord-only player identity examples
+
+- `/intel pending page:1` lists unresolved aliases such as an OCR-only `ChiCo`.
+- `/intel merge alias:ChiCo target:Ch1co` performs an exact, reversible correction against an existing verified target.
+- `/intel link alias:ChiCo steamid:76561198154738095` performs the same correction when the SteamID64 is known directly.
+- `/intel history target:Ch1co page:1` lists only dated Steam/API-verified names; it never promotes `ChiCo` merely
+  because that typo was merged.
+- `/intel links page:1` audits active rules, and `/intel unlink alias:ChiCo` revokes a wrong rule without deleting data.
+- `/intelimport cinfo image:<file>` and `/intelimport f7 image:<file>` create private previews that must be confirmed.
+  F7 never proves presence; each `/cinfo` panel uses its own GMT `Established`, not the upload date, to derive its wipe.
+
 ## In-Game and Discord Commands
 - **afk** - `!afk` - Display AFK teammates.
 - **alive** - `!alive` - Display who has been alive longest.
 - **autotranslate** - `!autotranslate on [language[,language...]]` or `!autotranslate off` - Translate a teammate only when the message matches one of their recorded languages and the active translation pair; relay the result to Rust team chat and Discord.
 - **commands/help** - `!commands [command]` or `!help [command]` - List all commands or show the documented synopsis and description for one command.
 - **connection/connections** - `!connection [steamid]` or `!connections` - Display latest team connections.
-- **activity** - `!activity [SteamID64|BattleMetrics ID|exact name] [1mo|all]` - Show conservative known-online time from the local event history; `1mo` is the default rolling 30 days.
-- **affinity** - `!affinity [SteamID64|BattleMetrics ID|exact name]` - Show compact confirmed `Known tags` and `Played with` counts.
+- **activity** - `!activity [SteamID64|BattleMetrics ID|partial name] [1mo|all]` - Show conservative known-online time from the local event history; `1mo` is the default rolling 30 days.
+- **affinity** - `!affinity [SteamID64|BattleMetrics ID|partial name]` - Show compact confirmed `Known tags` and `Played with` counts.
 - **clan** - `!clan [ClanTag]` - Show the latest confirmed stored snapshot for a ClanTag.
 - **clanhistory** - `!clanhistory [ClanTag]` - Show the five latest stored snapshots for a ClanTag.
 - **clantop** - `!clantop [1-10]` - Rank observed ClanTags by distinct confirmed snapshots.
@@ -48,7 +64,7 @@
 - **decay** - `!decay [item]` - Display the decay time of an item.
 - **despawn** - `!despawn [item]` - Display the despawn time of an item.
 - **language** - `!language [code]` - Show or change the bot language for this server.
-- **intel** - `!intel [SteamID64|BattleMetrics ID|exact name]` - Show the complete compact local profile: current identity, aliases, reliable presence, known tags, repeated clanmates, and rolling activity.
+- **intel** - `!intel [SteamID64|BattleMetrics ID|partial name]` - Return the closest known identity without a selector and show its complete compact local profile: current identity, verified aliases, reliable presence, known tags, repeated clanmates, and rolling activity.
 - **leader** - `!leader [teammate]` - Transfer leadership.
 - **logs** - `!logs [on|off]` - Show, enable, or disable bot file/debug logging.
 - **marker/markers** - `!marker [name]` or `!markers` - Set markers to navigate to.
@@ -67,7 +83,7 @@
 - **send** - `!send [discord user] [message]` - Send a message through rustplusplus to a person on Discord.
 - **stack** - `!stack [item]` - Display stack size information for an item.
 - **scanplayers** - `!scanplayers` - Trigger or queue an immediate bounded background identity rescan for the active wipe.
-- **steamid** - `!steamid [SteamID64|BattleMetrics ID|exact name]` - Compatibility alias for the complete `!intel` server-wide profile.
+- **steamid** - `!steamid [SteamID64|BattleMetrics ID|partial name]` - Compatibility alias for the complete `!intel` server-wide profile.
 - **team** - `!team` - Get team information (names of all teammates).
 - **time** - `!time` - Get in-game time.
 - **timer/timers** - `!timer [duration] [message]` or `!timers` - Set or list timers.
@@ -83,8 +99,19 @@
 - **unmute** - `!unmute` - Unmute rustplusplus in-game.
 - **upkeep** - `!upkeep` - Check upkeep of Storage Monitor Tool Cupboards.
 - **uptime** - `!uptime` - Display the uptime of rustplusplus and currently connected server.
-- **who** - `!who [SteamID64|BattleMetrics ID|exact name]` - List exact aliases known by the active server intelligence database.
+- **who** - `!who [SteamID64|BattleMetrics ID|partial name]` - Select the closest known identity and list only its verified Steam/API aliases.
 - **wipe** - `!wipe` - Display time since wipe.
+
+### Player identity examples with the in-game prefix
+
+- `!intel tree` returns the closest read-only profile, for example `Cockornut Tree`, without a selector or mutation.
+- `!who ch1` lists only verified Steam/API aliases and omits pending OCR spellings such as `ChiCo`.
+- `!affinity tree` shows confirmed `Known tags` and `Played with` counts; different captures add, while one merged person
+  counts once inside the same capture.
+- `!activity tree` uses a rolling month; `!activity tree all` uses all retained known-online evidence.
+- `!track peng` uses precise matching. If it returns several equal candidates, use `!track #2` or `!track peng 2`.
+- `!record <SteamID64> <BattleMetrics ID> <exact name>` is for a proven exact triple, not OCR correction. Use the
+  Discord-only `/intel merge` flow to reconcile a typo privately and reversibly.
 
 ## Smart Devices
 > Pair Smart Devices such as `Smart Switches`, `Smart Alarms`, `Storage Monitors` and control them from Discord or In-Game teamchat.

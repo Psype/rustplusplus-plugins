@@ -4,6 +4,8 @@ const Axios = require('axios');
 const Fs = require('fs');
 const Path = require('path');
 
+const PlayerNameReconciler = require('../../util/playerNameReconciler.js');
+
 const API_TIMEOUT_MS = 5000;
 const DEFAULT_API_ROOT = 'https://api.warbandits.gg';
 const DEFAULT_CATALOG_TTL_MS = 60 * 60 * 1000;
@@ -236,27 +238,14 @@ function groupPlayers(rows) {
 function selectPlayer(rows, query) {
     const players = groupPlayers(rows);
     const rawQuery = `${query}`.trim();
-    if (/^7656119\d{10}$/.test(rawQuery)) {
-        const matches = players.filter(player => player.steamId === rawQuery);
-        return deepFreeze({ player: matches.length === 1 ? matches[0] : null, candidates: matches,
-            ambiguous: matches.length > 1 });
-    }
-
-    const wanted = normalize(rawQuery);
-    const aliasesMatch = (player, predicate) => player.aliases.some(alias => predicate(normalize(alias)));
-    const exact = players.filter(player => aliasesMatch(player, alias => alias === wanted));
-    if (exact.length > 0) {
-        return deepFreeze({ player: exact.length === 1 ? exact[0] : null, candidates: exact,
-            ambiguous: exact.length > 1 });
-    }
-    const prefix = players.filter(player => aliasesMatch(player, alias => alias.startsWith(wanted)));
-    if (prefix.length > 0) {
-        return deepFreeze({ player: prefix.length === 1 ? prefix[0] : null, candidates: prefix,
-            ambiguous: prefix.length > 1 });
-    }
-    const partial = players.filter(player => aliasesMatch(player, alias => alias.includes(wanted)));
-    return deepFreeze({ player: partial.length === 1 ? partial[0] : null, candidates: partial,
-        ambiguous: partial.length > 1 });
+    const reconciliation = PlayerNameReconciler.reconcile(rawQuery, players, {
+        mode: PlayerNameReconciler.MODE_PRECISE,
+        getAliases: player => player.aliases,
+        getIdentifiers: player => player.steamId,
+        getKey: player => player.steamId
+    });
+    return deepFreeze({ player: reconciliation.target, candidates: reconciliation.candidates,
+        ambiguous: reconciliation.ambiguous });
 }
 
 function createProvider(dependencies = {}) {
@@ -497,8 +486,8 @@ function createProvider(dependencies = {}) {
         });
     }
 
-    function statsCacheKey(server, query) {
-        return `${server.slug}:${normalize(query)}`;
+    function statsCacheKey(server, query, wipe = 'all-time') {
+        return `${server.slug}:${wipe}:${normalize(query)}`;
     }
 
     function statsCacheGet(key) {
@@ -516,9 +505,12 @@ function createProvider(dependencies = {}) {
         return Number.isSafeInteger(total) && total >= 0 ? total : null;
     }
 
-    async function resolvePlayer(context, scope, query) {
+    async function resolvePlayer(context, scope, query, options = {}) {
         const rawQuery = `${query || ''}`.trim();
         if (!rawQuery || rawQuery.length > 64) return unavailable('invalid query', { candidates: [] });
+        const wipe = options.wipe === undefined || options.wipe === 'all-time' ? 'all-time' :
+            options.wipe === 0 || options.wipe === '0' ? 0 : null;
+        if (wipe === null) return unavailable('invalid wipe', { candidates: [] });
         const catalog = await ensureServerCatalog(context);
         if (!catalog.available || catalog.reason === 'cooldown') {
             return unavailable(catalog.reason, { candidates: [], server: null });
@@ -533,7 +525,7 @@ function createProvider(dependencies = {}) {
         }
         if (!server) return unavailable('server not supported', { candidates: [], server: null });
 
-        const key = statsCacheKey(server, rawQuery);
+        const key = statsCacheKey(server, rawQuery, wipe);
         const cached = statsCacheGet(key);
         let result = cached;
         if (!result) {
@@ -543,7 +535,7 @@ function createProvider(dependencies = {}) {
                 const steamQuery = /^7656119\d{10}$/.test(rawQuery);
                 const params = {
                     limit: 10,
-                    wipe: 'all-time',
+                    wipe,
                     category_ID: 1,
                     sort_direction: 'DESC',
                     [steamQuery ? 'steam_64_ID' : 'player_name']: rawQuery
@@ -560,6 +552,7 @@ function createProvider(dependencies = {}) {
                         reason: null,
                         server,
                         query: rawQuery,
+                        wipe,
                         player: truncated ? null : selection.player,
                         candidates: selection.candidates,
                         ambiguous: truncated || selection.ambiguous,
@@ -880,7 +873,7 @@ module.exports = Object.freeze({
         singleton.linkBattlemetricsPlayer(context, scope, link),
     parseServerCatalog,
     parseStatsPayload,
-    resolvePlayer: (context, scope, query) => singleton.resolvePlayer(context, scope, query),
+    resolvePlayer: (context, scope, query, options) => singleton.resolvePlayer(context, scope, query, options),
     scanCurrentWipePage: (context, scope, page) => singleton.scanCurrentWipePage(context, scope, page),
     selectPlayer,
     selectServer
