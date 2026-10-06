@@ -161,7 +161,8 @@ Test('does not swallow translator failures', async () => {
     }), /translator offline/);
     Assert.equal(logs.some(log => log.join(' ').includes('provider=google-web reason=HTTP 429')), true);
     Assert.equal(logs.some(log => log.join(' ').includes('provider=deeplx reason=ETIMEDOUT')), true);
-    Assert.equal(logs.every(log => log[2] === 'warn'), true);
+    Assert.equal(logs.filter(log => log[1].includes('PROVIDER_FAILED')).every(log => log[2] === 'warn'), true);
+    Assert.equal(logs.some(log => log[1].includes('FAILED') && log[1].includes('elapsedMs=')), true);
 });
 
 Test('ignores bot translations and messages without letters', async () => {

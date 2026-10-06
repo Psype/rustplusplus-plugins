@@ -62,10 +62,13 @@ async function translateMessage(rustplus, message, dependencies = {}) {
     const translator = dependencies.translator || Translator;
     if (typeof translator !== 'function') throw new TypeError('Translator must be a function.');
 
+    const translationStartedAt = Date.now();
     let result;
     try { result = await translator(message.message, { from: source, to: target }); }
     catch (error) {
         if (error && Array.isArray(error.failures)) logProviderFallbacks(rustplus, message, error.failures);
+        logDecision(rustplus, message, 'FAILED', 'all-providers-failed', settings.targets, source, knownLanguages,
+            target, '-', Date.now() - translationStartedAt);
         throw error;
     }
     const translated = typeof result === 'string' ? result : result && result.text;
@@ -76,7 +79,8 @@ async function translateMessage(rustplus, message, dependencies = {}) {
             settings.targets, source, knownLanguages, target, provider);
         return null;
     }
-    logDecision(rustplus, message, 'TRANSLATED', 'ok', settings.targets, source, knownLanguages, target, provider);
+    logDecision(rustplus, message, 'TRANSLATED', 'ok', settings.targets, source, knownLanguages, target, provider,
+        Date.now() - translationStartedAt);
     return Object.freeze({ source, target, translated });
 }
 
@@ -91,13 +95,14 @@ function logProviderFallbacks(rustplus, message, failures) {
 }
 
 function logDecision(rustplus, message, decision, reason, targets, source = '-', knownLanguages = [], target = '-',
-    provider = '-') {
+    provider = '-', elapsedMs = 0) {
     if (!rustplus || typeof rustplus.log !== 'function') return;
     const steamId = message && message.steamId !== undefined && message.steamId !== null ?
         message.steamId.toString() : 'unknown';
     rustplus.log('AUTOTRANSLATE',
         `${decision} steamId=${steamId} source=${source} player=${knownLanguages.join(';') || '-'} ` +
-        `targets=${targets.join(';') || '-'} target=${target} provider=${provider} reason=${reason}`);
+        `targets=${targets.join(';') || '-'} target=${target} provider=${provider} reason=${reason} ` +
+        `elapsedMs=${Math.max(0, Math.round(elapsedMs))}`);
 }
 
 function isBotOrTranslationMessage(message) {

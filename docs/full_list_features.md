@@ -14,7 +14,7 @@ review/correction output to Rust team chat.
 - **/decay** - Display the decay time of an item.
 - **/despawn** - Display the despawn time of an item.
 - **/help** - Get help message.
-- **/intel** - Privately list aliases without a verified SteamID, reconcile them to a verified identity, inspect verified alias history, review links, or revoke a correction.
+- **/intel** - Privately list aliases without a verified SteamID, reconcile them to a verified identity, inspect verified alias history, review links, or revoke a correction. Discord is acknowledged before logging or journal reads.
 - **/intelimport** - OCR, preview, and confirm `/cinfo` or F7 screenshots without fixed pixel coordinates.
 - **intel-imports channel** - Drop 1–10 screenshots manually or through the allowlisted Windows region-capture
   webhook, or paste 1–100 complete SteamID64 values with one ID per line. F7 versus `/cinfo` and repeated `/cinfo`
@@ -51,7 +51,7 @@ review/correction output to Rust team chat.
 ## In-Game and Discord Commands
 - **afk** - `!afk` - Display AFK teammates.
 - **alive** - `!alive` - Display who has been alive longest.
-- **autotranslate** - `!autotranslate on [language[,language...]]` or `!autotranslate off` - Translate a teammate only when the message matches one of their recorded languages and the active translation pair; relay the result to Rust team chat and Discord.
+- **autotranslate** - `!autotranslate on [language[,language...]]` or `!autotranslate off` - Translate a teammate only when the message matches one of their recorded languages and the active translation pair; relay the result to Rust team chat and Discord. Providers get at most two seconds each and the complete fallback chain is capped at five seconds.
 - **commands/help** - `!commands [command]` or `!help [command]` - List all commands or show the documented synopsis and description for one command.
 - **connection/connections** - `!connection [steamid]` or `!connections` - Display latest team connections.
 - **activity** - `!activity [SteamID64|BattleMetrics ID|partial name] [1mo|all]` - Show conservative known-online time from the local event history; `1mo` is the default rolling 30 days.

@@ -3,7 +3,7 @@ const Test = require('node:test');
 
 const Translator = require('../src/plugins/autoTranslate/translator.js');
 
-Test('uses Google Web first with the production five-second deadline', async () => {
+Test('uses Google Web first with the production two-second provider deadline', async () => {
     const calls = [];
     const googleClient = async (text, options) => {
         calls.push({ text, options });
@@ -18,7 +18,7 @@ Test('uses Google Web first with the production five-second deadline', async () 
     Assert.equal(calls.length, 1);
     Assert.equal(calls[0].options.from, 'en');
     Assert.equal(calls[0].options.to, 'fr');
-    Assert.equal(calls[0].options.fetchOptions.timeout, 5000);
+    Assert.equal(calls[0].options.fetchOptions.timeout, 2000);
     Assert.equal(calls[0].options.fetchOptions.signal instanceof AbortSignal, true);
 });
 
@@ -41,7 +41,7 @@ Test('uses DeepLX after Google and validates its request schema', async () => {
     Assert.deepEqual(postCalls[0].payload, {
         text: 'test de traduction', source_lang: 'FR', target_lang: 'ZH'
     });
-    Assert.equal(postCalls[0].options.timeout, 5000);
+    Assert.ok(postCalls[0].options.timeout > 0 && postCalls[0].options.timeout <= 2000);
     Assert.equal(postCalls[0].options.signal instanceof AbortSignal, true);
 });
 
@@ -67,7 +67,7 @@ Test('falls back from Google and DeepLX to Bing and maps Chinese for Bing', asyn
     });
     Assert.equal(bingCalls.length, 1);
     Assert.deepEqual(bingCalls[0].options, { from: 'en', to: 'zh-Hans' });
-    Assert.equal(bingCalls[0].execution.timeoutMs, 5000);
+    Assert.ok(bingCalls[0].execution.timeoutMs > 0 && bingCalls[0].execution.timeoutMs <= 2000);
     Assert.equal(Object.isFrozen(bingCalls[0].execution), true);
 });
 
@@ -94,7 +94,7 @@ Test('configured LibreTranslate replaces DeepLX and runs before Bing', async () 
     Assert.deepEqual(postCalls[0].payload, {
         q: 'the bot works', source: 'en', target: 'fr', format: 'text', api_key: 'secret'
     });
-    Assert.equal(postCalls[0].options.timeout, 5000);
+    Assert.ok(postCalls[0].options.timeout > 0 && postCalls[0].options.timeout <= 2000);
     Assert.equal(postCalls[0].options.signal instanceof AbortSignal, true);
 });
 
@@ -128,7 +128,7 @@ Test('falls back once to MyMemory after the other default providers fail', async
     });
     Assert.equal(httpCalls.length, 1);
     Assert.equal(httpCalls[0].options.params.langpair, 'en|zh-CN');
-    Assert.equal(httpCalls[0].options.timeout, 5000);
+    Assert.ok(httpCalls[0].options.timeout > 0 && httpCalls[0].options.timeout <= 2000);
     Assert.equal(httpCalls[0].options.signal instanceof AbortSignal, true);
 });
 
@@ -156,6 +156,35 @@ Test('aborts a timed-out provider then advances exactly once', async () => {
     Assert.deepEqual(result, {
         text: 'bonjour', provider: 'next', failures: [{ provider: 'slow', reason: 'ETIMEDOUT' }]
     });
+});
+
+Test('bounds the complete sequential provider chain with one total deadline', async () => {
+    const calls = [];
+    const slow = name => ({
+        name,
+        translate: async (_text, _options, execution) => new Promise((resolve, reject) => {
+            calls.push(name);
+            execution.signal.addEventListener('abort', () => reject(execution.signal.reason), { once: true });
+        })
+    });
+
+    let error;
+    const startedAt = Date.now();
+    try {
+        await Translator('hello', { from: 'en', to: 'fr' }, {
+            providers: [slow('first'), slow('second'), slow('third')],
+            requestTimeoutMs: 30,
+            totalTimeoutMs: 45
+        });
+    }
+    catch (caught) { error = caught; }
+
+    Assert.ok(error);
+    Assert.equal(error.name, 'TranslationProvidersError');
+    Assert.ok(calls.length >= 1 && calls.length <= 2);
+    Assert.equal(calls.includes('third'), false);
+    Assert.equal(error.failures.at(-1).provider, 'translation-budget');
+    Assert.ok(Date.now() - startedAt < 250);
 });
 
 Test('validates the entire provider chain before any provider call', async () => {
@@ -219,6 +248,9 @@ Test('rejects invalid inputs, duplicate providers and malformed responses', asyn
     await Assert.rejects(() => Translator('hello', { from: 'english', to: 'zh' }), /ISO language codes/);
     await Assert.rejects(() => Translator('hello', { from: 'en', to: 'en' }), /must differ/);
     await Assert.rejects(() => Translator('hello', { from: 'en', to: 'zh' }, { providers: null }), /non-empty array/);
+    await Assert.rejects(() => Translator('hello', { from: 'en', to: 'zh' }, {
+        providers: [invalidResponse], totalTimeoutMs: 0
+    }), /total timeout/);
     await Assert.rejects(() => Translator('hello', { from: 'en', to: 'zh' },
         { providers: duplicateProviders }), /Duplicate/);
     await Assert.rejects(() => Translator('hello', { from: 'en', to: 'zh' },

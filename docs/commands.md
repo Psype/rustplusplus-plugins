@@ -167,7 +167,8 @@ Options | Description | Required
 
 > **Privately review and correct player identities without sending commands to Rust team chat.** Every response is
 > ephemeral and every subcommand requires a Discord administrator. Corrections append reversible reconciliation
-> events: raw screenshots and journal observations are never edited or deleted.
+> events: raw screenshots and journal observations are never edited or deleted. The command acknowledges Discord
+> before logging, context loading or journal reads, so those operations cannot consume Discord's response window.
 
 Subcommand | Options | Description | Required
 ---------- | ------- | ----------- | --------
@@ -577,7 +578,7 @@ Command | Description
 > **Automatically translate Rust team-chat messages back into team chat and into the Discord relay.** `!autotranslate on` defaults to English. You can pass one target language, or two languages separated by a comma. With two targets, if the detected source language already matches one target, the other target is used; for example `!autotranslate on en,zh` translates Chinese messages to English and English messages to Chinese. Language names from the existing translation command are accepted, such as `english,chinese`, as well as language codes such as `en,zh`.
 <br>Command: `!autotranslate on [language[,language...]]`
 <br>Command: `!autotranslate off`
-<br>Provider queue: Google Web -> DeepLX -> Bing Web -> MyMemory. Each provider is attempted once with a five-second deadline. `RPP_LIBRETRANSLATE_URL` replaces the public DeepLX step with a self-hosted LibreTranslate instance; set `RPP_LIBRETRANSLATE_API_KEY` too when that instance requires a key. No public LibreTranslate mirror is enabled by default because public availability is not reliable enough.
+<br>Provider queue: Google Web -> DeepLX -> Bing Web -> MyMemory. Each provider is attempted once, for at most two seconds, and the complete sequential chain has a strict five-second budget. The original team-chat relay does not wait for translation; translated Rust/Discord relays arrive later or are skipped after the bounded failure. Decision logs include `elapsedMs`. `RPP_LIBRETRANSLATE_URL` replaces the public DeepLX step with a self-hosted LibreTranslate instance; set `RPP_LIBRETRANSLATE_API_KEY` too when that instance requires a key. No public LibreTranslate mirror is enabled by default because public availability is not reliable enough.
 <br>Provider references (verified 2026-09-09): [Google Web adapter 9.2.1](https://github.com/vitalets/google-translate-api), [DeepLX 0.4.0 and its public REST service](https://github.com/un-ts/deeplx), [Bing Web adapter reference 4.2.1](https://github.com/plainheart/bing-translate-api/releases/tag/v4.2.1), [MyMemory REST specification](https://mymemory.translated.net/doc/spec.php), and [LibreTranslate self-hosting/API](https://docs.libretranslate.com/).
 <br>Server live check: `npm run test:autotranslate:live` exercises the real detector, Google translation, forced real DeepLX/Bing/MyMemory fallbacks, the handler, Rust queue, and final send boundary without publishing to Rust or Discord.
 

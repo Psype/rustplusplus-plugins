@@ -16,12 +16,14 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 - Read `docs/ai_session_handoff_2026-10-04.md` first for the compact, copy-ready resumption context, exact worktree
   inventory, architecture map, safety invariants and remaining live checks. This `MEMORY.md` remains the detailed source
   of truth when the handoff links here.
-- Preserve the existing worktree. At handoff creation, branch `master` and `origin/master` both point to commit
-  `a3a71a8`; the intentional uncommitted delta is release `1.22.26` plus the documentation-only handoff updates. It
-  includes the `1.22.24` tightly-spaced `/cinfo` fixes, the `1.22.25` reusable player-name reconciler, and the `1.22.26`
-  private Discord identity-correction workflow. Do not reset, overwrite, reimplement or
+- Preserve the existing worktree. The original handoff began at `a3a71a8`; on 2026-10-06 the user committed and pushed
+  `d327e7d`, which contains the `1.22.24` tightly-spaced `/cinfo` fixes, the `1.22.25` reusable player-name reconciler,
+  and the `1.22.26` private Discord identity-correction workflow. Release `1.22.27`, immediately after that commit,
+  contains the interaction/translation latency bounds and documentation updates. At the latest audit, `master`,
+  `origin/master` and `origin/HEAD` were aligned on `1.22.27`, the worktree was clean, and only `master` plus the useful
+  `origin/master`/`upstream/master` remote-tracking references remained. Do not reset, overwrite, reimplement or
   discard these changes. Re-audit `git status --short` and `git diff` if the observed state differs.
-- Canonical package version is `1.22.26`. The complete local validation on 2026-10-06 passed `252/252` unit tests and
+- Canonical package version is `1.22.27`. The complete local validation on 2026-10-06 passed `253/253` unit tests and
   `tsc --noEmit`; `git diff --check` was clean. This is local deterministic evidence only. Deployment/restart and a
   new Discord import of the reported KIRK screenshot remain unconfirmed, so do not claim production success.
 - Primary unresolved production fact: raid and **Pair with Server** notifications were observed on the Rust+ phone but not on the bot. The 2026-09-23/24 journal showed accepted MCS logins and quick reconnects but no inbound notification. Phone receipt proves Facepunch delivery to the phone only; MCS login proves Google accepted the bot's GCM identity only. Facepunch delivery to the bot's virtual device still requires a live capture. Canonical transport audit: `docs/fcm_transport_audit_2026-09-23.md`.
@@ -186,6 +188,14 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   on `all-time`. Repeated/bracketed/indexed/comma/JSON `player_name` values using `KOH` + `PENG` all returned zero, so
   multiple high-confidence OCR fragments must be requested separately and reconciled locally; automatic fragment
   fan-out is not enabled until per-fragment OCR confidence is explicit.
+- Release `1.22.27` makes `/intel` call Discord's ephemeral `deferReply()` before logging, context loading, permission
+  work or player-intelligence journal reads. The command remains administrator-only; this removes local processing
+  from Discord's initial response window. AutoTranslate now allows at most two seconds per provider and five seconds
+  for the complete sequential Google/DeepLX-or-LibreTranslate/Bing/MyMemory chain, while preserving provider order and
+  the target-script validator. The original team-chat relay remains independent; translation decisions now log
+  `elapsedMs`. A retained slash command can still show `The application did not respond` when the bot is offline: the
+  2026-10-06 local inspection found `TokenInvalid`, no active Node process, and no local Discord token/client ID.
+  Restore valid runtime secrets and restart before treating any Discord timing test as production evidence.
 - Release `1.22.26` adds the administrator-only, ephemeral Discord `/intel` command. `pending` paginates every alias
   whose projected identity lacks a verified SteamID64; `link` attaches one exact alias to a SteamID; `merge` targets a
   verified exact alias/SteamID/BattleMetrics ID; `history` lists only verified aliases with dates; `links` audits active
@@ -259,6 +269,11 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   `git diff --check` is clean. New checks cover reversible `ChiCo` -> `Ch1co` historical reprojection, cross-snapshot
   aggregation plus same-snapshot deduplication, verified-versus-pending alias separation, Discord Steam-persona display
   refresh, ephemeral replies, verified history filtering, pending/link listing and unlink restoration.
+- Superseding QA for release `1.22.27` on 2026-10-06: `npm.cmd test` passes 253/253 including `tsc --noEmit`, and
+  `git diff --check` is clean. New checks require `/intel` to defer before all other work and enforce a single total
+  translation deadline in addition to provider-level cancellation. `npm.cmd run test:autotranslate:live` also passed
+  in 8.9 seconds for six cumulative live/fallback scenarios (versus roughly 35 seconds before the cap); Bing timed out
+  at its two-second bound and MyMemory completed that fallback. External provider health remains non-deterministic.
 - Performance check for `1.22.3`: the dedicated glyph benchmark recalls the target among 2,000 aliases with 104 stored
   glyph variants and eight graphemes in a 20.797 ms median. The existing 200-player pipeline measured before/after at
   41.702/39.357 ms initial load, 0.044/0.030 ms quiet-poll mean and 51.356/50.742 ms for ten transitions; no measured
@@ -306,7 +321,7 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 - The first reliably detected non-`XX` team-chat language still initializes an unknown player. Correct or expand the declared list by editing the most recently dated CSV row for that SteamID, using values such as `fr;en`; only that latest row is authoritative. Later automatic observations never overwrite or append to the list. Diagnose with `!who <steamid>` or the server CSV at `data/teammate-language-database/<guildId>-<sanitizedServerId>.csv`.
 - Autotranslate queues the translated Rust team-chat message before the optional Discord relay. Translation-engine and Discord failures are logged and do not cancel an already queued in-game translation.
 - `npm run test:autotranslate:live` is the explicit network integration check: it exercises the real local detector, Google translation, forced real DeepLX/Bing/MyMemory fallbacks, multilingual eligibility, team-chat handler, Rust in-game queue, and final `sendTeamMessageAsync` boundary while capturing Discord/Rust outputs instead of publishing them. The test includes plugin decision/error logs in assertion failures.
-- The former `translate` 1.4.1 / Google `client=gtx` path began returning persistent HTTP 429 responses (first through Node 18 Undici, then through Axios), causing the plugin boundary to return no translation. AutoTranslate now uses a sequential four-provider chain isolated under `src/plugins/autoTranslate`: `@vitalets/google-translate-api` 9.2.1 (`google-web`), DeepLX REST (`deeplx`), a cancellable local Bing Web adapter (`bing-web`), then MyMemory REST. Each provider is attempted exactly once with an orchestrator-enforced five-second deadline; malformed, unchanged, and target-script-mismatched responses also advance the chain, and total failure is structured and aggregated without retrying a provider.
+- The former `translate` 1.4.1 / Google `client=gtx` path began returning persistent HTTP 429 responses (first through Node 18 Undici, then through Axios), causing the plugin boundary to return no translation. AutoTranslate now uses a sequential four-provider chain isolated under `src/plugins/autoTranslate`: `@vitalets/google-translate-api` 9.2.1 (`google-web`), DeepLX REST (`deeplx`), a cancellable local Bing Web adapter (`bing-web`), then MyMemory REST. Each provider is attempted exactly once with an orchestrator-enforced two-second deadline and the whole sequential chain is capped at five seconds; malformed, unchanged, and target-script-mismatched responses also advance the chain, and total failure is structured and aggregated without retrying a provider.
 - `RPP_LIBRETRANSLATE_URL` replaces the public DeepLX step with a self-hosted LibreTranslate endpoint; `RPP_LIBRETRANSLATE_API_KEY` is optional. No public LibreTranslate instance is enabled by default: the public endpoints checked on 2026-09-09 were unavailable within five seconds. Lingva was rejected because a live FR→ZH request returned English while claiming success. MyMemory remains last because it also returned an English pivot for one FR→ZH probe; the target-script validator now rejects that false success.
 - Successful translation decision logs include the provider. Every failed provider is logged as `PROVIDER_FAILED` with a sanitized reason, including total-chain failures, without message content. Deterministic unit coverage verifies order, a single attempt, timeout cancellation, schema validation, Chinese code mappings, immutable results/errors, and all fallbacks under Node 18.
 - For this project, the user considers all supplied Rust team-chat text safe to send to the configured external translation providers during normal operation and diagnostics.

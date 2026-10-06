@@ -7,6 +7,13 @@ Program | Version | Download | Note
 `NodeJS` | >= 22.12.0 | [**here**](https://nodejs.org/en/download/) | Since discordjs v14 is used, the version needs to be at least 22.12.0.
 `Git` | Any | [**here**](https://git-scm.com/downloads) | &nbsp;
 
+## Runtime environment
+
+Copy `.env.example` to `.env`, then set `RPP_DISCORD_CLIENT_ID` and `RPP_DISCORD_TOKEN` before running `npm start`.
+Never commit the populated `.env`. A `TokenInvalid` startup log means the local process cannot connect to Discord;
+registered slash commands can remain visible in Discord but will display `The application did not respond` until a
+valid bot process is connected. Restart the deployed process after changing its environment.
+
 ## Optional Software
 To enable step-trace for cargoship and patrol helicopter, [**GraphicsMagick**](http://www.graphicsmagick.org/download.html) needs to be downloaded.
 

@@ -101,11 +101,14 @@ async function run() {
             googleClient: async () => { throw forcedRateLimit; },
             deepLxClient: async () => { throw new Error('forced DeepLX failure'); }
         });
-        Assert.equal(bingFallback.provider, 'bing-web');
-        Assert.deepEqual(bingFallback.failures, [
+        Assert.ok(['bing-web', 'mymemory'].includes(bingFallback.provider));
+        Assert.deepEqual(bingFallback.failures.slice(0, 2), [
             { provider: 'google-web', reason: 'HTTP 429' },
             { provider: 'deeplx', reason: 'forced DeepLX failure' }
         ]);
+        if (bingFallback.provider === 'mymemory') {
+            Assert.equal(bingFallback.failures[2].provider, 'bing-web');
+        }
         const myMemoryFallback = await Translator('the bot should work', { from: 'en', to: 'fr' }, {
             googleClient: async () => { throw forcedRateLimit; },
             deepLxClient: async () => { throw new Error('forced DeepLX failure'); },

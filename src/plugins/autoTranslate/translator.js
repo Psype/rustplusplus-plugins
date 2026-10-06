@@ -5,7 +5,8 @@ const BingWebTranslate = require('./providers/bingWeb.js');
 
 const DEEPLX_ENDPOINT = 'https://deeplx.1stg.me/translate';
 const MYMEMORY_ENDPOINT = 'https://api.mymemory.translated.net/get';
-const REQUEST_TIMEOUT_MS = 5000;
+const REQUEST_TIMEOUT_MS = 2000;
+const TOTAL_TIMEOUT_MS = 5000;
 const MYMEMORY_MAX_QUERY_BYTES = 500;
 const BING_LANGUAGE_CODES = Object.freeze({ zh: 'zh-Hans' });
 const MYMEMORY_LANGUAGE_CODES = Object.freeze({ zh: 'zh-CN' });
@@ -24,14 +25,22 @@ class TranslationProvidersError extends Error {
 async function translate(text, options, dependencies = {}) {
     const normalizedOptions = normalizeInputs(text, options);
     const timeoutMs = getRequestTimeout(dependencies);
+    const totalTimeoutMs = getTotalTimeout(dependencies);
     const configuredProviders = Object.prototype.hasOwnProperty.call(dependencies, 'providers') ?
         dependencies.providers : getDefaultProviders(dependencies);
     const providers = validateProviderChain(configuredProviders);
 
     const failures = [];
+    const deadline = Date.now() + totalTimeoutMs;
     for (const provider of providers) {
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) {
+            failures.push(Object.freeze({ provider: 'translation-budget', reason: 'ETIMEDOUT' }));
+            break;
+        }
         try {
-            const translated = await executeProvider(provider, text, normalizedOptions, timeoutMs);
+            const translated = await executeProvider(provider, text, normalizedOptions,
+                Math.min(timeoutMs, remainingMs));
             validateTranslatedText(text, translated, normalizedOptions.to);
             return Object.freeze({
                 text: translated.trim(),
@@ -206,6 +215,15 @@ function getRequestTimeout(dependencies) {
     if (!Object.prototype.hasOwnProperty.call(dependencies, 'requestTimeoutMs')) return REQUEST_TIMEOUT_MS;
     const value = dependencies.requestTimeoutMs;
     if (!Number.isInteger(value) || value <= 0) throw new TypeError('Translation timeout must be a positive integer.');
+    return value;
+}
+
+function getTotalTimeout(dependencies) {
+    if (!Object.prototype.hasOwnProperty.call(dependencies, 'totalTimeoutMs')) return TOTAL_TIMEOUT_MS;
+    const value = dependencies.totalTimeoutMs;
+    if (!Number.isInteger(value) || value <= 0) {
+        throw new TypeError('Translation total timeout must be a positive integer.');
+    }
     return value;
 }
 

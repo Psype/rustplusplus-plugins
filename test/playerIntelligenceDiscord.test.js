@@ -17,10 +17,11 @@ Test('Discord intel link uses the current Steam persona and replies only ephemer
         serverList: { server: { battlemetricsId: '42', title: 'Test' } }
     };
     const replies = [];
+    const interactionOrder = [];
     const client = {
         battlemetricsInstances: { 42: { server_rust_last_wipe: '2026-09-29T14:00:00.000Z' } },
         rustplusInstances: {},
-        getInstance: () => instance,
+        getInstance: () => { interactionOrder.push('context'); return instance; },
         playerIntelligenceDependencies: {
             dataDirectory: directory,
             now: () => new Date('2026-10-01T10:00:00.000Z')
@@ -31,9 +32,8 @@ Test('Discord intel link uses the current Steam persona and replies only ephemer
                 return 'Ch1co';
             }
         },
-        validatePermissions: async () => true,
         isAdministrator: () => true,
-        logInteraction: () => {},
+        logInteraction: () => { interactionOrder.push('log'); },
         interactionEditReply: async (_interaction, payload) => { replies.push(payload); },
         intlGet: (_guildId, key) => key,
         log: () => {}
@@ -59,11 +59,15 @@ Test('Discord intel link uses the current Steam persona and replies only ephemer
             getString: name => values[name] ?? null,
             getInteger: () => null
         },
-        deferReply: async options => { Assert.deepEqual(options, { ephemeral: true }); }
+        deferReply: async options => {
+            interactionOrder.push('defer');
+            Assert.deepEqual(options, { ephemeral: true });
+        }
     };
 
     await IntelCommand.execute(client, interaction);
 
+    Assert.equal(interactionOrder[0], 'defer');
     Assert.equal(replies.length, 1);
     Assert.match(replies[0].content, /Current display: "Ch1co" \(current Steam profile\)/u);
     Assert.deepEqual(replies[0].allowedMentions, { parse: [] });

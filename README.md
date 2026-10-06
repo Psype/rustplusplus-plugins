@@ -53,7 +53,11 @@ A NodeJS Discord Bot that uses the [rustplus.js](https://github.com/liamcottle/r
 
 > To run the bot, simply open the terminal of your choice and run the following from repository root:
 
-    $ npm start run
+    $ npm start
+
+Copy `.env.example` to `.env` first and provide `RPP_DISCORD_CLIENT_ID` and `RPP_DISCORD_TOKEN`. Discord may keep
+already registered slash commands visible while the bot is stopped or rejecting its token; those commands cannot
+acknowledge interactions until a valid bot process is connected.
 
 
 ## **How to update the repository**

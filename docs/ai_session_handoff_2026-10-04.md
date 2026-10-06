@@ -17,13 +17,16 @@ Avant toute modification :
 4. ne fais ni reset, ni checkout destructif, ni réécriture globale du worktree ;
 5. ne prétends jamais qu’un comportement fonctionne en production sur la seule base des tests locaux.
 
-État attendu au départ : branche master, HEAD/origin/master a3a71a8, package 1.22.26. Le worktree contient les releases
-1.22.24 à 1.22.26 non commitées avec leurs documentations/tests. La première conserve les identifiants de ligne TSV
+État observé au dernier audit : branche master, HEAD/origin/master alignés sur la release 1.22.27 et worktree propre.
+Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; le commit suivant ajoute
+la 1.22.27.
+La première conserve les identifiants de ligne TSV
 Tesseract pour empêcher un pseudo /cinfo replié (U Got Kirkified) d’absorber Established, accepte la confusion l/I/1
 uniquement dans l’ancre et garde une date illisible éditable avec Confirm désactivé. La seconde ajoute la
 réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
-d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La dernière validation complète a passé
-252/252 tests et tsc --noEmit ; le déploiement et la nouvelle capture Discord restent à valider réellement.
+d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La dernière borne les délais de réponse
+Discord/traduction. La dernière validation complète a passé 253/253 tests et tsc --noEmit ; le déploiement et la
+nouvelle capture Discord restent à valider réellement.
 
 Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
 la date de capture Discord est ignorée ; ce calendrier mardi/vendredi 14:00 GMT ne vaut que pour WarBandits EU 5x
@@ -39,11 +42,11 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 - Dépôt : `rustplusplus-plugins`.
 - Branche au moment de la passation : `master`.
-- `HEAD`, `origin/master` et `origin/HEAD` : `a3a71a8`.
-- Version canonique du worktree : `1.22.26` dans `package.json` et `package-lock.json`.
+- `HEAD`, `origin/master` et `origin/HEAD` : alignés sur la release `1.22.27` au dernier audit du 6 octobre 2026.
+- Version canonique du worktree : `1.22.27` dans `package.json` et `package-lock.json`.
 - Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
   métrique d’heures WarBandits.
-- Le delta local non commité est volontaire. Il contient les releases `1.22.24` à `1.22.26`, notamment dans :
+- Le commit utilisateur `d327e7d` regroupe les releases `1.22.24` à `1.22.26`, notamment dans :
 
   - `src/plugins/playerIntelligence/tesseractOcr.js` ;
   - `src/plugins/playerIntelligence/ocrLayout.js` ;
@@ -63,9 +66,33 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
   - `package.json`, `package-lock.json`, `MEMORY.md`, `docs/commands.md` et `docs/installation.md` ;
   - le présent document, son lien dans `docs/documentation.md` et la mise à jour de l’étude player-intelligence.
 
+- Le commit suivant `d327e7d` contient la release `1.22.27`, notamment dans :
+
+  - `src/commands/intel.js` et `test/playerIntelligenceDiscord.test.js` ;
+  - `src/plugins/autoTranslate/index.js`, `src/plugins/autoTranslate/translator.js` et leurs tests ;
+  - `.env.example`, `README.md` et la documentation de démarrage Discord ;
+  - `package.json`, `package-lock.json`, `MEMORY.md`, `docs/commands.md`, `docs/full_list_features.md` et ce document.
+
+- Il ne reste qu'une branche locale `master`. Les deux anciennes branches `origin/codex/*`, déjà entièrement intégrées,
+  ont été supprimées ; le suivi de l'amont est limité à `upstream/master`, avec pruning automatique des références.
+
 Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
 
-## Dernière correction : release 1.22.26
+## Dernière correction : release 1.22.27
+
+`/intel` accuse désormais réception auprès de Discord avec un `deferReply()` éphémère comme toute première opération,
+avant les logs, le chargement de contexte ou la lecture du journal player-intelligence. Le traitement peut ensuite
+prendre plus de trois secondes sans provoquer à lui seul `The application did not respond`. La commande reste réservée
+aux administrateurs. Un bot hors ligne ne peut toutefois pas accuser réception : l'inspection locale du 6 octobre a
+trouvé `TokenInvalid`, aucun processus Node actif et aucune variable locale `RPP_DISCORD_TOKEN`/
+`RPP_DISCORD_CLIENT_ID`. Les commandes slash déjà enregistrées restent visibles dans Discord dans cet état.
+
+AutoTranslate conserve l'ordre Google Web -> DeepLX (ou LibreTranslate) -> Bing Web -> MyMemory, mais chaque tentative
+est maintenant bornée à deux secondes et toute la chaîne séquentielle à cinq secondes. Le relais du message original
+reste immédiat et indépendant ; le relais traduit arrive plus tard ou est abandonné proprement à l'expiration du
+budget. Les décisions `TRANSLATED`/`FAILED` journalisent `elapsedMs` pour mesurer la production sans exposer le texte.
+
+## Correction précédente : release 1.22.26
 
 La commande slash `/intel`, réservée aux administrateurs et toujours éphémère, expose la correction d'identité sans
 polluer le chat Rust : `pending` liste les pseudos sans SteamID vérifié, `link` les associe directement, `merge` cible
@@ -138,15 +165,18 @@ inventer ni commiter silencieusement.
 
 ## Validation déjà effectuée
 
-Le 6 octobre 2026, après les releases 1.22.24 à 1.22.26 :
+Le 6 octobre 2026, après les releases 1.22.24 à 1.22.27 :
 
-- `npm.cmd test` : `252/252` tests unitaires réussis ;
+- `npm.cmd test` : `253/253` tests unitaires réussis ;
 - `tsc --noEmit -p .` : réussi dans la même commande ;
 - `git diff --check` : aucune erreur ;
+- `npm.cmd run test:autotranslate:live` : réussi en 8,9 s pour six scénarios cumulés ; Bing a atteint sa borne de deux
+  secondes et MyMemory a terminé ce fallback, contre environ 35 s avant la borne globale ;
 - tests ajoutés : séparation de lignes malgré géométrie chevauchante, récupération du membre replié avec ancre
   `EstabIished`, workflow d’édition obligatoire d’une date illisible, reprojection réversible `ChiCo` -> `Ch1co`,
   agrégation inter-captures/déduplication intra-capture, séparation alias vérifiés/OCR pending, persona Steam courant,
-  réponses Discord éphémères, historique filtré et révocation.
+  réponses Discord éphémères, historique filtré, révocation, accusé `/intel` avant tout travail et budget total de
+  traduction.
 
 Ces résultats ne prouvent ni le comportement du binaire Tesseract installé sur Linux, ni le téléchargement Discord, ni
 les fournisseurs externes, ni le processus de déploiement.
@@ -224,7 +254,7 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
 
 ## Vérifications de production encore ouvertes
 
-1. Déployer/redémarrer `1.22.26`, vérifier le message `RUSTPLUS v1.22.26 OPERATIONAL`, puis réimporter l’image KIRK
+1. Déployer/redémarrer `1.22.27`, vérifier le message `RUSTPLUS v1.22.27 OPERATIONAL`, puis réimporter l’image KIRK
    originale dans le canal d’intelligence. Exiger `U Got Kirkified` et un `Established` séparé.
 2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent
    des boîtes déterministes et ne remplacent pas ce contrôle.

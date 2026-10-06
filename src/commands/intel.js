@@ -187,17 +187,13 @@ module.exports = Object.freeze({
     },
 
     async execute(/** @type {any} */ client, /** @type {any} */ interaction) {
+        await interaction.deferReply({ ephemeral: true });
         const verifyId = Math.floor(100000 + Math.random() * 900000);
         client.logInteraction(interaction, verifyId, 'slashCommand');
-        if (!await client.validatePermissions(interaction)) return;
         if (!client.isAdministrator(interaction)) {
             const message = client.intlGet(interaction.guildId, 'missingPermission');
-            await client.interactionReply(interaction, {
-                content: message, ephemeral: true, allowedMentions: { parse: [] }
-            });
-            return;
+            return editReply(client, interaction, message);
         }
-        await interaction.deferReply({ ephemeral: true });
         const context = contextFor(client, interaction);
         const subcommand = interaction.options.getSubcommand();
         if (subcommand === 'pending') {
