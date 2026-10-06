@@ -196,7 +196,7 @@ fuzzy matching, so an administrator cannot accidentally merge a similarly named 
 
 Goal | Example | Expected effect
 ---- | ------- | ---------------
-Review unresolved OCR names | `/intel pending page:1` | Lists aliases whose projected identity still has no verified SteamID64.
+Review unresolved identities | `/intel pending page:1` | Lists one row per projected identity which still has no verified SteamID64, grouping aliases that already share a BattleMetrics ID.
 Correct against a known local player | `/intel merge alias:ChiCo target:Ch1co` | Reprojects `ChiCo` observations onto the verified `Ch1co` identity.
 Correct with a known SteamID64 | `/intel link alias:ChiCo steamid:76561198154738095` | Uses that Steam identity after reading its current public persona or a previously verified local alias.
 Review real past names | `/intel history target:Ch1co page:1` | Shows dated Steam/API-verified names only.
@@ -216,6 +216,12 @@ stored alias remains unverified correction evidence: `history` and `!who` show `
 Steam/API-verified names, never `ChiCo`. If Steam currently reports a newer persona, for example `Ch1co Current`, that
 name becomes the display name while the older verified `Ch1co` entry remains in the dated history. A manually typed
 display-name override is deliberately unavailable.
+
+`pending` counts identities separately from aliases. For example, BattleMetrics may report that `FUNTIK` previously
+used `gus` and `+=import&**`; if all three observations carry `BM:1192585926`, Discord shows one pending identity with
+three aliases, not three people. A `/cinfo` preview says `linked to known identities` only when the candidate has a
+SteamID64, a BattleMetrics ID, or both, and labels it `[Steam]`, `[BM]`, or `[Steam+BM]`. A name-only OCR observation
+stays pending even if its spelling is an exact local match.
 
 
 ## **/intelimport**
@@ -751,7 +757,7 @@ Subcommand | Description | Required
 > disk change or corruption fails closed instead of serving stale data.
 > The same 60-second hook clocks a coalesced background identity daemon without delaying BattleMetrics notifications.
 > It refreshes each already-linked SteamID at most once per wipe when that BattleMetrics identity is actually online,
-> prioritizes one SteamID pasted through `intel-reports` with an exact WarBandits all-time lookup per tick, and
+> prioritizes one SteamID pasted through `intel-reports` with one exact WarBandits lookup chain per tick, and
 > incrementally reads one bounded 100-row current-wipe WarBandits page at a time. Exact, unique live names of at least
 > three characters may join the two sources; collisions and short names stay unlinked. Its atomic cursor under the
 > player-intelligence server directory survives restarts. A completed WarBandits sweep waits twelve hours before a
@@ -816,8 +822,13 @@ that file remains private implementation data for translation language preferenc
 queues one forced pass behind an already-running cycle. Further pages advance on the existing 60-second BattleMetrics
 ticks, so Discord/Rust+ command handling never waits for the scan. It bypasses the normal twelve-hour completed-sweep
 delay, has a five-minute manual cooldown, reuses its restart-safe cursor and known-ID sets, and resets the once-per-wipe
-priority lookup set for pasted SteamIDs. With 100 pasted IDs, exact all-time lookups therefore take at most roughly
-100 successful ticks rather than requiring a traversal of the full all-time leaderboard. Provider cooldowns extend
+priority lookup set for pasted SteamIDs. With 100 pasted IDs, exact lookups therefore take at most roughly
+100 successful ticks rather than requiring a traversal of the full all-time leaderboard. Each lookup first checks
+`wipe=0`, then the newest completed wipe returned by the server's `/wipes` catalogue, and only then `all-time` if both
+scopes are empty. When a unique response name exactly matches one and only one local BattleMetrics identity without a
+conflicting SteamID, the journal records the combined Steam+BM identity and all aliases on that BM leave `pending`
+together. An ambiguous response remains manual. `!scanplayers` can reset the current wipe's completed priority set so
+IDs imported before this behavior are reconsidered. Provider cooldowns extend
 that delay safely. The command does not manufacture online/offline presence.
 
 
@@ -835,7 +846,7 @@ that delay safely. The command does not manufacture online/offline presence.
 <br>Ambiguous example: if `!track peng` returns a numbered list, use `!track #2` or `!track peng 2`; unlike the
 read-only `!intel peng`, tracking never silently selects between equally ranked candidates.
 <br>The plugin creates one native `Enemies` tracker per server. The existing 60-second BattleMetrics poller sends login/logout alerts to Discord and, by default, Rust team chat. `!tracklist` and `!tracks` always queue every tracked player over minimal Rust-safe messages as `name: Online`, `name: <duration> ago`, or `name: Unknown`, without page headers. Adding `all` packs multiple complete `name,BattleMetricsID,SteamID,status` records per message; `-` means the SteamID is unknown and status is `on`, `off:<age>`, or `unk:<age>`. An API failure is never reported as a logout.
-<br>On a recognized WarBandits server, `!track` also invokes the detached WarBandits provider once with `wipe=0` to enrich the selected current-server identity with its name, SteamID64, internal WarBandits ID, aliases, rank, playtime, and available statistics. OCR corroboration also uses `wipe=0` when that block's `Established` maps to the active wipe, and falls back to `all-time` only for a different or indeterminate wipe. Current-wipe and all-time responses have separate caches. The tracker path performs no background polling. The separate player-intelligence daemon may consume bounded current-wipe pages, but neither path emits an online/offline transition: BattleMetrics remains the sole presence source.
+<br>On a recognized WarBandits server, `!track` also invokes the detached WarBandits provider once with `wipe=0` to enrich the selected current-server identity with its name, SteamID64, internal WarBandits ID, aliases, rank, playtime, and available statistics. OCR corroboration checks `wipe=0`, then the numeric wipe interval from `/wipes/<server>` which contains that block's GMT `Established` (or the closest interval), and finally `all-time` only when both narrower scopes are empty. A lookup without an `Established` value uses the newest completed interval as its historical step. Numeric wipe IDs are opaque API identifiers: they are selected by date range, never derived with `current ID - 1`. The first scope returning candidates stops the chain; multiple all-time candidates remain unresolved for manual review. Every scope has a separate cache. The tracker path performs no background polling. The separate player-intelligence daemon may consume bounded current-wipe pages, but neither path emits an online/offline transition: BattleMetrics remains the sole presence source.
 <br>Presence alerts created by this plugin and their `TRACKER` info logs always use `Tracked player <name> is now online.` and `Tracked player <name> just disconnected.`. The event is logged before the optional Rust/Discord deliveries, whose failures remain isolated.
 <br>For SteamID64 input, the plugin reads the free public Steam Community profile name with a five-second timeout, then requires a strict match on the active server. A leading `[CLAN]` tag is tolerated. If BattleMetrics exposes its own Steam identifier, it must equal the requested SteamID; a mismatch, ambiguous name, private profile, or unproven loose match performs no write.
 <br>Re-adding the same proven identity never creates a second entry. A later `!track <SteamID64>` that resolves to an existing BattleMetrics player with no SteamID atomically enriches that player, preserves its history and aliases, and replies `Tracking updated`.

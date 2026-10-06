@@ -70,15 +70,22 @@ function contextFor(client, interaction) {
 function previewText(parsed) {
     if (parsed.kind === 'cinfo') {
         const parsedMembers = Array.isArray(parsed.members) ? parsed.members : [];
-        const resolved = Array.isArray(parsed.resolvedMembers) ? parsed.resolvedMembers : parsedMembers;
         const display = (/** @type {any} */ member) => `${member.name}${
             ['leader', 'moderator'].includes(member.role) ? ` (${member.role})` : ''}`;
+        const linkType = (/** @type {any} */ member) => {
+            const steam = /^7656119\d{10}$/u.test(`${member.steamId || ''}`);
+            const battlemetrics = /^\d{1,32}$/u.test(`${member.battlemetricsPlayerId || ''}`);
+            return steam && battlemetrics ? 'Steam+BM' : steam ? 'Steam' : battlemetrics ? 'BM' : null;
+        };
+        const resolved = (Array.isArray(parsed.resolvedMembers) ? parsed.resolvedMembers : parsedMembers)
+            .filter((/** @type {any} */ member) => linkType(member) !== null);
         const boundedRoster = parsedMembers.slice(0, 20).map(display);
         if (parsedMembers.length > boundedRoster.length) {
             boundedRoster.push(`+${parsedMembers.length - boundedRoster.length}`);
         }
         const boundedLinked = resolved.slice().sort((/** @type {any} */ left, /** @type {any} */ right) =>
-            (left.memberIndex ?? 0) - (right.memberIndex ?? 0)).slice(0, 20).map(display);
+            (left.memberIndex ?? 0) - (right.memberIndex ?? 0)).slice(0, 20)
+            .map((/** @type {any} */ member) => `${display(member)} [${linkType(member)}]`);
         if (resolved.length > boundedLinked.length) boundedLinked.push(`+${resolved.length - boundedLinked.length}`);
         const resolutionGap = Math.max(0, parsedMembers.length - resolved.length);
         const pendingCount = Math.max(resolutionGap, Array.isArray(parsed.unresolvedMembers) ?
@@ -88,11 +95,11 @@ function previewText(parsed) {
         return [
             `${parsed.manualMetadataCorrected ? 'Corrected' : 'OCR'} /cinfo — ${parsed.tag || 'unknown'} — ${
                 parsedMembers.length}/${declared} names read · ${
-                resolved.length}/${declared} linked`,
+                resolved.length}/${declared} linked to known identities`,
             `Established: ${parsed.establishedRaw || 'unread'}`,
             `${parsed.manualRosterCorrected ? 'Corrected roster' : showOcrRoster ? 'OCR roster' : 'Members'}: ${
                 (showOcrRoster ? boundedRoster : boundedLinked).join(', ') || 'none'}`,
-            showOcrRoster ? `Linked identities: ${boundedLinked.join(', ') || 'none'}` : '',
+            showOcrRoster ? `Known identity links: ${boundedLinked.join(', ') || 'none'}` : '',
             showOcrRoster ?
                 `Pending identities: ${pendingCount}. They stay excluded until automatically matched.` : '',
             parsed.errors.length > 0 ? `Warnings: ${parsed.errors.join(' ')}` : 'Ready to commit.'
@@ -809,26 +816,28 @@ function corroborationQueries(context, scope, items, limit) {
     for (const item of items) {
         if (item.parsed.kind !== 'cinfo') continue;
         const wipe = corroborationWipe(context, scope, item);
+        const observedAt = item.parsed.establishedAtUtc || null;
         for (const member of item.parsed.unresolvedMembers || []) {
             for (const candidate of member.candidates || []) {
                 if (!/^7656119\d{10}$/u.test(`${candidate.steamId || ''}`) || candidate.score < 0.55) continue;
-                const key = `${wipe}\u0000${candidate.steamId}`;
+                const key = `${wipe}\u0000${observedAt || ''}\u0000${candidate.steamId}`;
                 const previous = steamScores.get(key);
                 if (!previous || candidate.score > previous.score) {
-                    steamScores.set(key, { value: candidate.steamId, score: candidate.score, wipe });
+                    steamScores.set(key, { value: candidate.steamId, score: candidate.score, wipe, observedAt });
                 }
             }
             if (member.observedText) {
-                const key = `${wipe}\u0000${member.observedText}`;
-                if (!observedNames.has(key)) observedNames.set(key, { value: member.observedText, wipe });
+                const key = `${wipe}\u0000${observedAt || ''}\u0000${member.observedText}`;
+                if (!observedNames.has(key)) observedNames.set(key, { value: member.observedText, wipe, observedAt });
             }
         }
     }
     const queries = [...steamScores.values()].sort((left, right) => right.score - left.score ||
-        left.value.localeCompare(right.value)).map(({ value, wipe }) => ({ kind: 'steam', value, wipe }));
-    for (const { value, wipe } of observedNames.values()) {
+        left.value.localeCompare(right.value)).map(({ value, wipe, observedAt }) =>
+        ({ kind: 'steam', value, wipe, observedAt }));
+    for (const { value, wipe, observedAt } of observedNames.values()) {
         if (queries.length >= limit) break;
-        queries.push({ kind: 'name', value, wipe });
+        queries.push({ kind: 'name', value, wipe, observedAt });
     }
     return Object.freeze(queries.slice(0, limit).map(query => Object.freeze(query)));
 }
@@ -866,9 +875,12 @@ async function corroborateCandidateAliases(context, items, client, dependencies)
 
     for (const query of queries) {
         if (query.kind === 'steam') steamIds.add(query.value);
-        if (!provider || typeof provider.resolvePlayer !== 'function') continue;
+        if (!provider || (typeof provider.resolvePlayerRecent !== 'function' &&
+            typeof provider.resolvePlayer !== 'function')) continue;
         try {
-            const result = await provider.resolvePlayer(context, scope, query.value, { wipe: query.wipe });
+            const result = typeof provider.resolvePlayerRecent === 'function' ?
+                await provider.resolvePlayerRecent(context, scope, query.value, { observedAt: query.observedAt }) :
+                await provider.resolvePlayer(context, scope, query.value, { wipe: query.wipe });
             const player = result && result.available && !result.ambiguous && result.player;
             if (!player || !/^7656119\d{10}$/u.test(`${player.steamId || ''}`) ||
                 (query.kind === 'steam' && `${player.steamId}` !== query.value)) continue;
@@ -896,6 +908,33 @@ async function corroborateCandidateAliases(context, items, client, dependencies)
         }
     }
     return Object.freeze([...aliases.values()]);
+}
+
+/** @param {readonly any[]} known @param {readonly any[]} corroborated */
+function joinCorroboratedStableIds(known, corroborated) {
+    const joined = [];
+    for (const proof of corroborated) {
+        const steamId = /^7656119\d{10}$/u.test(`${proof && proof.steamId || ''}`) ? `${proof.steamId}` : null;
+        const name = Layout.cleanText(proof && proof.name || '');
+        if (!steamId || !name) continue;
+        const key = name.normalize('NFKC').toLocaleLowerCase('en');
+        const exact = known.filter(candidate => Layout.cleanText(candidate && candidate.name || '')
+            .normalize('NFKC').toLocaleLowerCase('en') === key);
+        if (exact.some(candidate => /^7656119\d{10}$/u.test(`${candidate.steamId || ''}`) &&
+            `${candidate.steamId}` !== steamId)) continue;
+        const battlemetricsIds = [...new Set(exact.map(candidate => `${candidate.battlemetricsPlayerId || ''}`)
+            .filter(value => /^\d{1,32}$/u.test(value)))];
+        if (battlemetricsIds.length !== 1) continue;
+        joined.push(Object.freeze({
+            ...proof,
+            name,
+            steamId,
+            battlemetricsPlayerId: battlemetricsIds[0],
+            caseFidelity: proof.caseFidelity !== false,
+            corroborated: true
+        }));
+    }
+    return Object.freeze([...corroborated, ...joined]);
 }
 
 /**
@@ -1058,7 +1097,10 @@ async function prepareImports(client, source, requests, requesterUserId, referen
     if (!Array.isArray(corroborated)) {
         throw new TypeError('Candidate corroboration returned an invalid result.');
     }
-    if (corroborated.length > 0) items = resolveItems(Object.freeze([...candidates, ...corroborated]));
+    if (corroborated.length > 0) {
+        const joined = joinCorroboratedStableIds(candidates, corroborated);
+        items = resolveItems(Object.freeze([...candidates, ...joined]));
+    }
     if (items.length < 1 || items.length > 20) throw new Error('Detected import block count must be between 1 and 20.');
     const blockedItems = items.filter(item => !itemCommitReady(item));
     if (blockedItems.length > 0 && !blockedItems.every(recoverableCinfo)) {
@@ -1252,28 +1294,31 @@ function pendingScopeMatches(scope, item) {
 async function recrossWarBandits(context, parsedItems, client) {
     const dependencies = importDependencies(client);
     const provider = dependencies.warBanditsProvider || WarBandits;
-    if (!provider || typeof provider.resolvePlayer !== 'function') return;
+    if (!provider || (typeof provider.resolvePlayerRecent !== 'function' &&
+        typeof provider.resolvePlayer !== 'function')) return;
     try {
         const scope = Runtime.getScope(context);
         if (!scope) return;
         const ranked = new Map();
-        /** @param {unknown} rawSteamId @param {unknown} rawName @param {number} score */
-        function addCandidate(rawSteamId, rawName, score) {
+        /** @param {unknown} rawSteamId @param {unknown} rawName @param {number} score
+         * @param {string|null} [observedAt] */
+        function addCandidate(rawSteamId, rawName, score, observedAt = null) {
             const steamId = `${rawSteamId || ''}`;
             if (!/^7656119\d{10}$/u.test(steamId)) return;
             const previous = ranked.get(steamId);
             if (!previous || score > previous.score) ranked.set(steamId, {
-                steamId, name: `${rawName || ''}`, score
+                steamId, name: `${rawName || ''}`, score, observedAt
             });
         }
         for (const parsed of parsedItems) {
             if (parsed.kind === 'cinfo') {
                 for (const member of parsed.resolvedMembers || []) {
-                    addCandidate(member.steamId, member.name, 2);
+                    addCandidate(member.steamId, member.name, 2, parsed.establishedAtUtc || null);
                 }
                 for (const member of parsed.unresolvedMembers || []) {
                     for (const candidate of member.candidates || []) {
-                        addCandidate(candidate.steamId, candidate.name, candidate.score);
+                        addCandidate(candidate.steamId, candidate.name, candidate.score,
+                            parsed.establishedAtUtc || null);
                     }
                 }
             }
@@ -1287,7 +1332,10 @@ async function recrossWarBandits(context, parsedItems, client) {
         const candidates = [...ranked.values()].sort((left, right) =>
             right.score - left.score || left.steamId.localeCompare(right.steamId)).slice(0, 3);
         for (const candidate of candidates) {
-            const result = await provider.resolvePlayer(context, scope, candidate.steamId);
+            const result = typeof provider.resolvePlayerRecent === 'function' ?
+                await provider.resolvePlayerRecent(context, scope, candidate.steamId,
+                    { observedAt: candidate.observedAt }) :
+                await provider.resolvePlayer(context, scope, candidate.steamId);
             if (!result || !result.available || result.ambiguous || !result.player ||
                 `${result.player.steamId}` !== candidate.steamId) continue;
             await Runtime.recordWarBanditsIdentity(context, result.player, result.observedAt);

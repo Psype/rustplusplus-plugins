@@ -140,6 +140,31 @@ function parseServerCatalog(payload) {
     return deepFreeze(servers);
 }
 
+function parseWipeCatalog(payload) {
+    if (!Array.isArray(payload) || payload.length > 1000) {
+        throw new TypeError('WarBandits wipe catalogue response is invalid.');
+    }
+    const seen = new Set();
+    const wipes = payload.map(raw => {
+        if (!isObject(raw) || !hasOwn(raw, 'ID') || !hasOwn(raw, 'start_date') || !hasOwn(raw, 'end_date')) {
+            throw new TypeError('WarBandits wipe catalogue entry is incomplete.');
+        }
+        const id = asIdentifier(raw.ID, 'wipe ID');
+        const startAt = asNonEmptyString(raw.start_date, 'wipe start_date');
+        const endAt = asNonEmptyString(raw.end_date, 'wipe end_date');
+        const numericId = Number(id);
+        if (!/^\d+$/u.test(id) || !Number.isSafeInteger(numericId) || numericId <= 0 || seen.has(numericId) ||
+            Number.isNaN(Date.parse(startAt)) ||
+            Number.isNaN(Date.parse(endAt)) || Date.parse(startAt) >= Date.parse(endAt)) {
+            throw new TypeError('WarBandits wipe catalogue entry is invalid or duplicated.');
+        }
+        seen.add(numericId);
+        return deepFreeze({ id: numericId, startAt: new Date(startAt).toISOString(),
+            endAt: new Date(endAt).toISOString() });
+    });
+    return deepFreeze(wipes.sort((left, right) => right.endAt.localeCompare(left.endAt) || right.id - left.id));
+}
+
 function parseStatistic(raw) {
     if (!isObject(raw) || !hasOwn(raw, 'name') || !hasOwn(raw, 'amount')) {
         throw new TypeError('WarBandits statistic is invalid.');
@@ -246,6 +271,19 @@ function selectPlayer(rows, query) {
     });
     return deepFreeze({ player: reconciliation.target, candidates: reconciliation.candidates,
         ambiguous: reconciliation.ambiguous });
+}
+
+function normalizeWipe(value) {
+    if (value === undefined || value === 'all-time') return 'all-time';
+    if (value === 0 || value === '0') return 0;
+    const numeric = typeof value === 'number' ? value :
+        (typeof value === 'string' && /^\d+$/u.test(value) ? Number(value) : Number.NaN);
+    return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : null;
+}
+
+function hasLookupRows(result) {
+    return Boolean(result && result.available && (result.player || result.truncated ||
+        (Array.isArray(result.candidates) && result.candidates.length > 0)));
 }
 
 function createProvider(dependencies = {}) {
@@ -505,11 +543,64 @@ function createProvider(dependencies = {}) {
         return Number.isSafeInteger(total) && total >= 0 ? total : null;
     }
 
+    async function getRecentWipes(context, scope) {
+        const catalog = await ensureServerCatalog(context);
+        if (!catalog.available || catalog.reason === 'cooldown') {
+            return unavailable(catalog.reason, { wipes: [], server: null });
+        }
+        let server;
+        try {
+            server = selectServer(catalog.servers, scope);
+        }
+        catch (error) {
+            return unavailable(error.message, { wipes: [], server: null });
+        }
+        if (!server) return unavailable('server not supported', { wipes: [], server: null });
+
+        const key = `wipes:${server.slug}`;
+        const cached = statsCacheGet(key);
+        if (cached) return cached;
+        return coalesce(key, async () => {
+            const secondCached = statsCacheGet(key);
+            if (secondCached) return secondCached;
+            try {
+                const response = await request(key,
+                    `${apiRoot}/wipes/${encodeURIComponent(server.slug)}`, {});
+                const value = deepFreeze({ available: true, reason: null, server,
+                    wipes: parseWipeCatalog(response && response.data), observedAt: dateNow().toISOString() });
+                responseCache.set(key, { savedAt: dateNow().getTime(), value });
+                return value;
+            }
+            catch (error) {
+                const state = readCatalogCache();
+                const reason = state && state.cooldownUntil &&
+                    Date.parse(state.cooldownUntil) > dateNow().getTime() ? 'cooldown' : 'request failed';
+                log(context, `Wipe catalogue unavailable: ${reason}.`);
+                return unavailable(reason, { server, wipes: [] });
+            }
+        });
+    }
+
+    function preferredHistoricalWipe(wipes, observedAt) {
+        if (!Array.isArray(wipes) || wipes.length === 0) return null;
+        const completed = wipes.filter(wipe => Date.parse(wipe.endAt) <= dateNow().getTime());
+        if (completed.length === 0) return null;
+        const observedMs = Date.parse(`${observedAt || ''}`);
+        if (Number.isNaN(observedMs)) return completed[0];
+        const containing = completed.find(wipe => Date.parse(wipe.startAt) <= observedMs &&
+            observedMs < Date.parse(wipe.endAt));
+        if (containing) return containing;
+        return completed.slice().sort((left, right) => {
+            const distance = wipe => observedMs < Date.parse(wipe.startAt) ? Date.parse(wipe.startAt) - observedMs :
+                observedMs - Date.parse(wipe.endAt);
+            return distance(left) - distance(right) || right.endAt.localeCompare(left.endAt);
+        })[0];
+    }
+
     async function resolvePlayer(context, scope, query, options = {}) {
         const rawQuery = `${query || ''}`.trim();
         if (!rawQuery || rawQuery.length > 64) return unavailable('invalid query', { candidates: [] });
-        const wipe = options.wipe === undefined || options.wipe === 'all-time' ? 'all-time' :
-            options.wipe === 0 || options.wipe === '0' ? 0 : null;
+        const wipe = normalizeWipe(options.wipe);
         if (wipe === null) return unavailable('invalid wipe', { candidates: [] });
         const catalog = await ensureServerCatalog(context);
         if (!catalog.available || catalog.reason === 'cooldown') {
@@ -585,6 +676,29 @@ function createProvider(dependencies = {}) {
             }
         }
         return result;
+    }
+
+    async function resolvePlayerRecent(context, scope, query, options = {}) {
+        const searchedWipes = [];
+        const current = await resolvePlayer(context, scope, query, { wipe: 0 });
+        searchedWipes.push(0);
+        if (!current.available || hasLookupRows(current)) {
+            return deepFreeze({ ...current, searchedWipes });
+        }
+
+        const recent = await getRecentWipes(context, scope);
+        const historical = recent.available ? preferredHistoricalWipe(recent.wipes, options.observedAt) : null;
+        if (historical && historical.id !== 0) {
+            const previous = await resolvePlayer(context, scope, query, { wipe: historical.id });
+            searchedWipes.push(historical.id);
+            if (!previous.available || hasLookupRows(previous)) {
+                return deepFreeze({ ...previous, searchedWipes });
+            }
+        }
+
+        const allTime = await resolvePlayer(context, scope, query, { wipe: 'all-time' });
+        searchedWipes.push('all-time');
+        return deepFreeze({ ...allTime, searchedWipes });
     }
 
     async function scanCurrentWipePage(context, scope, page = 1) {
@@ -858,8 +972,10 @@ function createProvider(dependencies = {}) {
 
     return Object.freeze({
         ensureServerCatalog,
+        getRecentWipes,
         linkBattlemetricsPlayer,
         resolvePlayer,
+        resolvePlayerRecent,
         scanCurrentWipePage
     });
 }
@@ -869,11 +985,15 @@ const singleton = createProvider();
 module.exports = Object.freeze({
     createProvider,
     ensureServerCatalog: context => singleton.ensureServerCatalog(context),
+    getRecentWipes: (context, scope) => singleton.getRecentWipes(context, scope),
     linkBattlemetricsPlayer: (context, scope, link) =>
         singleton.linkBattlemetricsPlayer(context, scope, link),
     parseServerCatalog,
     parseStatsPayload,
+    parseWipeCatalog,
     resolvePlayer: (context, scope, query, options) => singleton.resolvePlayer(context, scope, query, options),
+    resolvePlayerRecent: (context, scope, query, options) =>
+        singleton.resolvePlayerRecent(context, scope, query, options),
     scanCurrentWipePage: (context, scope, page) => singleton.scanCurrentWipePage(context, scope, page),
     selectPlayer,
     selectServer

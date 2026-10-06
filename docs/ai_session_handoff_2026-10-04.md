@@ -17,15 +17,17 @@ Avant toute modification :
 4. ne fais ni reset, ni checkout destructif, ni réécriture globale du worktree ;
 5. ne prétends jamais qu’un comportement fonctionne en production sur la seule base des tests locaux.
 
-État observé au dernier audit : branche master, HEAD/origin/master alignés sur la release 1.22.27 et worktree propre.
-Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; le commit suivant ajoute
-la 1.22.27.
+État observé au dernier audit : branche master, HEAD/origin/master alignés sur la release 1.22.28 et worktree propre.
+Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; `a308c0a` ajoute la
+1.22.27. La release suivante 1.22.28 groupe les alias pending par identité BattleMetrics et ajoute le fallback
+WarBandits courant -> intervalle historique pertinent -> all-time.
 La première conserve les identifiants de ligne TSV
 Tesseract pour empêcher un pseudo /cinfo replié (U Got Kirkified) d’absorber Established, accepte la confusion l/I/1
 uniquement dans l’ancre et garde une date illisible éditable avec Confirm désactivé. La seconde ajoute la
 réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
-d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La dernière borne les délais de réponse
-Discord/traduction. La dernière validation complète a passé 253/253 tests et tsc --noEmit ; le déploiement et la
+d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La suivante borne les délais de réponse
+Discord/traduction et la dernière fiabilise la sémantique des identités connues et des wipes WarBandits. La dernière
+validation complète a passé 259/259 tests et tsc --noEmit ; le déploiement et la
 nouvelle capture Discord restent à valider réellement.
 
 Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
@@ -42,8 +44,8 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 - Dépôt : `rustplusplus-plugins`.
 - Branche au moment de la passation : `master`.
-- `HEAD`, `origin/master` et `origin/HEAD` : alignés sur la release `1.22.27` au dernier audit du 6 octobre 2026.
-- Version canonique du worktree : `1.22.27` dans `package.json` et `package-lock.json`.
+- `HEAD`, `origin/master` et `origin/HEAD` : alignés sur la release `1.22.28` au dernier audit du 6 octobre 2026.
+- Version canonique du worktree : `1.22.28` dans `package.json` et `package-lock.json`.
 - Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
   métrique d’heures WarBandits.
 - Le commit utilisateur `d327e7d` regroupe les releases `1.22.24` à `1.22.26`, notamment dans :
@@ -66,19 +68,48 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
   - `package.json`, `package-lock.json`, `MEMORY.md`, `docs/commands.md` et `docs/installation.md` ;
   - le présent document, son lien dans `docs/documentation.md` et la mise à jour de l’étude player-intelligence.
 
-- Le commit suivant `d327e7d` contient la release `1.22.27`, notamment dans :
+- Le commit suivant `a308c0a` contient la release `1.22.27`, notamment dans :
 
   - `src/commands/intel.js` et `test/playerIntelligenceDiscord.test.js` ;
   - `src/plugins/autoTranslate/index.js`, `src/plugins/autoTranslate/translator.js` et leurs tests ;
   - `.env.example`, `README.md` et la documentation de démarrage Discord ;
   - `package.json`, `package-lock.json`, `MEMORY.md`, `docs/commands.md`, `docs/full_list_features.md` et ce document.
 
+- La release `1.22.28` ajoute la résolution de wipes récents et le regroupement des alias pending, notamment dans :
+
+  - `src/plugins/warBandits/index.js`, `src/plugins/playerIntelligence/importWorkflow.js`,
+    `src/plugins/playerIntelligence/resolveCinfo.js` et `src/plugins/playerIntelligence/scanDaemon.js` ;
+  - `src/plugins/playerIntelligence/identityAdministration.js` et `src/commands/intel.js` ;
+  - les tests WarBandits, import, résolution, daemon, runtime et Discord associés ;
+  - `package.json`, `package-lock.json`, `MEMORY.md` et les documentations player-intelligence/commandes/sources.
+
 - Il ne reste qu'une branche locale `master`. Les deux anciennes branches `origin/codex/*`, déjà entièrement intégrées,
   ont été supprimées ; le suivi de l'amont est limité à `upstream/master`, avec pruning automatique des références.
 
 Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
 
-## Dernière correction : release 1.22.27
+## Dernière correction : release 1.22.28
+
+`/intel pending` compte désormais les personnes séparément de leurs alias. Une identité BattleMetrics sans SteamID64
+produit une seule ligne, avec son nom d'affichage courant et ses autres pseudos : `FUNTIK`, `gus` et `+=import&**`
+partageant `BM:1192585926` valent donc une identité et trois alias. L'aperçu `/cinfo` réserve `linked to known
+identities` aux cibles possédant réellement un identifiant et affiche `[BM]`, `[Steam]` ou `[Steam+BM]`. Une
+correspondance name-only reste pending.
+
+Le provider WarBandits valide et met en cache `/wipes/<serveur>`. Les vérifications OCR et les SteamID prioritaires
+essaient `wipe=0`, puis l'intervalle numérique contenant ou le plus proche du GMT `Established` (le wipe terminé le
+plus récent sans timestamp), et seulement ensuite `all-time` si aucun candidat n'est apparu. La première portée avec
+des candidats arrête la chaîne ; une ambiguïté all-time reste manuelle. Les IDs sont opaques et sélectionnés par dates,
+jamais calculés. Le 6 octobre, `8467` était l'intervalle immédiatement terminé (2 au 6 octobre) et `8398` l'intervalle
+antérieur du 1er au 2 octobre. `FUNTIK` était absent de ces portées restreintes mais correspondait à quatre SteamID
+all-time, donc aucune fusion automatique n'est permise.
+
+Lorsqu'un SteamID importé produit au contraire une réponse WarBandits unique dont le nom exact correspond à une seule
+identité BattleMetrics locale sans conflit, le daemon journalise le couple Steam+BM et fusionne les alias déjà portés
+par ce BM. Un ancien lot déjà marqué comme traité peut être relancé après déploiement avec `!scanplayers`, qui remet à
+zéro uniquement le checkpoint de priorités du wipe sans supprimer l'historique.
+
+## Correction précédente : release 1.22.27
 
 `/intel` accuse désormais réception auprès de Discord avec un `deferReply()` éphémère comme toute première opération,
 avant les logs, le chargement de contexte ou la lecture du journal player-intelligence. Le traitement peut ensuite
@@ -165,9 +196,9 @@ inventer ni commiter silencieusement.
 
 ## Validation déjà effectuée
 
-Le 6 octobre 2026, après les releases 1.22.24 à 1.22.27 :
+Le 6 octobre 2026, après les releases 1.22.24 à 1.22.28 :
 
-- `npm.cmd test` : `253/253` tests unitaires réussis ;
+- `npm.cmd test` : `259/259` tests unitaires réussis ;
 - `tsc --noEmit -p .` : réussi dans la même commande ;
 - `git diff --check` : aucune erreur ;
 - `npm.cmd run test:autotranslate:live` : réussi en 8,9 s pour six scénarios cumulés ; Bing a atteint sa borne de deux
@@ -175,8 +206,9 @@ Le 6 octobre 2026, après les releases 1.22.24 à 1.22.27 :
 - tests ajoutés : séparation de lignes malgré géométrie chevauchante, récupération du membre replié avec ancre
   `EstabIished`, workflow d’édition obligatoire d’une date illisible, reprojection réversible `ChiCo` -> `Ch1co`,
   agrégation inter-captures/déduplication intra-capture, séparation alias vérifiés/OCR pending, persona Steam courant,
-  réponses Discord éphémères, historique filtré, révocation, accusé `/intel` avant tout travail et budget total de
-  traduction.
+  réponses Discord éphémères, historique filtré, révocation, accusé `/intel` avant tout travail, budget total de
+  traduction, regroupement des alias BattleMetrics pending, liens `/cinfo` adossés à un identifiant et fallback de
+  wipes WarBandits avec ambiguïté manuelle et jointure Steam/BM exacte non conflictuelle.
 
 Ces résultats ne prouvent ni le comportement du binaire Tesseract installé sur Linux, ni le téléchargement Discord, ni
 les fournisseurs externes, ni le processus de déploiement.
@@ -254,7 +286,7 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
 
 ## Vérifications de production encore ouvertes
 
-1. Déployer/redémarrer `1.22.27`, vérifier le message `RUSTPLUS v1.22.27 OPERATIONAL`, puis réimporter l’image KIRK
+1. Déployer/redémarrer `1.22.28`, vérifier le message `RUSTPLUS v1.22.28 OPERATIONAL`, puis réimporter l’image KIRK
    originale dans le canal d’intelligence. Exiger `U Got Kirkified` et un `Established` séparé.
 2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent
    des boîtes déterministes et ne remplacent pas ce contrôle.

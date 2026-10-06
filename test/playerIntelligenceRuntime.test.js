@@ -325,6 +325,32 @@ Test('Discord identity administration lists pending aliases and keeps OCR correc
         Assert.deepEqual((await Runtime.listPendingAliases(value.context())).map(item => item.name), ['ChiCo']);
     });
 
+Test('pending identity administration groups every alias sharing one BattleMetrics identity', async t => {
+    const value = harness(t);
+    const scope = { guildId: 'guild', serverKey: 'battlemetrics:42',
+        wipeId: 'wipe:2026-10-02T14:00:00.000Z' };
+    const observed = (exactName, observedAt, sourceEventId) => Core.createEvent({
+        schemaVersion: Core.SCHEMA_VERSION,
+        kind: 'identity_observed', observedAt, recordedAt: observedAt, scope,
+        subject: { steamId: null, battlemetricsPlayerId: '1192585926', exactName },
+        payload: { caseFidelity: true },
+        provenance: { source: 'test', sourceEventId, collectorVersion: 'test-1' },
+        confidence: 'verified', evidence: null
+    });
+    await value.store().appendMany([
+        observed('+=import&**', '2026-10-02T09:00:00.000Z', 'funtik-old'),
+        observed('gus', '2026-10-03T09:00:00.000Z', 'funtik-middle'),
+        observed('FUNTIK', '2026-10-04T09:00:00.000Z', 'funtik-current')
+    ]);
+
+    const pending = await Runtime.listPendingAliases(value.context());
+
+    Assert.equal(pending.length, 1);
+    Assert.equal(pending[0].name, 'FUNTIK');
+    Assert.deepEqual(pending[0].aliases, ['FUNTIK', 'gus', '+=import&**']);
+    Assert.deepEqual(pending[0].battlemetricsPlayerIds, ['1192585926']);
+});
+
 Test('scanplayers acknowledges a bounded background rescan without awaiting it', async t => {
     const value = harness(t);
     const requests = [];

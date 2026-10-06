@@ -131,6 +131,28 @@ Test('cinfo resolver keeps uncertain identities pending and immutable', () => {
     Assert.equal(Object.isFrozen(result.resolvedMembers), true);
 });
 
+Test('cinfo links only candidates backed by a known Steam or BattleMetrics identity', () => {
+    const parsed = {
+        kind: 'cinfo', tag: 'TEST', declaredCount: 1,
+        members: [{ name: 'Known Name', role: 'member' }],
+        complete: true,
+        establishedRaw: '09/29/2026 14:58:27',
+        establishedAtUtc: '2026-09-29T14:58:27.000Z',
+        timezoneConfidence: 'probable', rawText: '', errors: Object.freeze([])
+    };
+    const nameOnly = resolveCinfo(parsed, [{
+        name: 'Known Name', steamId: null, battlemetricsPlayerId: null
+    }]);
+    Assert.equal(nameOnly.resolvedMembers.length, 0);
+    Assert.equal(nameOnly.unresolvedMembers[0].observedText, 'Known Name');
+
+    const battlemetrics = resolveCinfo(parsed, [{
+        name: 'Known Name', steamId: null, battlemetricsPlayerId: '42'
+    }]);
+    Assert.equal(battlemetrics.resolvedMembers.length, 1);
+    Assert.equal(battlemetrics.resolvedMembers[0].battlemetricsPlayerId, '42');
+});
+
 Test('partial cinfo resolves exact names but never strips adjacent Marley glyphs into Swizzy', () => {
     const parsed = {
         kind: 'cinfo', tag: 'FBM', declaredCount: 6,

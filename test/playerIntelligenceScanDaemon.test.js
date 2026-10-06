@@ -116,14 +116,18 @@ Test('background scan refreshes known online SteamIDs once per wipe and resumes 
     Assert.equal(requests, 1);
 });
 
-Test('text-imported SteamIDs receive one prioritized all-time WarBandits lookup per tick', async t => {
+Test('text-imported SteamIDs receive one prioritized recent-scope WarBandits lookup chain per tick', async t => {
     const value = harness(t);
     await value.store.append(identityEvent({
         steamId: STEAM_D, battlemetricsPlayerId: null, exactName: null
     }, 'text-list-dana', 'discord-steamid-list'));
+    await value.store.append(identityEvent({
+        steamId: null, battlemetricsPlayerId: '777', exactName: 'Dana'
+    }, 'cinfo-dana', 'discord-cinfo'));
     let directLookups = 0;
     const warBanditsProvider = {
-        resolvePlayer: async (_context, _scope, steamId) => {
+        resolvePlayer: async () => { throw new Error('legacy single-scope lookup must not run'); },
+        resolvePlayerRecent: async (_context, _scope, steamId) => {
             directLookups += 1;
             Assert.equal(steamId, STEAM_D);
             return {
@@ -141,6 +145,7 @@ Test('text-imported SteamIDs receive one prioritized all-time WarBandits lookup 
     Assert.equal(directLookups, 1);
     let projection = Core.rebuild(await value.store.readAll());
     Assert.equal(projection.identities.displayName(`steam:${STEAM_D}`), 'Dana');
+    Assert.deepEqual(projection.identities.getPerson(`steam:${STEAM_D}`).battlemetricsPlayerIds, ['777']);
     Assert.equal(projection.metrics.getLatest({ steamId: STEAM_D, battlemetricsPlayerId: null, exactName: null },
         value.scope.serverKey, 'warbandits', 'playtime').value, 10.8);
 

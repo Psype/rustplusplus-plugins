@@ -19,11 +19,13 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 - Preserve the existing worktree. The original handoff began at `a3a71a8`; on 2026-10-06 the user committed and pushed
   `d327e7d`, which contains the `1.22.24` tightly-spaced `/cinfo` fixes, the `1.22.25` reusable player-name reconciler,
   and the `1.22.26` private Discord identity-correction workflow. Release `1.22.27`, immediately after that commit,
-  contains the interaction/translation latency bounds and documentation updates. At the latest audit, `master`,
-  `origin/master` and `origin/HEAD` were aligned on `1.22.27`, the worktree was clean, and only `master` plus the useful
+  contains the interaction/translation latency bounds and documentation updates. Release `1.22.28` groups pending
+  aliases by known BattleMetrics identity and adds date-selected recent-wipe WarBandits fallback. At the latest audit,
+  `master`, `origin/master` and `origin/HEAD` were aligned on `1.22.28`, the worktree was clean, and only `master` plus
+  the useful
   `origin/master`/`upstream/master` remote-tracking references remained. Do not reset, overwrite, reimplement or
   discard these changes. Re-audit `git status --short` and `git diff` if the observed state differs.
-- Canonical package version is `1.22.27`. The complete local validation on 2026-10-06 passed `253/253` unit tests and
+- Canonical package version is `1.22.28`. The complete local validation on 2026-10-06 passed `259/259` unit tests and
   `tsc --noEmit`; `git diff --check` was clean. This is local deterministic evidence only. Deployment/restart and a
   new Discord import of the reported KIRK screenshot remain unconfirmed, so do not claim production success.
 - Primary unresolved production fact: raid and **Pair with Server** notifications were observed on the Rust+ phone but not on the bot. The 2026-09-23/24 journal showed accepted MCS logins and quick reconnects but no inbound notification. Phone receipt proves Facepunch delivery to the phone only; MCS login proves Google accepted the bot's GCM identity only. Facepunch delivery to the bot's virtual device still requires a live capture. Canonical transport audit: `docs/fcm_transport_audit_2026-09-23.md`.
@@ -182,12 +184,27 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   `Cockornut Tree` without a selector and without creating identity evidence. Tracker, tracked-player and WarBandits
   resolution use `precise` mode; equal best candidates still require the existing numbered `!track` selector, and
   current-online priority remains ahead of stale exact profiles.
-- WarBandits name/Steam resolution now separates current-wipe and all-time caches. `!track` uses `wipe=0`; OCR
-  corroboration uses `wipe=0` only when that individual block's GMT `Established` derives the active wipe and uses
-  `all-time` for another/indeterminate wipe. Live checks on 2026-10-06 showed `peng` unique on `wipe=0` but ten results
+- WarBandits name/Steam resolution separates every wipe scope cache. `!track` uses `wipe=0`; OCR and imported-SteamID
+  verification check `wipe=0`, then the numeric `/wipes/<server>` interval containing/nearest to the individual
+  block's GMT `Established` (or the newest completed interval without a timestamp), then `all-time` only when the
+  narrower scopes are empty. The first candidate set stops fallback and ambiguity remains manual. Wipe IDs are opaque,
+  selected by interval and never derived arithmetically. Live checks on 2026-10-06 showed `peng` unique on `wipe=0`
+  but ten results
   on `all-time`. Repeated/bracketed/indexed/comma/JSON `player_name` values using `KOH` + `PENG` all returned zero, so
   multiple high-confidence OCR fragments must be requested separately and reconciled locally; automatic fragment
   fan-out is not enabled until per-fragment OCR confidence is explicit.
+- Release `1.22.28` makes `/intel pending` emit one row per unresolved projected identity, with a separate alias count
+  and grouped historical spellings. `FUNTIK`, `gus` and `+=import&**` therefore form one pending identity when they
+  share `BM:1192585926`. `/cinfo` now calls a member `linked to known identities` only when SteamID64, BattleMetrics ID
+  or both are present, and shows `[Steam]`, `[BM]` or `[Steam+BM]`; name-only matches stay pending. The WarBandits
+  provider validates/caches `/wipes/<server>`, accepts opaque positive numeric wipe IDs, and exposes the bounded
+  current -> relevant completed interval -> all-time resolver used by OCR corroboration and daemon priority lookups.
+  A unique WarBandits Steam proof can join an exact, unique, non-conflicting local BattleMetrics identity, so a pasted
+  SteamID enriches the existing BM alias group instead of creating a parallel Steam-only person. Ambiguous all-time
+  results never join automatically.
+  The 2026-10-06 live catalogue placed `8467` at 2026-10-02 through the 2026-10-06 wipe and `8398` at the earlier
+  2026-10-01 through 2026-10-02 interval. A `FUNTIK` lookup was empty in current/8467/8398 but returned four distinct
+  all-time Steam identities, so it is deliberately left for manual resolution.
 - Release `1.22.27` makes `/intel` call Discord's ephemeral `deferReply()` before logging, context loading, permission
   work or player-intelligence journal reads. The command remains administrator-only; this removes local processing
   from Discord's initial response window. AutoTranslate now allows at most two seconds per provider and five seconds
@@ -196,8 +213,9 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   `elapsedMs`. A retained slash command can still show `The application did not respond` when the bot is offline: the
   2026-10-06 local inspection found `TokenInvalid`, no active Node process, and no local Discord token/client ID.
   Restore valid runtime secrets and restart before treating any Discord timing test as production evidence.
-- Release `1.22.26` adds the administrator-only, ephemeral Discord `/intel` command. `pending` paginates every alias
-  whose projected identity lacks a verified SteamID64; `link` attaches one exact alias to a SteamID; `merge` targets a
+- Release `1.22.26` adds the administrator-only, ephemeral Discord `/intel` command. `pending` was introduced to
+  paginate identities lacking a verified SteamID64; as of 1.22.28 it groups aliases already sharing an identity.
+  `link` attaches one exact alias to a SteamID; `merge` targets a
   verified exact alias/SteamID/BattleMetrics ID; `history` lists only verified aliases with dates; `links` audits active
   rules; and `unlink` reverses them. Link/merge read the current public Steam persona, falling back only to an already
   Steam/API-verified local alias; no manually entered name can enter verified history. `identity_linked` may now also
@@ -274,6 +292,11 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   translation deadline in addition to provider-level cancellation. `npm.cmd run test:autotranslate:live` also passed
   in 8.9 seconds for six cumulative live/fallback scenarios (versus roughly 35 seconds before the cap); Bing timed out
   at its two-second bound and MyMemory completed that fallback. External provider health remains non-deterministic.
+- Superseding QA for release `1.22.28` on 2026-10-06: `npm.cmd test` passes 259/259 including `tsc --noEmit`, and
+  `git diff --check` is clean. New checks cover pending alias grouping by BattleMetrics identity, Discord rendering,
+  name-only `/cinfo` candidates remaining pending, strict wipe-catalogue parsing, numeric wipe cache isolation,
+  Established-selected historical lookup, all-time ambiguity, daemon use of the recent-scope resolver and safe
+  SteamID/BattleMetrics joining from unique exact WarBandits evidence.
 - Performance check for `1.22.3`: the dedicated glyph benchmark recalls the target among 2,000 aliases with 104 stored
   glyph variants and eight graphemes in a 20.797 ms median. The existing 200-player pipeline measured before/after at
   41.702/39.357 ms initial load, 0.044/0.030 ms quiet-poll mean and 51.356/50.742 ms for ten transitions; no measured

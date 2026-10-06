@@ -1,13 +1,19 @@
 // @ts-check
 const { resolveRoster } = require('./nameSimilarity.js');
 
+/** @param {any} candidate */
+function hasKnownIdentity(candidate) {
+    return Boolean(candidate && (/^7656119\d{10}$/u.test(`${candidate.steamId || ''}`) ||
+        /^\d{1,32}$/u.test(`${candidate.battlemetricsPlayerId || ''}`)));
+}
+
 /** @param {any} parsed @param {readonly any[]} candidates @param {any} options */
 function resolveCinfo(parsed, candidates, options = {}) {
     if (!parsed || parsed.kind !== 'cinfo' || !Array.isArray(parsed.members)) {
         throw new TypeError('Parsed cinfo observation is required.');
     }
     const tagKey = `${parsed.tag || ''}`.normalize('NFKC').toLocaleLowerCase('en');
-    const contextualCandidates = candidates.map((/** @type {any} */ candidate) => ({
+    const contextualCandidates = candidates.filter(hasKnownIdentity).map((/** @type {any} */ candidate) => ({
         ...candidate,
         contextPriority: Array.isArray(candidate.knownClanTags) &&
             candidate.knownClanTags.includes(tagKey)

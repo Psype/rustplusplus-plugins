@@ -291,9 +291,26 @@ function uniqueOnlineNames(online) {
 
 /** @param {any} projection @param {string} steamId @param {string} battlemetricsPlayerId */
 function hasConflictingBattlemetricsLink(projection, steamId, battlemetricsPlayerId) {
-    const matches = projection.identities.findByIdentifier(steamId);
-    return matches.some((/** @type {any} */ person) => person.battlemetricsPlayerIds.length > 0 &&
+    const steamMatches = projection.identities.findByIdentifier(steamId);
+    const steamConflict = steamMatches.some((/** @type {any} */ person) =>
+        person.battlemetricsPlayerIds.length > 0 &&
         !person.battlemetricsPlayerIds.includes(battlemetricsPlayerId));
+    const battlemetricsMatches = projection.identities.findByIdentifier(battlemetricsPlayerId);
+    const battlemetricsConflict = battlemetricsMatches.some((/** @type {any} */ person) =>
+        person.steamId && person.steamId !== steamId);
+    return steamConflict || battlemetricsConflict;
+}
+
+/** @param {any} projection @param {string} steamId @param {string} name */
+function exactHistoricalBattlemetricsMatch(projection, steamId, name) {
+    if (Array.from(normalize(name)).length < 3) return null;
+    const matches = projection.identities.findByExactName(name);
+    if (matches.some((/** @type {any} */ person) => person.steamId && person.steamId !== steamId)) return null;
+    const battlemetricsIds = [...new Set(matches.flatMap((/** @type {any} */ person) =>
+        person.battlemetricsPlayerIds))];
+    if (battlemetricsIds.length !== 1 ||
+        hasConflictingBattlemetricsLink(projection, steamId, battlemetricsIds[0])) return null;
+    return battlemetricsIds[0];
 }
 
 /** @param {readonly any[]} events @param {any} scope @param {Set<string>} seen @param {Set<string>} refreshed */
@@ -379,10 +396,13 @@ async function runCycle(options) {
     }
 
     const provider = options.warBanditsProvider;
-    if (provider && typeof provider.resolvePlayer === 'function') {
+    if (provider && (typeof provider.resolvePlayerRecent === 'function' ||
+        typeof provider.resolvePlayer === 'function')) {
         const [steamId] = targetedLookupCandidates(existing, projection, options.scope, targeted);
         if (steamId) {
-            const lookup = await provider.resolvePlayer(options.context, options.scope, steamId);
+            const lookup = typeof provider.resolvePlayerRecent === 'function' ?
+                await provider.resolvePlayerRecent(options.context, options.scope, steamId) :
+                await provider.resolvePlayer(options.context, options.scope, steamId);
             if (lookup && lookup.available) {
                 targeted.add(steamId);
                 targetedLookups = 1;
@@ -392,9 +412,11 @@ async function runCycle(options) {
                     const observedAt = canonicalIso(lookup.observedAt) || recordedAt;
                     if (name) {
                         const live = uniqueOnlineNames(online).get(normalize(name)) || [];
-                        const battlemetricsPlayerId = Array.from(normalize(name)).length >= 3 && live.length === 1 &&
+                        const liveBattlemetricsPlayerId = Array.from(normalize(name)).length >= 3 && live.length === 1 &&
                             !hasConflictingBattlemetricsLink(projection, steamId, live[0].battlemetricsPlayerId) ?
                             live[0].battlemetricsPlayerId : null;
+                        const battlemetricsPlayerId = liveBattlemetricsPlayerId ||
+                            exactHistoricalBattlemetricsMatch(projection, steamId, name);
                         events.push(identityEvent(options.scope, { steamId, battlemetricsPlayerId, name }, {
                             guildId: options.context.guildId,
                             observedAt,

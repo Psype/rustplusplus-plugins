@@ -877,10 +877,13 @@ paramètre répété, crochets, index, virgule et tableau JSON ont toutes renvoy
 recouper localement les SteamID et n'utiliser que des fragments dont la confiance OCR individuelle est explicitement
 élevée.
 
-Enfin, la corroboration OCR existante utilise `wipe=0` lorsque le `Established` GMT du bloc appartient au wipe actif,
-et `all-time` seulement si le bloc appartient à un autre wipe ou si son wipe est indéterminable. Les caches sont
-séparés par serveur, portée de wipe et requête, afin qu'une recherche historique bruitée ne contamine pas une recherche
-du wipe courant.
+Enfin, la corroboration OCR consulte d'abord `wipe=0`, puis le catalogue `/wipes/<serveur>` et l'intervalle numérique
+qui contient le `Established` GMT du bloc, ou l'intervalle le plus proche. Sans timestamp exploitable, elle prend le
+wipe terminé le plus récent. `all-time` n'est interrogé que si ces deux portées n'ont renvoyé aucun candidat. La
+première portée qui renvoie des candidats arrête la chaîne ; plusieurs résultats, notamment en `all-time`, restent
+ambigus et doivent être traités manuellement. Les IDs de wipe sont des identifiants API opaques sélectionnés par leur
+intervalle, jamais par une soustraction. Les caches sont séparés par serveur, portée de wipe et requête, afin qu'une
+recherche historique bruitée ne contamine pas une recherche du wipe courant.
 
 La recherche visuelle a été mesurée séparément sur 20 crops et la limite de 2 000 signatures. La validation/décodage
 répétée de chaque signature prenait une médiane de `600,386 ms` sur sept exécutions. Un cache faible des features
@@ -890,11 +893,18 @@ de forme ni la pénalité d'aspect. Le premier chargement valide toujours intég
 ### Correction Discord et historique d'alias vérifiés (6 octobre 2026)
 
 La commande slash administrateur `/intel` fournit une interface privée et éphémère au-dessus des événements
-`identity_linked`/`identity_link_revoked`. `/intel pending` pagine tous les pseudos dont la projection n'a encore aucun
-SteamID64 vérifié ; `/intel link` associe un pseudo exact à un SteamID64 ; `/intel merge` utilise comme cible un
+`identity_linked`/`identity_link_revoked`. `/intel pending` pagine une ligne par identité dont la projection n'a encore
+aucun SteamID64 vérifié. Les pseudos qui partagent déjà un BattleMetrics ID sont regroupés : `FUNTIK`, `gus` et
+`+=import&**` sur `BM:1192585926` comptent comme une identité et trois alias, pas trois personnes. `/intel link`
+associe un pseudo exact à un SteamID64 ; `/intel merge` utilise comme cible un
 SteamID64, un BattleMetrics ID ou un alias local exact déjà vérifié ; `/intel links` audite les règles actives et
 `/intel unlink` les révoque sans effacer la moindre observation. Une liaison peut également couvrir le BattleMetrics ID
 de la source, afin que les observations historiques liées à cet ID soient reprojetées vers le SteamID cible.
+
+L'aperçu `/cinfo` n'emploie désormais `linked to known identities` que pour une cible portant réellement un SteamID64,
+un BattleMetrics ID, ou les deux. Il affiche respectivement `[Steam]`, `[BM]` ou `[Steam+BM]`. Une correspondance
+name-only reste pending, même si son orthographe est exacte, afin que `linked` signifie toujours « relié à une identité
+connue par un identifiant ».
 
 Avant une liaison, le bot lit le persona public Steam actuel du SteamID cible. Ce nom devient l'alias vérifié le plus
 récent et donc le nom d'affichage. Si Steam est indisponible, seul un alias local déjà vérifié par Steam/API peut être

@@ -199,11 +199,19 @@ module.exports = Object.freeze({
         if (subcommand === 'pending') {
             const values = await Runtime.listPendingAliases(context);
             const page = interaction.options.getInteger('page') || 1;
-            return editReply(client, interaction, paginated(values, page, value =>
-                `- ${JSON.stringify(truncate(value.name, 80))} - ${value.snapshotCount} capture(s) - ${
+            const aliasCount = values.reduce((/** @type {number} */ total, /** @type {any} */ value) =>
+                total + value.aliases.length, 0);
+            return editReply(client, interaction, paginated(values, page, value => {
+                const otherAliases = value.aliases.filter((/** @type {string} */ alias) => alias !== value.name);
+                const shownAliases = otherAliases.slice(0, 2).map((/** @type {string} */ alias) =>
+                    JSON.stringify(truncate(alias, 36)));
+                const aliasText = shownAliases.length === 0 ? '' : ` - aliases: ${shownAliases.join(', ')}${
+                    otherAliases.length > shownAliases.length ? `, +${otherAliases.length - shownAliases.length}` : ''}`;
+                return `- ${JSON.stringify(truncate(value.name, 80))}${aliasText} - ${value.snapshotCount} capture(s) - ${
                     value.battlemetricsPlayerIds.length > 0 ? `BM:${value.battlemetricsPlayerIds.join(',')}` :
-                        'name only'} - last ${value.lastObservedAt.slice(0, 10)}`,
-            'Pending aliases without SteamID64', 'No alias is currently waiting for a SteamID64.'));
+                        'name only'} - last ${value.lastObservedAt.slice(0, 10)}`;
+            }, `Pending identities without SteamID64 (${aliasCount} aliases)`,
+            'No known identity is currently waiting for a SteamID64.'));
         }
         if (subcommand === 'links') {
             const values = await Runtime.listIdentityLinks(context);

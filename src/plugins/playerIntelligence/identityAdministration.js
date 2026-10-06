@@ -68,14 +68,18 @@ function pendingAliases(projection) {
     const rows = [];
     for (const person of projection.identities.persons) {
         if (person.steamId !== null) continue;
-        for (const alias of person.names) rows.push(Object.freeze({
-            name: alias.name,
+        const aliases = person.names.slice().sort((/** @type {any} */ left, /** @type {any} */ right) =>
+            right.lastObservedAt.localeCompare(left.lastObservedAt) || left.name.localeCompare(right.name));
+        if (aliases.length === 0) continue;
+        rows.push(Object.freeze({
+            name: projection.identities.displayName(person.personId),
+            aliases: Object.freeze(aliases.map((/** @type {any} */ alias) => alias.name)),
             personId: person.personId,
             battlemetricsPlayerIds: Object.freeze([...person.battlemetricsPlayerIds]),
-            firstObservedAt: alias.firstObservedAt,
-            lastObservedAt: alias.lastObservedAt,
-            snapshotCount: counts.get(person.personId) || 0,
-            verified: alias.verified === true
+            firstObservedAt: aliases.reduce((/** @type {string} */ earliest, /** @type {any} */ alias) =>
+                alias.firstObservedAt < earliest ? alias.firstObservedAt : earliest, aliases[0].firstObservedAt),
+            lastObservedAt: aliases[0].lastObservedAt,
+            snapshotCount: counts.get(person.personId) || 0
         }));
     }
     return Object.freeze(rows.sort((left, right) => right.snapshotCount - left.snapshotCount ||

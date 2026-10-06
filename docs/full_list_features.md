@@ -14,7 +14,7 @@ review/correction output to Rust team chat.
 - **/decay** - Display the decay time of an item.
 - **/despawn** - Display the despawn time of an item.
 - **/help** - Get help message.
-- **/intel** - Privately list aliases without a verified SteamID, reconcile them to a verified identity, inspect verified alias history, review links, or revoke a correction. Discord is acknowledged before logging or journal reads.
+- **/intel** - Privately list identities without a verified SteamID, grouping aliases already joined by BattleMetrics; reconcile them to a verified identity, inspect verified alias history, review links, or revoke a correction. Discord is acknowledged before logging or journal reads.
 - **/intelimport** - OCR, preview, and confirm `/cinfo` or F7 screenshots without fixed pixel coordinates.
 - **intel-imports channel** - Drop 1–10 screenshots manually or through the allowlisted Windows region-capture
   webhook, or paste 1–100 complete SteamID64 values with one ID per line. F7 versus `/cinfo` and repeated `/cinfo`
@@ -39,7 +39,8 @@ review/correction output to Rust team chat.
 
 ### Discord-only player identity examples
 
-- `/intel pending page:1` lists unresolved aliases such as an OCR-only `ChiCo`.
+- `/intel pending page:1` lists one row per unresolved identity. Aliases sharing a BattleMetrics ID are grouped; for
+  example `FUNTIK`, `gus`, and `+=import&**` on `BM:1192585926` count as one identity and three aliases.
 - `/intel merge alias:ChiCo target:Ch1co` performs an exact, reversible correction against an existing verified target.
 - `/intel link alias:ChiCo steamid:76561198154738095` performs the same correction when the SteamID64 is known directly.
 - `/intel history target:Ch1co page:1` lists only dated Steam/API-verified names; it never promotes `ChiCo` merely

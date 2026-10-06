@@ -34,6 +34,13 @@ function catalog(servers = [server()]) {
     return servers;
 }
 
+function wipes(rows = [
+    { ID: 8467, start_date: '2026-10-02T13:56:00.000Z', end_date: '2026-10-06T13:56:05.000Z' },
+    { ID: 8398, start_date: '2026-10-01T13:56:00.000Z', end_date: '2026-10-02T13:56:13.000Z' }
+]) {
+    return rows;
+}
+
 function statsRow(overrides = {}) {
     return {
         player: {
@@ -109,6 +116,23 @@ Test('strict catalogue parsing and exact server selection prefer BattleMetrics I
         /incomplete/);
 });
 
+Test('wipe catalogue parsing preserves opaque numeric IDs and orders newest intervals first', () => {
+    const parsed = WarBandits.parseWipeCatalog(wipes().slice().reverse());
+
+    Assert.equal(Object.isFrozen(parsed), true);
+    Assert.equal(Object.isFrozen(parsed[0]), true);
+    Assert.deepEqual(parsed.map(wipe => wipe.id), [8467, 8398]);
+    Assert.equal(parsed[0].startAt, '2026-10-02T13:56:00.000Z');
+    Assert.throws(() => WarBandits.parseWipeCatalog(wipes([
+        { ID: 8467, start_date: '2026-10-02T13:56:00.000Z', end_date: '2026-10-06T13:56:05.000Z' },
+        { ID: '08467', start_date: '2026-09-25T13:56:00.000Z', end_date: '2026-10-02T13:56:05.000Z' }
+    ])), /duplicated/);
+    Assert.throws(() => WarBandits.parseWipeCatalog(wipes([
+        { ID: Number.MAX_SAFE_INTEGER + 1, start_date: '2026-10-02T13:56:00.000Z',
+            end_date: '2026-10-06T13:56:05.000Z' }
+    ])), /invalid/);
+});
+
 Test('catalogue cache is atomic LF, coalesced and reusable from disk', async t => {
     let release;
     const gate = new Promise(resolve => { release = resolve; });
@@ -168,20 +192,85 @@ Test('requests are serialized, gap-controlled and identical player lookups coale
     Assert.equal(test.calls[1].config.params.player_name, 'Psype');
 });
 
-Test('player lookups isolate current-wipe and all-time caches', async t => {
+Test('player lookups isolate current, historical-ID and all-time caches', async t => {
     const test = harness(t);
     const scope = { battlemetricsId: '42' };
 
     const current = await test.provider.resolvePlayer(null, scope, 'Psype', { wipe: 0 });
     const allTime = await test.provider.resolvePlayer(null, scope, 'Psype');
     const currentCached = await test.provider.resolvePlayer(null, scope, 'Psype', { wipe: '0' });
+    const historical = await test.provider.resolvePlayer(null, scope, 'Psype', { wipe: 8398 });
 
     Assert.equal(current.wipe, 0);
     Assert.equal(allTime.wipe, 'all-time');
+    Assert.equal(historical.wipe, 8398);
     Assert.strictEqual(currentCached, current);
-    Assert.deepEqual(test.calls.slice(1).map(call => call.config.params.wipe), [0, 'all-time']);
-    Assert.equal((await test.provider.resolvePlayer(null, scope, 'Psype', { wipe: 1 })).reason,
+    Assert.deepEqual(test.calls.slice(1).map(call => call.config.params.wipe), [0, 'all-time', 8398]);
+    Assert.equal((await test.provider.resolvePlayer(null, scope, 'Psype', { wipe: -1 })).reason,
         'invalid wipe');
+});
+
+Test('recent resolution tries current then the interval matching Established and stops before all-time', async t => {
+    const test = harness(t, {
+        httpClient: {
+            get: async (url, config) => {
+                test.calls.push({ url, config });
+                if (url.endsWith('/servers')) return { data: catalog() };
+                if (url.includes('/wipes/')) return { data: wipes([
+                    { ID: 8500, start_date: '2026-10-06T13:56:05.000Z',
+                        end_date: '2026-10-09T13:56:00.000Z' },
+                    ...wipes()
+                ]) };
+                if (config.params.wipe === 8398) {
+                    return { data: stats([statsRow({
+                        player: { steam_64_ID: '76561198784468196', name: 'FUNTIK' }
+                    })]) };
+                }
+                return { data: stats([], { total: 0 }) };
+            }
+        }
+    });
+    test.setNow('2026-10-06T16:00:00.000Z');
+
+    const result = await test.provider.resolvePlayerRecent(null, { battlemetricsId: '42' }, 'FUNTIK', {
+        observedAt: '2026-10-01T20:00:00.000Z'
+    });
+
+    Assert.equal(result.player.steamId, '76561198784468196');
+    Assert.equal(result.wipe, 8398);
+    Assert.deepEqual(result.searchedWipes, [0, 8398]);
+    Assert.deepEqual(test.calls.filter(call => call.url.includes('/stats/'))
+        .map(call => call.config.params.wipe), [0, 8398]);
+});
+
+Test('recent resolution leaves multiple all-time identities ambiguous for manual review', async t => {
+    const test = harness(t, {
+        httpClient: {
+            get: async (url, config) => {
+                test.calls.push({ url, config });
+                if (url.endsWith('/servers')) return { data: catalog() };
+                if (url.includes('/wipes/')) return { data: wipes([
+                    { ID: 8500, start_date: '2026-10-06T13:56:05.000Z',
+                        end_date: '2026-10-09T13:56:00.000Z' },
+                    ...wipes()
+                ]) };
+                if (config.params.wipe !== 'all-time') return { data: stats([], { total: 0 }) };
+                return { data: stats([
+                    statsRow({ player: { steam_64_ID: '76561198784468196', name: 'FUNTIK' } }),
+                    statsRow({ player: { ID: 502, steam_64_ID: '76561199137754751', name: 'funtik' } })
+                ], { total: 2 }) };
+            }
+        }
+    });
+    test.setNow('2026-10-06T16:00:00.000Z');
+
+    const result = await test.provider.resolvePlayerRecent(null, { battlemetricsId: '42' }, 'FUNTIK');
+
+    Assert.equal(result.available, true);
+    Assert.equal(result.ambiguous, true);
+    Assert.equal(result.player, null);
+    Assert.equal(result.candidates.length, 2);
+    Assert.deepEqual(result.searchedWipes, [0, 8467, 'all-time']);
 });
 
 Test('current-wipe pages are bounded, deterministic and expose a resumable cursor', async t => {
@@ -476,6 +565,7 @@ Test('public provider API has no periodic WarBandits hook', () => {
     Assert.equal('onBattlemetricsUpdated' in WarBandits, false);
     Assert.equal('onBattlemetricsUpdated' in provider, false);
     Assert.deepEqual(Object.keys(provider).sort(), [
-        'ensureServerCatalog', 'linkBattlemetricsPlayer', 'resolvePlayer', 'scanCurrentWipePage'
+        'ensureServerCatalog', 'getRecentWipes', 'linkBattlemetricsPlayer', 'resolvePlayer',
+        'resolvePlayerRecent', 'scanCurrentWipePage'
     ]);
 });

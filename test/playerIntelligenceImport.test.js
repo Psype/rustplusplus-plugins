@@ -465,13 +465,20 @@ Test('cinfo preview keeps every OCR name visible when the declared count is unre
         kind: 'cinfo', tag: 'genx', declaredCount: null, establishedRaw: '',
         members: ['n444shj', 'Jameskdw1704', 'spirit_monger19', 'Tingtong', 'Sumdumsit', 'GingerMinx']
             .map(name => ({ name, role: 'member' })),
-        resolvedMembers: ['n444shj', 'Jameskdw1704', 'spirit_monger19']
-            .map((name, memberIndex) => ({ name, role: 'member', memberIndex })),
+        resolvedMembers: [
+            { name: 'n444shj', role: 'member', memberIndex: 0,
+                steamId: '76561199177077740', battlemetricsPlayerId: null },
+            { name: 'Jameskdw1704', role: 'member', memberIndex: 1,
+                steamId: null, battlemetricsPlayerId: '101' },
+            { name: 'spirit_monger19', role: 'member', memberIndex: 2,
+                steamId: null, battlemetricsPlayerId: '102' }
+        ],
         unresolvedMembers: [], missingMemberCount: 0,
         errors: ['Members count not found.']
     });
     Assert.match(preview, /OCR roster: n444shj, Jameskdw1704, spirit_monger19, Tingtong, Sumdumsit, GingerMinx/);
-    Assert.match(preview, /Linked identities: n444shj, Jameskdw1704, spirit_monger19/);
+    Assert.match(preview,
+        /Known identity links: n444shj \[Steam\], Jameskdw1704 \[BM\], spirit_monger19 \[BM\]/);
     Assert.match(preview, /Pending identities: 3/);
 });
 
@@ -897,8 +904,10 @@ Test('cinfo preview separates OCR-read names from linked identities in roster or
             { name: 'RangerMS', role: 'member' }
         ],
         resolvedMembers: [
-            { memberIndex: 2, name: 'Cockornut Tree', role: 'member' },
-            { memberIndex: 1, name: 'Nova', role: 'member' }
+            { memberIndex: 2, name: 'Cockornut Tree', role: 'member',
+                steamId: '76561198000000002', battlemetricsPlayerId: null },
+            { memberIndex: 1, name: 'Nova', role: 'member',
+                steamId: '76561198000000001', battlemetricsPlayerId: '979924420' }
         ],
         unresolvedMembers: [
             { observedText: 'd.ve' }, { observedText: 'Mr Tutel' }, { observedText: 'RangerMS' }
@@ -909,7 +918,36 @@ Test('cinfo preview separates OCR-read names from linked identities in roster or
     });
     Assert.match(preview, /5\/5 names read · 2\/5 linked/);
     Assert.match(preview, /OCR roster: d\.ve, Nova, Cockornut Tree, Mr Tutel, RangerMS/);
-    Assert.match(preview, /Linked identities: Nova, Cockornut Tree/);
+    Assert.match(preview, /Known identity links: Nova \[Steam\+BM\], Cockornut Tree \[Steam\]/);
+});
+
+Test('unique WarBandits proof joins a matching BattleMetrics-only cinfo identity', async t => {
+    const value = createHarness(t);
+    const steamId = '76561198784468196';
+    value.client.playerIntelligenceImportDependencies.recognize = async () => [
+        word('ClanTag: TEST', 20), word('Members: 1', 45),
+        word('Clan Members: FUNTIK', 70), word('Established: 10/01/2026 10:00:00', 95)
+    ];
+    value.client.playerIntelligenceImportDependencies.identityCandidates = async () => [{
+        name: 'FUNTIK', steamId: null, battlemetricsPlayerId: '1192585926', caseFidelity: true
+    }];
+    value.client.playerIntelligenceImportDependencies.corroborateCandidates = async () => [{
+        name: 'FUNTIK', steamId, battlemetricsPlayerId: null,
+        caseFidelity: true, corroborated: true
+    }];
+
+    await ImportWorkflow.beginImport(value.client, value.command);
+
+    Assert.match(value.edits[0].content, /FUNTIK \[Steam\+BM\]/);
+    const customId = value.edits[0].components[0].components[0].data.custom_id;
+    await ImportWorkflow.handleButton({
+        client: value.client,
+        interaction: { customId, guildId: 'guild', channelId: 'commands', user: { id: 'requester' } }
+    });
+    const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
+    const identity = (await store.readAll()).find(event => event.provenance.sourceEventId.endsWith(':cinfo-name:0'));
+    Assert.equal(identity.subject.steamId, steamId);
+    Assert.equal(identity.subject.battlemetricsPlayerId, '1192585926');
 });
 
 Test('short-name collision resolves only after bounded SteamID corroboration', async t => {

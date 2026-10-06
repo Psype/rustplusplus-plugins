@@ -91,6 +91,35 @@ Test('Discord intel link uses the current Steam persona and replies only ephemer
     Assert.match(replies[1].content, /Verified alias history for Ch1co/u);
     Assert.match(replies[1].content, /"Ch1co"/u);
     Assert.doesNotMatch(replies[1].content, /ChiCo/u);
+
+    const observed = (exactName, observedAt, sourceEventId) => Core.createEvent({
+        schemaVersion: Core.SCHEMA_VERSION,
+        kind: 'identity_observed', observedAt, recordedAt: observedAt,
+        scope: { guildId: 'guild', serverKey: 'battlemetrics:42',
+            wipeId: 'wipe:2026-09-29T14:00:00.000Z' },
+        subject: { steamId: null, battlemetricsPlayerId: '1192585926', exactName },
+        payload: { caseFidelity: true },
+        provenance: { source: 'discord-cinfo', sourceEventId, collectorVersion: 'test-1' },
+        confidence: 'verified', evidence: null
+    });
+    await store.appendMany([
+        observed('+=import&**', '2026-10-01T09:10:00.000Z', 'funtik-old'),
+        observed('FUNTIK', '2026-10-01T09:11:00.000Z', 'funtik-current')
+    ]);
+    await IntelCommand.execute(client, {
+        guildId: 'guild', user: { id: 'admin' },
+        options: {
+            getSubcommand: () => 'pending',
+            getString: () => null,
+            getInteger: () => null
+        },
+        deferReply: async options => { Assert.deepEqual(options, { ephemeral: true }); }
+    });
+    Assert.match(replies[2].content,
+        /Pending identities without SteamID64 \(2 aliases\) - 1 - page 1\/1/u);
+    Assert.match(replies[2].content, /"FUNTIK" - aliases: "\+=import&\*\*"/u);
+    Assert.match(replies[2].content, /BM:1192585926/u);
+
     Assert.deepEqual(IntelCommand.getData().toJSON().options.map(option => option.name),
         ['pending', 'links', 'history', 'link', 'merge', 'unlink']);
     const linkOptions = IntelCommand.getData().toJSON().options.find(option => option.name === 'link').options;
