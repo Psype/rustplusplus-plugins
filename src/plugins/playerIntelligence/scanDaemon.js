@@ -9,8 +9,8 @@ const BoundedTtlCache = require('../../util/boundedTtlCache.js');
 const RuntimeTelemetry = require('../../util/runtimeTelemetry.js');
 const Core = require('./index.js');
 
-const STATE_SCHEMA_VERSION = 5;
-const COLLECTOR_VERSION = 'player-scan-daemon-5';
+const STATE_SCHEMA_VERSION = 6;
+const COLLECTOR_VERSION = 'player-scan-daemon-6';
 const STATE_FILE = 'scan-daemon.json';
 const MAX_LOCAL_REFRESHES_PER_CYCLE = 100;
 const RESCAN_DELAY_MS = 12 * 60 * 60 * 1000;
@@ -21,6 +21,8 @@ const WARNING_MAX_ENTRIES = 256;
 const RETRY_BASE_MS = 60 * 1000;
 const RETRY_MAX_MS = 60 * 60 * 1000;
 const MAX_TARGETED_RETRIES = 10000;
+const MAX_STEAM_PROFILE_RETRIES = 10000;
+const FRESH_BURST_LIMIT = 2;
 const ONLINE_SOURCE = 'battlemetrics-online-wipe-daemon';
 const WARBANDITS_SOURCE = 'warbandits-current-wipe-daemon';
 const WARBANDITS_LOOKUP_SOURCE = 'warbandits-direct-lookup-daemon';
@@ -98,9 +100,11 @@ function emptyState(options, now) {
         seenWarBanditsSteamIds: [],
         targetedLookupSteamIds: [],
         targetedLookupRetries: [],
+        targetedFreshStreak: 0,
         refreshedSteamIds: [],
         profiledSteamIds: [],
-        profileAttemptedSteamIds: [],
+        steamProfileRetries: [],
+        steamProfileFreshStreak: 0,
         warBanditsRetryAt: null,
         warBanditsFailures: 0,
         updatedAt: now.toISOString()
@@ -113,7 +117,7 @@ function validateState(value, options) {
         throw new TypeError('state must be an object');
     }
     const state = /** @type {any} */ (value);
-    if (![1, 2, 3, 4, STATE_SCHEMA_VERSION].includes(state.schemaVersion) ||
+    if (![1, 2, 3, 4, 5, STATE_SCHEMA_VERSION].includes(state.schemaVersion) ||
         `${state.guildId}` !== `${options.context.guildId}` ||
         typeof state.serverKey !== 'string' || typeof state.wipeId !== 'string' ||
         !Number.isSafeInteger(state.nextWarBanditsPage) || state.nextWarBanditsPage < 1 ||
@@ -126,26 +130,49 @@ function validateState(value, options) {
     }
     const targetedLookupSteamIds = state.schemaVersion === 1 ? [] : state.targetedLookupSteamIds;
     const profiledSteamIds = state.schemaVersion < 3 ? [] : state.profiledSteamIds;
-    const profileAttemptedSteamIds = state.schemaVersion < 4 ? [...profiledSteamIds] :
-        state.profileAttemptedSteamIds;
+    const legacyProfileAttempts = state.schemaVersion < 4 ? [...profiledSteamIds] :
+        state.schemaVersion < 6 ? state.profileAttemptedSteamIds : [];
+    if (!Array.isArray(targetedLookupSteamIds)) throw new TypeError('state targeted lookup set is invalid');
+    if (!Array.isArray(profiledSteamIds)) throw new TypeError('state Steam profile set is invalid');
+    if (!Array.isArray(legacyProfileAttempts) || legacyProfileAttempts.length > 200000 ||
+        new Set(legacyProfileAttempts).size !== legacyProfileAttempts.length ||
+        legacyProfileAttempts.some((/** @type {any} */ value) => !/^7656119\d{10}$/u.test(`${value}`))) {
+        throw new TypeError('state Steam profile attempt set is invalid');
+    }
     const targetedLookupRetries = state.schemaVersion < 5 ? [] : state.targetedLookupRetries;
     const warBanditsRetryAt = state.schemaVersion < 5 ? null : state.warBanditsRetryAt;
     const warBanditsFailures = state.schemaVersion < 5 ? 0 : state.warBanditsFailures;
-    if (!Array.isArray(targetedLookupSteamIds)) throw new TypeError('state targeted lookup set is invalid');
-    if (!Array.isArray(profiledSteamIds)) throw new TypeError('state Steam profile set is invalid');
-    if (!Array.isArray(profileAttemptedSteamIds)) throw new TypeError('state Steam profile attempt set is invalid');
+    const targetedFreshStreak = state.schemaVersion < 6 ? 0 : state.targetedFreshStreak;
+    const profiledSet = new Set(profiledSteamIds);
+    const steamProfileRetries = state.schemaVersion < 6 ? legacyProfileAttempts
+        .filter((/** @type {string} */ steamId) => !profiledSet.has(steamId))
+        .sort().slice(0, MAX_STEAM_PROFILE_RETRIES)
+        .map((/** @type {string} */ steamId) => ({ steamId, failures: 1, nextAttemptAt: state.updatedAt })) :
+        state.steamProfileRetries;
+    const steamProfileFreshStreak = state.schemaVersion < 6 ? 0 : state.steamProfileFreshStreak;
     if (!Array.isArray(targetedLookupRetries) || targetedLookupRetries.length > MAX_TARGETED_RETRIES) {
         throw new TypeError('state targeted lookup retries are invalid');
     }
-    const retryIds = new Set();
-    for (const retry of targetedLookupRetries) {
-        if (!retry || typeof retry !== 'object' || !/^7656119\d{10}$/u.test(`${retry.steamId}`) ||
-            !Number.isSafeInteger(retry.failures) || retry.failures < 1 || retry.failures > 1000 ||
-            typeof retry.nextAttemptAt !== 'string' || Number.isNaN(Date.parse(retry.nextAttemptAt)) ||
-            retryIds.has(`${retry.steamId}`)) {
-            throw new TypeError('state targeted lookup retry is invalid');
+    if (!Array.isArray(steamProfileRetries) || steamProfileRetries.length > MAX_STEAM_PROFILE_RETRIES) {
+        throw new TypeError('state Steam profile retries are invalid');
+    }
+    for (const [label, retries] of [['targeted lookup', targetedLookupRetries],
+        ['Steam profile', steamProfileRetries]]) {
+        const retryIds = new Set();
+        for (const retry of /** @type {any[]} */ (retries)) {
+            if (!retry || typeof retry !== 'object' || !/^7656119\d{10}$/u.test(`${retry.steamId}`) ||
+                !Number.isSafeInteger(retry.failures) || retry.failures < 1 || retry.failures > 1000 ||
+                typeof retry.nextAttemptAt !== 'string' || Number.isNaN(Date.parse(retry.nextAttemptAt)) ||
+                retryIds.has(`${retry.steamId}`)) {
+                throw new TypeError(`state ${label} retry is invalid`);
+            }
+            retryIds.add(`${retry.steamId}`);
         }
-        retryIds.add(`${retry.steamId}`);
+    }
+    if (!Number.isSafeInteger(targetedFreshStreak) || targetedFreshStreak < 0 ||
+        targetedFreshStreak > FRESH_BURST_LIMIT || !Number.isSafeInteger(steamProfileFreshStreak) ||
+        steamProfileFreshStreak < 0 || steamProfileFreshStreak > FRESH_BURST_LIMIT) {
+        throw new TypeError('state retry fairness counters are invalid');
     }
     if (!Number.isSafeInteger(warBanditsFailures) || warBanditsFailures < 0 || warBanditsFailures > 1000 ||
         (warBanditsRetryAt !== null && (typeof warBanditsRetryAt !== 'string' ||
@@ -154,18 +181,21 @@ function validateState(value, options) {
         throw new TypeError('state WarBandits retry is invalid');
     }
     for (const values of /** @type {any[][]} */ ([state.seenWarBanditsSteamIds, state.refreshedSteamIds,
-        targetedLookupSteamIds, profiledSteamIds, profileAttemptedSteamIds])) {
+        targetedLookupSteamIds, profiledSteamIds, legacyProfileAttempts])) {
         if (values.length > 200000 || new Set(values).size !== values.length ||
             values.some(value => !/^7656119\d{10}$/u.test(`${value}`))) {
             throw new TypeError('state SteamID set is invalid');
         }
     }
-    const attempted = new Set(profileAttemptedSteamIds);
-    if (profiledSteamIds.some((/** @type {string} */ steamId) => !attempted.has(steamId))) {
+    const attempted = new Set(legacyProfileAttempts);
+    if (state.schemaVersion < 6 && profiledSteamIds.some((/** @type {string} */ steamId) => !attempted.has(steamId))) {
         throw new TypeError('completed Steam profiles must also be marked attempted');
     }
-    return { ...state, schemaVersion: STATE_SCHEMA_VERSION, targetedLookupSteamIds, targetedLookupRetries,
-        profiledSteamIds, profileAttemptedSteamIds, warBanditsRetryAt, warBanditsFailures };
+    const migrated = { ...state, schemaVersion: STATE_SCHEMA_VERSION, targetedLookupSteamIds,
+        targetedLookupRetries, targetedFreshStreak, profiledSteamIds, steamProfileRetries,
+        steamProfileFreshStreak, warBanditsRetryAt, warBanditsFailures };
+    delete migrated.profileAttemptedSteamIds;
+    return migrated;
 }
 
 /** @param {Date} current @param {number} failures @param {unknown} [suggested] */
@@ -178,10 +208,10 @@ function retryAt(current, failures, suggested = null) {
 }
 
 /** @param {Map<string,{steamId:string,failures:number,nextAttemptAt:string}>} retries @param {string} steamId
- * @param {Date} current @param {unknown} [suggested] */
-function recordTargetedRetry(retries, steamId, current, suggested = null) {
+ * @param {Date} current @param {number} limit @param {unknown} [suggested] */
+function recordRetry(retries, steamId, current, limit, suggested = null) {
     const previous = retries.get(steamId);
-    if (!previous && retries.size >= MAX_TARGETED_RETRIES) {
+    if (!previous && retries.size >= limit) {
         const oldest = [...retries.values()].sort((left, right) =>
             left.nextAttemptAt.localeCompare(right.nextAttemptAt) || left.steamId.localeCompare(right.steamId))[0];
         if (oldest) retries.delete(oldest.steamId);
@@ -202,9 +232,16 @@ async function readState(options, now) {
         throw error;
     }
     try {
-        const parsed = validateState(JSON.parse(text), options);
-        return parsed.serverKey === options.scope.serverKey && parsed.wipeId === options.scope.wipeId ? parsed :
-            emptyState(options, now);
+        const raw = JSON.parse(text);
+        const parsed = validateState(raw, options);
+        if (parsed.serverKey !== options.scope.serverKey || parsed.wipeId !== options.scope.wipeId) {
+            return emptyState(options, now);
+        }
+        Object.defineProperty(parsed, 'needsMigrationWrite', {
+            value: raw.schemaVersion !== STATE_SCHEMA_VERSION,
+            enumerable: false
+        });
+        return parsed;
     }
     catch (error) {
         throw new ScanDaemonStateError(file, error);
@@ -397,7 +434,9 @@ async function runCycle(options) {
         state.warBanditsResumeAt = null;
         state.targetedLookupSteamIds = [];
         state.targetedLookupRetries = [];
-        state.profileAttemptedSteamIds = [...state.profiledSteamIds];
+        state.targetedFreshStreak = 0;
+        state.steamProfileRetries = [];
+        state.steamProfileFreshStreak = 0;
         state.warBanditsRetryAt = null;
         state.warBanditsFailures = 0;
     }
@@ -407,7 +446,8 @@ async function runCycle(options) {
     const targetedRetries = new Map(state.targetedLookupRetries.map((/** @type {any} */ retry) =>
         [`${retry.steamId}`, { ...retry, steamId: `${retry.steamId}` }]));
     const profiled = new Set(state.profiledSteamIds);
-    const profileAttempts = new Set(state.profileAttemptedSteamIds);
+    const steamProfileRetries = new Map(state.steamProfileRetries.map((/** @type {any} */ retry) =>
+        [`${retry.steamId}`, { ...retry, steamId: `${retry.steamId}` }]));
     const existing = await options.store.readAll();
     recoverSetsFromJournal(existing, options.scope, seen, refreshed);
     const projection = Core.rebuild(existing);
@@ -423,11 +463,15 @@ async function runCycle(options) {
     let metricsObserved = 0;
     let steamProfilesRefreshed = 0;
     let steamProfileAttempts = 0;
+    let steamProfileFailures = 0;
     let targetedLookupFailures = 0;
     let warBanditsPageFailures = 0;
     let retryChanged = forcedRescan;
     for (const steamId of targeted) {
         if (targetedRetries.delete(steamId)) retryChanged = true;
+    }
+    for (const steamId of profiled) {
+        if (steamProfileRetries.delete(steamId)) retryChanged = true;
     }
     const latestPlaytimes = new Map(projection.metrics.observations
         .filter(value => value.serverKey === options.scope.serverKey && value.provider === 'warbandits' &&
@@ -453,12 +497,26 @@ async function runCycle(options) {
 
     const steamProfileIdentity = dependencies.steamProfileIdentity;
     if (typeof steamProfileIdentity === 'function') {
-        const profileSteamId = projection.identities.persons
+        const profileSteamIds = projection.identities.persons
             .map((/** @type {any} */ person) => person.steamId)
-            .filter((/** @type {any} */ steamId) => steamId && !profileAttempts.has(steamId))
-            .sort()[0];
+            .filter((/** @type {any} */ steamId) => steamId && !profiled.has(steamId));
+        const freshSteamIds = profileSteamIds.filter((/** @type {string} */ steamId) =>
+            !steamProfileRetries.has(steamId)).sort();
+        const dueSteamIds = profileSteamIds.filter((/** @type {string} */ steamId) => {
+            const retry = steamProfileRetries.get(steamId);
+            return retry && Date.parse(retry.nextAttemptAt) <= current.getTime();
+        }).sort((left, right) => {
+            const leftRetry = /** @type {any} */ (steamProfileRetries.get(left));
+            const rightRetry = /** @type {any} */ (steamProfileRetries.get(right));
+            return leftRetry.nextAttemptAt.localeCompare(rightRetry.nextAttemptAt) || left.localeCompare(right);
+        });
+        const useRetry = dueSteamIds.length > 0 &&
+            (freshSteamIds.length === 0 || state.steamProfileFreshStreak >= FRESH_BURST_LIMIT);
+        const profileSteamId = useRetry ? dueSteamIds[0] : freshSteamIds[0];
         if (profileSteamId) {
-            profileAttempts.add(profileSteamId);
+            state.steamProfileFreshStreak = useRetry ? 0 :
+                Math.min(FRESH_BURST_LIMIT, state.steamProfileFreshStreak + 1);
+            retryChanged = true;
             steamProfileAttempts = 1;
             let profile = null;
             try {
@@ -470,6 +528,7 @@ async function runCycle(options) {
                         error.message : error}.`);
             }
             const currentName = sanitize(profile && profile.currentName);
+            let profileComplete = false;
             if (profile && `${profile.steamId}` === profileSteamId && currentName) {
                 let current = Core.consolidateProjection(projection, {
                     steamId: profileSteamId, battlemetricsPlayerId: null,
@@ -498,6 +557,9 @@ async function runCycle(options) {
                     .map((/** @type {any} */ alias) => sanitize(alias && alias.name || alias))
                     .filter((/** @type {string} */ name) => name && name !== currentName));
                 for (const name of pastNames) {
+                    const pastAlreadyKnown = knownProfile && knownProfile.names.some((/** @type {any} */ alias) =>
+                        alias.name === name && alias.steamStatus === 'past');
+                    if (pastAlreadyKnown) continue;
                     const historical = Core.consolidateProjection(projection, {
                         steamId: profileSteamId, battlemetricsPlayerId: null,
                         name, caseFidelity: true, allowExactName: false
@@ -514,7 +576,16 @@ async function runCycle(options) {
                 if (profile.aliasesComplete !== false) {
                     profiled.add(profileSteamId);
                     steamProfilesRefreshed = 1;
+                    profileComplete = true;
                 }
+            }
+            if (profileComplete) {
+                if (steamProfileRetries.delete(profileSteamId)) retryChanged = true;
+            }
+            else {
+                recordRetry(steamProfileRetries, profileSteamId, current, MAX_STEAM_PROFILE_RETRIES);
+                steamProfileFailures = 1;
+                retryChanged = true;
             }
         }
     }
@@ -535,14 +606,23 @@ async function runCycle(options) {
     const provider = options.warBanditsProvider;
     if (provider && (typeof provider.resolvePlayerRecent === 'function' ||
         typeof provider.resolvePlayer === 'function')) {
-        const blocked = new Set([...targeted, ...targetedRetries.keys()]);
-        let [steamId] = targetedLookupCandidates(existing, projection, options.scope, blocked);
-        const blockedUntilDue = new Set(targeted);
-        for (const retry of targetedRetries.values()) {
-            if (Date.parse(retry.nextAttemptAt) > current.getTime()) blockedUntilDue.add(retry.steamId);
-        }
-        if (!steamId) [steamId] = targetedLookupCandidates(existing, projection, options.scope, blockedUntilDue);
+        const candidates = targetedLookupCandidates(existing, projection, options.scope, targeted);
+        const freshSteamId = candidates.find(steamId => !targetedRetries.has(steamId));
+        const dueSteamId = candidates.filter(steamId => {
+            const retry = targetedRetries.get(steamId);
+            return retry && Date.parse(retry.nextAttemptAt) <= current.getTime();
+        }).sort((left, right) => {
+            const leftRetry = /** @type {any} */ (targetedRetries.get(left));
+            const rightRetry = /** @type {any} */ (targetedRetries.get(right));
+            return leftRetry.nextAttemptAt.localeCompare(rightRetry.nextAttemptAt) || left.localeCompare(right);
+        })[0];
+        const useRetry = Boolean(dueSteamId) &&
+            (!freshSteamId || state.targetedFreshStreak >= FRESH_BURST_LIMIT);
+        const steamId = useRetry ? dueSteamId : freshSteamId;
         if (steamId) {
+            state.targetedFreshStreak = useRetry ? 0 :
+                Math.min(FRESH_BURST_LIMIT, state.targetedFreshStreak + 1);
+            retryChanged = true;
             let lookup = null;
             try {
                 lookup = typeof provider.resolvePlayerRecent === 'function' ?
@@ -591,7 +671,7 @@ async function runCycle(options) {
                 }
             }
             else {
-                recordTargetedRetry(targetedRetries, steamId, current,
+                recordRetry(targetedRetries, steamId, current, MAX_TARGETED_RETRIES,
                     lookup && (lookup.retryAt || lookup.cooldownUntil));
                 targetedLookupFailures = 1;
                 retryChanged = true;
@@ -666,11 +746,11 @@ async function runCycle(options) {
     if (events.length > 0) await options.store.appendMany(events);
     newlySeen.forEach(value => seen.add(value));
     newlyRefreshed.forEach(value => refreshed.add(value));
-    let changed = forcedRescan || retryChanged || events.length > 0 ||
+    let changed = forcedRescan || state.needsMigrationWrite === true || retryChanged || events.length > 0 ||
         seen.size !== state.seenWarBanditsSteamIds.length ||
         targeted.size !== state.targetedLookupSteamIds.length ||
         refreshed.size !== state.refreshedSteamIds.length || profiled.size !== state.profiledSteamIds.length ||
-        profileAttempts.size !== state.profileAttemptedSteamIds.length;
+        steamProfileRetries.size !== state.steamProfileRetries.length;
     if (scanSucceeded) {
         changed = true;
         if (scan.complete || scan.nextPage === null) {
@@ -689,7 +769,8 @@ async function runCycle(options) {
         left.steamId.localeCompare(right.steamId));
     state.refreshedSteamIds = [...refreshed].sort();
     state.profiledSteamIds = [...profiled].sort();
-    state.profileAttemptedSteamIds = [...profileAttempts].sort();
+    state.steamProfileRetries = [...steamProfileRetries.values()].sort((left, right) =>
+        left.steamId.localeCompare(right.steamId));
     state.updatedAt = recordedAt;
     if (changed || !Fs.existsSync(statePath(options.directory))) {
         await writeStateAtomic(statePath(options.directory), validateState(state, options));
@@ -704,6 +785,7 @@ async function runCycle(options) {
         warBanditsPageFailures,
         metricsObserved,
         steamProfileAttempts,
+        steamProfileFailures,
         steamProfilesRefreshed,
         nextWarBanditsPage: state.nextWarBanditsPage,
         warBanditsResumeAt: state.warBanditsResumeAt,

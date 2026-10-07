@@ -849,7 +849,7 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale la plus récente après reprise durable WarBandits : `npm.cmd test` passe 301/301 le 7 octobre 2026,
+QA locale la plus récente après reprise durable Steam/WarBandits : `npm.cmd test` passe 304/304 le 7 octobre 2026,
 dont le typage strict `tsc --noEmit`. Une
 couverture déterministe reproduit la mauvaise attribution `』Marley』`/`Swizzy`, vérifie le découpage relatif aux
 virgules, la fusion `n444shj, spirit_monger19`, le rejet des comptes/doublons manuels et l'absence d'apprentissage avant
@@ -899,6 +899,14 @@ son curseur et un backoff distinct. Les exceptions fournisseur sont isolées ava
 travail Steam/local déjà calculé. La migration des schemas 1–4 garde les ensembles collectés, et aucune panne fournisseur
 n'est convertie en preuve de présence. Une page `available` mal formée et un SteamID retourné différent de la requête
 restent des échecs retryables ; ils ne valident ni l'ID ni le curseur.
+
+La release 1.22.38 passe ce checkpoint au schema 6 et remplace les tentatives Steam définitives par une file de retries
+bornée, persistée et soumise au même backoff exponentiel de une à soixante minutes. Une ancienne tentative schema 5
+qui n'était pas dans les profils terminés devient immédiatement retryable ; les curseurs et retries WarBandits sont
+conservés. Une réponse Steam partielle peut ajouter son persona courant et ses anciens alias vérifiés, mais reste
+incomplète tant que `aliasesComplete=false`; les retries identiques ne réémettent pas les alias déjà connus. Dans les
+files Steam et WarBandits ciblée, deux nouveaux IDs au maximum peuvent passer avant un retry dû. Cette équité est
+persistée, et aucun checkpoint ou profil fournisseur ne crée une présence.
 
 Scénario reproductible `npm run benchmark:player-intelligence` : roster initial de 200 joueurs, 60 polls silencieux,
 puis 10 déconnexions. Le premier profilage lisait/reprojetait le journal à chaque poll silencieux : `25,397 ms/poll`.

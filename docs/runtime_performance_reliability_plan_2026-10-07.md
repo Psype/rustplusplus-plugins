@@ -160,15 +160,32 @@ Résultat local : A indisponible est checkpointé, B est servi au tick suivant m
 puis A reprend une fois les nouveaux IDs épuisés. Une exception lookup/page conserve les événements locaux et la
 page fautive ; une réponse `available` mal formée échoue aussi sans avancer. Aucun événement de présence n'est créé.
 
-### Lot 6b — Bornes temporelles et files fournisseurs
+### Lot 6b — Reprise Steam et équité des files — release 1.22.38
+
+Statut : implémenté et validé localement ; déploiement à vérifier.
+
+1. Checkpointer les profils Steam incomplets ou indisponibles avec le même backoff exponentiel de 1 à 60 minutes.
+2. Migrer les anciennes tentatives incomplètes du schema 5, puis retirer la liste redondante des tentatives du schema 6.
+3. Alterner de façon bornée : au plus deux nouveaux SteamID avant un retry dû, séparément pour Steam et WarBandits.
+4. Conserver les alias Steam valides reçus dans une réponse partielle, sans marquer le profil comme terminé.
+5. Réarmer les travaux incomplets avec `!scanplayers` sans retraiter les profils déjà complets.
+
+Critères : aucun ID en famine sous arrivées continues, reprise après redémarrage et aucune preuve de présence créée.
+
+Résultat local : un échec Steam survit au checkpoint et reprend automatiquement ; le backoff passe de une à deux
+minutes après deux échecs. Une réponse `aliasesComplete=false` enregistre les alias courants/passés vérifiés mais reste
+retryable jusqu'à une réponse complète. La migration schema 5 conserve les retries/cursors WarBandits et transforme
+les anciennes tentatives non terminées. Les deux files servent au maximum deux nouveaux IDs avant un retry dû.
+
+### Lot 6c — Bornes temporelles des fournisseurs
 
 Statut : planifié comme sous-lot séparé.
 
-1. Rendre le retry automatique des profils Steam incomplets/indisponibles, sans rescan manuel.
-2. Séparer l'exécution Steam du pipeline WarBandits sans ouvrir deux cycles pour un même répertoire.
-3. Ajouter des budgets/annulations aux frontières fournisseurs et des compteurs de progression par file.
+1. Séparer l'exécution Steam du pipeline WarBandits sans ouvrir deux cycles pour un même répertoire.
+2. Ajouter des budgets/annulations aux frontières fournisseurs.
+3. Exposer des compteurs de progression fixes pour chaque file dans la télémétrie agrégée.
 
-Critères : durée de cycle bornée, aucun ID en famine et checkpoints suffisants pour reprendre après redémarrage.
+Critères : durée de cycle bornée, abandon propre d'un fournisseur lent et reprise durable au cycle suivant.
 
 ### Lot 7 — Priorité interactive et travail en arrière-plan
 
@@ -240,7 +257,7 @@ Critères : démarrage reproductible, mémoire stable sur plusieurs wipes et rol
 
 Après `git pull` et redémarrage :
 
-1. vérifier `RUSTPLUS v1.22.36 OPERATIONAL` ;
+1. vérifier `RUSTPLUS v1.22.38 OPERATIONAL` ;
 2. noter RSS, `heapUsed` et temps de réponse avant l’import ;
 3. rejouer le lot de 11 SteamID, puis un lot de 100 ID si disponible ;
 4. exiger un aperçu rapide, les noms locaux déjà vérifiés et aucun dialogue Replace/Keep pour le lot identique ;
@@ -252,7 +269,10 @@ Après `git pull` et redémarrage :
    candidats, puis observer temps et heap d’un import image répété.
 9. attendre une fenêtre, exécuter `/runtime`, puis corréler `RUNTIME`, `RUNTIME_WORK` et les éventuels `RUNTIME_SLOW`
    avec RSS/heap systemd avant, pendant et après un import ; la réponse doit rester éphémère et sans donnée joueur.
+10. laisser échouer un profil Steam, vérifier qu'il reprend automatiquement après son backoff, puis injecter de
+    nouveaux IDs en continu et confirmer qu'un retry dû passe après au plus deux nouveaux IDs dans chaque file.
 
 Les lots 1 à 3 suppriment le chemin chaud précisément observé, le lot 4 rend les prochaines décisions mesurables et
-le lot 5 borne les caches/états dérivés identifiés. Aucun ne prétend à lui seul résoudre toutes les rétentions. Les lots
+le lot 5 borne les caches/états dérivés identifiés et le lot 6 reprend le travail fournisseur sans famine. Aucun ne
+prétend à lui seul résoudre toutes les rétentions. Les lots
 suivants doivent être décidés à partir de ces métriques, sans migration MySQL préalable.
