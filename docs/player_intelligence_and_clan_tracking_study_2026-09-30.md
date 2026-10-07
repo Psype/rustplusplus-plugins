@@ -849,13 +849,19 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale la plus récente après séparation native des lignes Tesseract et édition d’un `Established` illisible :
-`npm.cmd test` passe 241/241 le 3 octobre 2026,
+QA locale la plus récente après ciblage des imports SteamID : `npm.cmd test` passe 269/269 le 7 octobre 2026,
 dont le typage strict `tsc --noEmit`. Une
 couverture déterministe reproduit la mauvaise attribution `』Marley』`/`Swizzy`, vérifie le découpage relatif aux
 virgules, la fusion `n444shj, spirit_monger19`, le rejet des comptes/doublons manuels et l'absence d'apprentissage avant
 Confirm. Elle vérifie ensuite la persistance et la réutilisation du mot corrigé. Le sélecteur Windows, un webhook
 Discord réel et l'OCR de PNG originaux restent à valider interactivement ; les tests n'envoient rien sur le réseau.
+
+Le diagnostic de production du 7 octobre mesure environ 1,08 GiB de heap JavaScript pour seulement 19,09 MiB de
+journal player-intelligence. Une pile capturée pendant un import texte montrait la construction de tous les candidats,
+puis la reconsolidation de chaque observation contre toute la projection. La release 1.22.31 remplace ce chemin précis
+par une résolution limitée aux SteamID collés et couverte par un lot de 100 ID. Une migration MySQL ne traite pas cette
+cause mesurée. La feuille de route incrémentale et ses critères de production sont dans
+`docs/runtime_performance_reliability_plan_2026-10-07.md`.
 
 Scénario reproductible `npm run benchmark:player-intelligence` : roster initial de 200 joueurs, 60 polls silencieux,
 puis 10 déconnexions. Le premier profilage lisait/reprojetait le journal à chaque poll silencieux : `25,397 ms/poll`.

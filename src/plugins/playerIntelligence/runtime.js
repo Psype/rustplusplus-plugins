@@ -311,6 +311,7 @@ async function identityCandidates(context) {
     if (!scope) return Object.freeze([]);
     const events = await getStore(context, scope).readAll();
     const projection = Core.rebuild(events);
+    /** @type {any[]} */
     const values = [];
     for (const person of projection.identities.persons) {
         const knownClanTags = projection.clans.getAffinity({
@@ -370,6 +371,103 @@ async function identityCandidates(context) {
     }
     return Object.freeze([...unique.values()].sort((left, right) =>
         left.name.localeCompare(right.name) || `${left.steamId || ''}`.localeCompare(`${right.steamId || ''}`)));
+}
+
+/**
+ * Return only the identity candidates needed to describe the supplied SteamID64 values.
+ * Unlike identityCandidates(), this does not walk every projected person, historical
+ * observation, clan affinity, or consolidated candidate.
+ *
+ * @param {any} context
+ * @param {readonly string[]} steamIds
+ */
+async function identityCandidatesBySteamIds(context, steamIds) {
+    const scope = getScope(context);
+    if (!scope) return Object.freeze([]);
+    const requested = new Set((Array.isArray(steamIds) ? steamIds : [])
+        .map(value => `${value}`)
+        .filter(value => /^7656119\d{10}$/u.test(value)));
+    if (requested.size === 0) return Object.freeze([]);
+
+    const projection = Core.rebuild(await getStore(context, scope).readAll());
+    const knownBattlemetricsBySteamId = new Map();
+    for (const steamId of requested) {
+        const ids = new Set(projection.identities.findByIdentifier(steamId)
+            .filter((/** @type {any} */ person) => person.steamId === steamId)
+            .flatMap((/** @type {any} */ person) => person.battlemetricsPlayerIds));
+        knownBattlemetricsBySteamId.set(steamId, ids);
+    }
+    /** @type {any[]} */
+    const values = [];
+    /** @param {any} value */
+    const add = value => {
+        const steamId = /^7656119\d{10}$/u.test(`${value && value.steamId || ''}`) ?
+            `${value.steamId}` : null;
+        const name = sanitize(value && value.name);
+        if (!steamId || !requested.has(steamId) || !name) return;
+        const battlemetricsPlayerId = /^\d{1,32}$/u.test(`${value.battlemetricsPlayerId || ''}`) ?
+            `${value.battlemetricsPlayerId}` : null;
+        const knownBattlemetricsIds = knownBattlemetricsBySteamId.get(steamId);
+        if (battlemetricsPlayerId && knownBattlemetricsIds && knownBattlemetricsIds.size > 0 &&
+            !knownBattlemetricsIds.has(battlemetricsPlayerId)) return;
+        const preferredName = sanitize(value && value.preferredName) || null;
+        values.push({ name, steamId, battlemetricsPlayerId, preferredName,
+            caseFidelity: value.caseFidelity !== false });
+    };
+
+    for (const steamId of requested) {
+        for (const person of projection.identities.findByIdentifier(steamId)) {
+            if (person.steamId !== steamId) continue;
+            const preferredName = person.names.some((/** @type {any} */ alias) => alias.verified) ?
+                projection.identities.displayName(person.personId) : null;
+            const battlemetricsIds = person.battlemetricsPlayerIds.length > 0 ?
+                person.battlemetricsPlayerIds : [null];
+            for (const alias of person.names.filter((/** @type {any} */ item) => item.verified)) {
+                for (const battlemetricsPlayerId of battlemetricsIds) {
+                    add({ name: alias.name, steamId, battlemetricsPlayerId, preferredName, caseFidelity: true });
+                }
+            }
+            // A current BattleMetrics name is authoritative for the preview even when the
+            // provider record does not repeat the already-projected SteamID.
+            for (const battlemetricsPlayerId of person.battlemetricsPlayerIds) {
+                const player = scope.battlemetrics && scope.battlemetrics.players &&
+                    scope.battlemetrics.players[battlemetricsPlayerId];
+                const recordSteamId = /^7656119\d{10}$/u.test(`${player && player.steamId || ''}`) ?
+                    `${player.steamId}` : null;
+                if (player && (!recordSteamId || recordSteamId === steamId)) {
+                    add({ name: player.name, steamId, battlemetricsPlayerId, caseFidelity: true });
+                }
+            }
+        }
+    }
+    for (const identity of trackedIdentities(scope)) add(identity);
+    for (const player of Object.values(scope.battlemetrics && scope.battlemetrics.players || {})) {
+        const record = /** @type {any} */ (player);
+        add({
+            name: record && record.name,
+            steamId: record && record.steamId,
+            battlemetricsPlayerId: record && (record.id || null),
+            caseFidelity: true
+        });
+    }
+    for (const player of context.rustplus && context.rustplus.team && context.rustplus.team.players || []) {
+        add({ name: player && player.name, steamId: player && player.steamId,
+            battlemetricsPlayerId: null, caseFidelity: true });
+    }
+
+    const unique = new Map();
+    for (const value of values) {
+        const key = `${value.steamId}\u0000${value.battlemetricsPlayerId || ''}\u0000${value.name}`;
+        const previous = unique.get(key);
+        unique.set(key, Object.freeze({
+            ...value,
+            preferredName: previous && previous.preferredName || value.preferredName,
+            caseFidelity: Boolean(previous && previous.caseFidelity) || value.caseFidelity !== false
+        }));
+    }
+    return Object.freeze([...unique.values()].sort((left, right) =>
+        left.steamId.localeCompare(right.steamId) || left.name.localeCompare(right.name) ||
+        `${left.battlemetricsPlayerId || ''}`.localeCompare(`${right.battlemetricsPlayerId || ''}`)));
 }
 
 /** @param {any} battlemetrics @param {string} playerId */
@@ -1246,6 +1344,7 @@ module.exports = Object.freeze({
     getScope,
     handleCommand,
     identityCandidates,
+    identityCandidatesBySteamIds,
     linkIdentityAlias,
     listIdentityLinks,
     listPendingAliases,

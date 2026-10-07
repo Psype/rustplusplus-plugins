@@ -416,8 +416,11 @@ function textSteamIdEntry(steamId, candidates, scope) {
     const current = battlemetricsPlayerId && scope.battlemetrics && scope.battlemetrics.players &&
         scope.battlemetrics.players[battlemetricsPlayerId];
     const currentName = Layout.cleanText(current && current.name || '');
+    const preferredNames = [...new Set(matches.map(candidate => Layout.cleanText(candidate.preferredName || ''))
+        .filter(Boolean))];
     const aliases = [...new Set(matches.map(candidate => Layout.cleanText(candidate.name || '')).filter(Boolean))];
-    const name = currentName || (aliases.length === 1 ? aliases[0] : null);
+    const name = currentName || (preferredNames.length === 1 ? preferredNames[0] :
+        aliases.length === 1 ? aliases[0] : null);
     return Object.freeze({
         steamId,
         battlemetricsPlayerId,
@@ -436,8 +439,8 @@ async function prepareSteamIdTextImport(client, source, steamIds, duplicateLineC
     const scope = Runtime.getScope(context);
     if (!scope) throw new Error('Active BattleMetrics server is unavailable.');
     const dependencies = importDependencies(client);
-    const loadCandidates = dependencies.identityCandidates || Runtime.identityCandidates;
-    const candidates = await loadCandidates(context);
+    const loadCandidates = dependencies.identityCandidatesBySteamIds || Runtime.identityCandidatesBySteamIds;
+    const candidates = await loadCandidates(context, steamIds);
     if (!Array.isArray(candidates)) throw new TypeError('Identity candidate provider returned an invalid result.');
     const entries = Object.freeze(steamIds.map(steamId => textSteamIdEntry(steamId, candidates, scope)));
     const parsed = Object.freeze({

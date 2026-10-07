@@ -39,6 +39,11 @@ function createHarness(t) {
         word('Clan Members: Nirks, Psype and tom.le.geek.2', 70),
         word('Established: 09/29/2026 14:58:27', 95)
     ];
+    const defaultIdentityCandidates = async () => [
+        { name: 'Nirks', steamId: '76561197900000001', battlemetricsPlayerId: null },
+        { name: 'Psype', steamId: '76561197975819827', battlemetricsPlayerId: '101' },
+        { name: 'tom.le.geek.2', steamId: '76561197900000002', battlemetricsPlayerId: null }
+    ];
     const client = {
         rustplusInstances: { guild: rustplus },
         getInstance: () => instance,
@@ -53,11 +58,8 @@ function createHarness(t) {
         playerIntelligenceImportDependencies: {
             downloadImage: async () => ({ imageBase64: 'AA==', sha256: 'a'.repeat(64) }),
             recognize: async () => words,
-            identityCandidates: async () => [
-                { name: 'Nirks', steamId: '76561197900000001', battlemetricsPlayerId: null },
-                { name: 'Psype', steamId: '76561197975819827', battlemetricsPlayerId: '101' },
-                { name: 'tom.le.geek.2', steamId: '76561197900000002', battlemetricsPlayerId: null }
-            ],
+            identityCandidates: defaultIdentityCandidates,
+            identityCandidatesBySteamIds: defaultIdentityCandidates,
             enableExternalCorroboration: false,
             allowedWebhookIds: ['12345678901234567'],
             warBanditsProvider: { resolvePlayer: async () => ({ available: false }) }
@@ -1100,6 +1102,7 @@ Test('dedicated import channel previews and confirms one or many line-separated 
         playerIntelligenceDependencies: value.client.playerIntelligenceDependencies
     }, { steamId: unknown, name: 'Enriched Persona' }, '2026-10-01T12:01:00.000Z');
     delete value.client.playerIntelligenceImportDependencies.identityCandidates;
+    delete value.client.playerIntelligenceImportDependencies.identityCandidatesBySteamIds;
     Assert.equal(await ImportWorkflow.handleMessage({
         client: value.client,
         message: { ...message, id: 'message-steamids-repeat' }
@@ -1124,6 +1127,128 @@ Test('dedicated import channel previews and confirms one or many line-separated 
     }), true);
     Assert.match(value.replies.at(-1).content, /Invalid SteamID64 on line 2/);
     Assert.equal((await store.readAll()).length, 3);
+});
+
+Test('SteamID text imports use only the targeted resolver for the complete 100-ID batch', async t => {
+    const value = createHarness(t);
+    const steamIds = Array.from({ length: 100 }, (_unused, index) =>
+        `${76561198000000000n + BigInt(index)}`);
+    let receivedContext = null;
+    let receivedIds = null;
+    value.client.playerIntelligenceImportDependencies.identityCandidates = async () => {
+        throw new Error('global identity candidates must not be loaded for a SteamID list');
+    };
+    value.client.playerIntelligenceImportDependencies.identityCandidatesBySteamIds = async (context, requested) => {
+        receivedContext = context;
+        receivedIds = [...requested];
+        return [{ name: 'First Known', steamId: steamIds[0], battlemetricsPlayerId: '9001' }];
+    };
+    const message = {
+        guildId: 'guild', channelId: 'intel-imports', id: 'message-steamids-100',
+        content: steamIds.join('\n'), webhookId: null,
+        author: { id: 'requester', bot: false },
+        member: { permissions: { has: () => false }, roles: { cache: new Map() } },
+        attachments: new Map(), reply: async payload => value.replies.push(payload)
+    };
+
+    Assert.equal(await ImportWorkflow.handleMessage({ client: value.client, message }), true);
+    Assert.equal(receivedContext.guildId, 'guild');
+    Assert.deepEqual(receivedIds, steamIds);
+    Assert.match(value.replies[0].content, /100 unique IDs \(1 named, 99 awaiting enrichment\)/);
+    Assert.match(value.replies[0].content, /First Known \[BM:9001\]/);
+});
+
+Test('targeted SteamID candidates keep current and past verified aliases but reject OCR and BM conflicts',
+    async t => {
+    const value = createHarness(t);
+    const target = '76561198875390964';
+    const unrelated = '76561198843692446';
+    const withoutBattlemetrics = '76561198843692447';
+    value.client.battlemetricsInstances = {
+        '42': {
+            players: {
+                '202': { id: '202', steamId: target, name: 'Current BM Name', status: true },
+                '203': { id: '203', steamId: target, name: 'Other Known BM Name', status: false },
+                '999': { id: '999', steamId: target, name: 'Conflicting BM Name', status: true },
+                '303': { id: '303', steamId: unrelated, name: 'Unrelated BM Name', status: true }
+            }
+        }
+    };
+    value.client.rustplusInstances.guild.team = {
+        players: [{ steamId: target, name: 'Current Team Name' },
+            { steamId: unrelated, name: 'Unrelated Team Name' }]
+    };
+    const context = {
+        client: value.client,
+        guildId: 'guild',
+        rustplus: value.client.rustplusInstances.guild,
+        playerIntelligenceDependencies: value.client.playerIntelligenceDependencies
+    };
+    const store = new Core.JsonlHistoryStore({ directory: Path.join(value.directory, 'guild', '42') });
+    let sequence = 0;
+    const observed = (name, steamId, battlemetricsPlayerId, source, caseFidelity = true) =>
+        Core.createEvent({
+            schemaVersion: Core.SCHEMA_VERSION,
+            kind: 'identity_observed',
+            observedAt: `2026-10-01T12:0${sequence}:00.000Z`,
+            recordedAt: `2026-10-01T12:0${sequence}:00.000Z`,
+            scope: { guildId: 'guild', serverKey: 'battlemetrics:42', wipeId: 'wipe:test' },
+            subject: { steamId, battlemetricsPlayerId, exactName: name },
+            payload: { caseFidelity },
+            provenance: { source, sourceEventId: `targeted-${++sequence}`, collectorVersion: 'test-1' },
+            confidence: caseFidelity ? 'verified' : 'untrusted',
+            evidence: null
+        });
+    await store.appendMany([
+        observed('Verified Past Alias', target, null, 'steam-profile-alias-history'),
+        observed('Preferred Steam Name', target, null, 'steam-profile-current'),
+        observed('Known BM Alias', target, '202', 'warbandits'),
+        observed('Other Known BM Alias', target, '203', 'warbandits'),
+        observed('N01SY OCR Error', target, null, 'discord-f7', false),
+        observed('Unrelated Verified Alias', unrelated, '303', 'warbandits'),
+        observed('No BM Past Alias', withoutBattlemetrics, null, 'steam-profile-alias-history'),
+        observed('No BM Current Name', withoutBattlemetrics, null, 'steam-profile-current'),
+        observed('No BM OCR Error', withoutBattlemetrics, null, 'discord-f7', false)
+    ]);
+
+    const candidates = await Runtime.identityCandidatesBySteamIds(context, [target]);
+    const candidateNames = [...new Set(candidates.map(candidate => candidate.name))];
+    Assert.equal(candidateNames.includes('Verified Past Alias'), true);
+    Assert.equal(candidateNames.includes('Preferred Steam Name'), true);
+    Assert.equal(candidateNames.includes('Current BM Name'), true);
+    Assert.equal(candidateNames.includes('Current Team Name'), true);
+    Assert.equal(candidateNames.includes('N01SY OCR Error'), false);
+    Assert.equal(candidateNames.includes('Conflicting BM Name'), false);
+    Assert.equal(candidateNames.includes('Unrelated Verified Alias'), false);
+    Assert.equal(candidates.every(candidate => candidate.steamId === target), true);
+    Assert.deepEqual([...new Set(candidates.map(candidate => candidate.battlemetricsPlayerId)
+        .filter(Boolean))].sort(), ['202', '203']);
+    Assert.deepEqual([...new Set(candidates.map(candidate => candidate.preferredName).filter(Boolean))],
+        ['Preferred Steam Name']);
+
+    const withoutBattlemetricsCandidates = await Runtime.identityCandidatesBySteamIds(context,
+        [withoutBattlemetrics]);
+    Assert.deepEqual([...new Set(withoutBattlemetricsCandidates.map(candidate => candidate.name))].sort(),
+        ['No BM Current Name', 'No BM Past Alias']);
+    Assert.deepEqual([...new Set(withoutBattlemetricsCandidates.map(candidate => candidate.preferredName)
+        .filter(Boolean))], ['No BM Current Name']);
+    Assert.equal(withoutBattlemetricsCandidates.every(candidate => candidate.battlemetricsPlayerId === null), true);
+
+    value.client.playerIntelligenceImportDependencies.identityCandidatesBySteamIds = async () => candidates;
+    const message = {
+        guildId: 'guild', channelId: 'intel-imports', id: 'message-targeted-live-name', content: target,
+        webhookId: null, author: { id: 'requester', bot: false },
+        member: { permissions: { has: () => false }, roles: { cache: new Map() } },
+        attachments: new Map(), reply: async payload => value.replies.push(payload)
+    };
+    Assert.equal(await ImportWorkflow.handleMessage({ client: value.client, message }), true);
+    Assert.match(value.replies[0].content, /Current BM Name \[BM:202\]/);
+
+    value.client.battlemetricsInstances['42'].players['202'].status = false;
+    Assert.equal(await ImportWorkflow.handleMessage({ client: value.client,
+        message: { ...message, id: 'message-targeted-preferred-name' } }), true);
+    Assert.match(value.replies.at(-1).content, /Preferred Steam Name/);
+    Assert.doesNotMatch(value.replies.at(-1).content, /Preferred Steam Name \[BM:/);
 });
 
 Test('confirm buttons acknowledge immediately and serialize durable work per server', async t => {

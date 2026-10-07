@@ -90,9 +90,10 @@ class FakeScheduler {
 }
 
 async function waitFor(predicate) {
-    for (let attempt = 0; attempt < 200; attempt += 1) {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
         if (predicate()) return;
-        await new Promise(resolve => setImmediate(resolve));
+        await new Promise(resolve => setTimeout(resolve, 1));
     }
     throw new Error('Timed out waiting for test state');
 }

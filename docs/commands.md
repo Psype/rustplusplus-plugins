@@ -311,7 +311,8 @@ webhook can post the same messages when its ID is listed in `RPP_INTEL_IMPORT_WE
 human requester, any member with the configured bot role (or an administrator) may confirm it. Unapproved webhooks are
 ignored. A text-only message may instead contain 1–100 complete SteamID64 values, one per non-empty line (an optional
 whole-message `text` code fence is accepted). Blank and duplicate lines are ignored; any other line rejects the entire
-lot. The preview reuses a unique locally known name/BattleMetrics ID when available, preserves unknown IDs without
+lot. The preview resolves only the pasted SteamID values, reuses a unique locally known name/BattleMetrics ID when
+available, preserves unknown IDs without
 inventing a name, and requires the same `Confirm import` or `Reject` decision before durable storage. Missing names are
 left for the background identity daemon, which tries at most one Steam profile and one pasted SteamID per existing
 BattleMetrics tick. WarBandits checks the current wipe, then the relevant recent completed wipe, and only then
@@ -319,6 +320,9 @@ all-time when the narrower scopes are empty; a unique result stores its current 
 Steam profile attempt no longer blocks the IDs behind it. `!scanplayers` explicitly retries incomplete/failed profile
 attempts while leaving already complete Steam histories alone. Reposting an identical SteamID text lot is idempotent:
 the preview reads the latest local names/links, confirmation keeps the original evidence and never asks to replace it.
+Verified current and past Steam aliases remain attached to the same ID, but the preview prefers the current live
+BattleMetrics name, then the verified current Steam persona. An OCR-only spelling and a conflicting BattleMetrics ID
+are never promoted by this lookup.
 All paths use the same validation, thirty-minute requester/channel/
 server binding and durable batch commit logic.
 Import decision buttons are acknowledged before validation or disk work begins. The message temporarily changes to
