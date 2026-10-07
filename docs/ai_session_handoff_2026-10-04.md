@@ -17,9 +17,8 @@ Avant toute modification :
 4. ne fais ni reset, ni checkout destructif, ni réécriture globale du worktree ;
 5. ne prétends jamais qu’un comportement fonctionne en production sur la seule base des tests locaux.
 
-État observé avant la release courante : branche master, HEAD/origin/master alignés sur la release 1.22.30 et
-worktree propre. La release 1.22.31 cible la résolution des lots SteamID texte sans construire tous les candidats de
-la base.
+État observé avant la release courante : branche master, HEAD/origin/master alignés sur la release 1.22.31 et
+worktree propre. La release 1.22.32 prépare et indexe un consolidateur réutilisable par projection immuable.
 Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; `a308c0a` ajoute la
 1.22.27. La release suivante 1.22.28 groupe les alias pending par identité BattleMetrics et ajoute le fallback
 WarBandits courant -> intervalle historique pertinent -> all-time. La release 1.22.29 centralise toute consolidation
@@ -28,13 +27,15 @@ release 1.22.30 garde la preuve initiale lorsqu'un lot SteamID identique est rej
 courant sans Replace/Keep et empêche un profil Steam indisponible de bloquer tous les IDs suivants.
 La release 1.22.31 résout uniquement les SteamID collés, conserve les alias Steam vérifiés et liens BattleMetrics non
 conflictuels, et préfère le nom BM live puis le persona Steam courant.
+La release 1.22.32 indexe SteamID/BattleMetrics/nom fiable une fois par projection et vérifie tous les résultats contre
+un oracle linéaire figé de la 1.22.31.
 La première conserve les identifiants de ligne TSV
 Tesseract pour empêcher un pseudo /cinfo replié (U Got Kirkified) d’absorber Established, accepte la confusion l/I/1
 uniquement dans l’ancre et garde une date illisible éditable avec Confirm désactivé. La seconde ajoute la
 réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
 d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La suivante borne les délais de réponse
 Discord/traduction et la dernière fiabilise la sémantique des identités connues et des wipes WarBandits. La dernière
-validation complète a passé 269/269 tests et tsc --noEmit ; le déploiement et la
+validation complète a passé 273/273 tests et tsc --noEmit ; le déploiement et la
 nouvelle capture Discord restent à valider réellement.
 
 Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
@@ -53,8 +54,8 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 - Dépôt : `rustplusplus-plugins`.
 - Branche au moment de la passation : `master`.
-- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur la release `1.22.30` avant la release courante.
-- Version canonique du worktree : `1.22.31` dans `package.json` et `package-lock.json`.
+- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur la release `1.22.31` avant la release courante.
+- Version canonique du worktree : `1.22.32` dans `package.json` et `package-lock.json`.
 - Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
   métrique d’heures WarBandits.
 - Le commit utilisateur `d327e7d` regroupe les releases `1.22.24` à `1.22.26`, notamment dans :
@@ -111,12 +112,31 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
   - `test/playerIntelligenceImport.test.js` et la stabilisation temporelle de `test/reliableFcmReceiver.test.js` ;
   - `package.json`, `package-lock.json`, `MEMORY.md`, `docs/commands.md`, l'étude player-intelligence et le plan runtime.
 
+- La release `1.22.32` prépare et indexe le consolidateur d'identité, notamment dans :
+
+  - `src/plugins/playerIntelligence/identityConsolidator.js` ;
+  - `test/playerIntelligenceConsolidator.test.js` et son oracle linéaire sous `test/fixtures/` ;
+  - `benchmark/player-intelligence-consolidator.js`, le script npm associé et les documentations architecture/runtime.
+
 - Il ne reste qu'une branche locale `master`. Les deux anciennes branches `origin/codex/*`, déjà entièrement intégrées,
   ont été supprimées ; le suivi de l'amont est limité à `upstream/master`, avec pruning automatique des références.
 
 Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
 
-## Dernière correction : release 1.22.31
+## Dernière correction : release 1.22.32
+
+`prepareIdentityConsolidator()` normalise une fois le snapshot candidat, puis construit des index ordonnés SteamID,
+BattleMetrics et nom exact fiable. `consolidateProjection()` le réutilise via un `WeakMap` uniquement pour les
+projections profondément immuables de `Core.rebuild()` ; une projection mutable est recalculée et ne peut pas fournir
+un résultat obsolète. Les couples conflictuels, homonymes, noms courts/non fiables et alias Steam passés gardent
+strictement leur sémantique antérieure.
+
+Un oracle linéaire figé de la 1.22.31 compare 1 920 observations générées plus les cas Unicode/NFKC, doublons,
+conflits et ambiguïtés. Le benchmark local de 2 500 personnes/7 500 lignes mesure environ 38 ms de préparation,
+4,8 MiB d'index et 0,011 ms par résolution préparée, contre 14,3 ms avec l'algorithme linéaire. Le gain synthétique
+d'environ 1 280× doit encore être mesuré sur le journal et la charge réels.
+
+## Correction précédente : release 1.22.31
 
 Un lot texte de 1 à 100 SteamID utilise maintenant un résolveur ciblé. Il cherche seulement ces identifiants dans la
 projection, conserve leurs alias vérifiés actuels/passés et leurs liens BattleMetrics connus, puis superpose les
@@ -264,9 +284,9 @@ inventer ni commiter silencieusement.
 
 ## Validation déjà effectuée
 
-Le 7 octobre 2026, après la release 1.22.31 :
+Le 7 octobre 2026, après la release 1.22.32 :
 
-- `npm.cmd test` : `269/269` tests unitaires réussis ;
+- `npm.cmd test` : `273/273` tests unitaires réussis ;
 - `tsc --noEmit -p .` : réussi dans la même commande ;
 - `git diff --check` : aucune erreur ;
 - `npm.cmd run test:autotranslate:live` : réussi en 8,9 s pour six scénarios cumulés ; Bing a atteint sa borne de deux
@@ -313,7 +333,8 @@ les fournisseurs externes, ni le processus de déploiement.
 
 - `src/plugins/playerIntelligence/historyStore.js` : journal JSONL mensuel, append sérialisé, corruption bloquante.
 - `src/plugins/playerIntelligence/identityConsolidator.js` : frontière unique SteamID/BattleMetrics/pseudo exact vers
-  une identité locale enrichie ; aucune correspondance floue ne peut muter le journal.
+  une identité locale enrichie, préparée/indexée une fois par projection immuable ; aucune correspondance floue ne
+  peut muter le journal.
 - `src/plugins/playerIntelligence/runtime.js` et les projecteurs : reconstruction
   identité/clan/activité/présence/métriques.
 - `src/plugins/playerIntelligence/scanDaemon.js` : une page WarBandits bornée par tick BattleMetrics existant, état
@@ -357,7 +378,7 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
 
 ## Vérifications de production encore ouvertes
 
-1. Déployer/redémarrer `1.22.31`, vérifier le message `RUSTPLUS v1.22.31 OPERATIONAL`, puis rejouer le lot de 11
+1. Déployer/redémarrer `1.22.32`, vérifier le message `RUSTPLUS v1.22.32 OPERATIONAL`, puis rejouer le lot de 11
    SteamID. Mesurer temps de réponse, RSS et heap avant/après ; exiger les noms locaux connus et aucun Replace/Keep.
 2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent
    des boîtes déterministes et ne remplacent pas ce contrôle.

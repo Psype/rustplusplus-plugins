@@ -54,9 +54,9 @@ Statut : implémenté et validé localement ; déploiement à vérifier.
 Critères : mêmes aperçus métier, 1 à 100 ID acceptés, inconnus conservés comme pending, conflits BM rejetés, aucune
 itération sur toutes les observations pour chaque ID.
 
-### Lot 2 — Consolidateur d’identité préparé et indexé
+### Lot 2 — Consolidateur d’identité préparé et indexé — release 1.22.32
 
-Statut : planifié.
+Statut : implémenté et validé localement ; déploiement à vérifier.
 
 1. Normaliser les candidats une seule fois par projection.
 2. Construire des index `SteamID -> lignes`, `BattleMetrics ID -> lignes` et `nom exact fiable -> lignes`.
@@ -67,6 +67,12 @@ Statut : planifié.
 
 Critères : résultat strictement identique à l’oracle linéaire, ordre déterministe conservé, ambiguïtés et conflits
 inchangés, aucun cache global retenant une ancienne projection.
+
+Résultat local : 7 500 lignes candidates sont préparées en environ 38 ms et occupent environ 4,8 MiB d’index. Sur
+2 500 observations synthétiques, la résolution préparée mesure environ 0,011 ms par observation contre 14,3 ms pour
+l’algorithme linéaire 1.22.31, soit environ 1 280× sur ce corpus. Le test différentiel couvre 1 920 observations
+générées, Unicode/NFKC, doublons, conflits et ambiguïtés. Le cache faible accepte uniquement les projections profondes
+immuables ; une projection de test mutable est recalculée. Ces mesures locales ne préjugent pas du gain de production.
 
 ### Lot 3 — Construction et déduplication des candidats
 
@@ -179,16 +185,18 @@ Statut : planifié après stabilisation applicative.
 
 Critères : démarrage reproductible, mémoire stable sur plusieurs wipes et rollback sans toucher aux données persistantes.
 
-## Vérifications de production du lot 1
+## Vérifications de production des lots 1 et 2
 
 Après `git pull` et redémarrage :
 
-1. vérifier `RUSTPLUS v1.22.31 OPERATIONAL` ;
+1. vérifier `RUSTPLUS v1.22.32 OPERATIONAL` ;
 2. noter RSS, `heapUsed` et temps de réponse avant l’import ;
 3. rejouer le lot de 11 SteamID, puis un lot de 100 ID si disponible ;
 4. exiger un aperçu rapide, les noms locaux déjà vérifiés et aucun dialogue Replace/Keep pour le lot identique ;
 5. vérifier que le heap redescend après GC naturel et ne reprend pas une croissance proportionnelle à toute la base ;
 6. vérifier que `/intel pending`, le daemon et la traduction continuent de progresser pendant et après l’import.
+7. comparer les durées d’un import image et d’une consolidation daemon avant/après, puis vérifier que le heap reste
+   stable lors de consolidations répétées contre une même projection.
 
-Le lot 1 supprime le chemin chaud précisément observé, mais ne prétend pas à lui seul résoudre toutes les rétentions.
-Les lots suivants doivent être décidés à partir des métriques, dans l’ordre ci-dessus, sans migration MySQL préalable.
+Les lots 1 et 2 suppriment le chemin chaud précisément observé, mais ne prétendent pas à eux seuls résoudre toutes les
+rétentions. Les lots suivants doivent être décidés à partir des métriques, sans migration MySQL préalable.

@@ -34,6 +34,20 @@ that boundary and must not import individual feature plugins.
   `## In-Game and Discord Commands` section of `docs/full_list_features.md` at runtime; QA compares that catalogue
   against every static native/plugin command syntax.
 
+## Player-intelligence identity boundary
+
+`src/plugins/playerIntelligence/identityConsolidator.js` is the only conservative local boundary that may fill a
+missing SteamID64 or BattleMetrics ID from durable exact evidence. `prepareIdentityConsolidator(candidates)`
+normalizes one immutable candidate snapshot and indexes it by SteamID, BattleMetrics ID and trusted exact name.
+Repeated observations should use that prepared function. The compatibility `consolidateCandidates()` entry point
+still prepares one snapshot per call, while `consolidateProjection()` reuses a prepared resolver through a `WeakMap`
+only for the deeply immutable projections produced by `Core.rebuild()`.
+
+The indexes change retrieval cost, not identity rules: short, fuzzy, untrusted, past-Steam-name and conflicting
+evidence retain their previous behavior. A deterministic linear oracle is kept under `test/fixtures/`, and
+`npm run benchmark:consolidator` reports preparation, heap and both linear/prepared timings without contacting a
+provider.
+
 ## Stable hooks
 
 The core currently calls these plugin-manager operations:

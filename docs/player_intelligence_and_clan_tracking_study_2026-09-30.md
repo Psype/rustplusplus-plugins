@@ -863,6 +863,12 @@ par une résolution limitée aux SteamID collés et couverte par un lot de 100 I
 cause mesurée. La feuille de route incrémentale et ses critères de production sont dans
 `docs/runtime_performance_reliability_plan_2026-10-07.md`.
 
+La release 1.22.32 prépare ensuite une fois les index SteamID, BattleMetrics et nom exact fiable pour toutes les
+consolidations d’une projection immuable. Le benchmark `npm run benchmark:consolidator` sur 2 500 personnes et 7 500
+lignes mesure localement environ 38 ms de préparation, 4,8 MiB d’index et 0,011 ms par observation préparée contre
+14,3 ms avec l’algorithme linéaire 1.22.31. Le test compare strictement les deux résultats ; ces valeurs synthétiques ne
+remplacent pas la mesure RSS/CPU/latence après déploiement.
+
 Scénario reproductible `npm run benchmark:player-intelligence` : roster initial de 200 joueurs, 60 polls silencieux,
 puis 10 déconnexions. Le premier profilage lisait/reprojetait le journal à chaque poll silencieux : `25,397 ms/poll`.
 Après ajout d'une garde de poll inchangé fondée sur la fiabilité fournisseur, le wipe, les deltas et les liens tracker,

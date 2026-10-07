@@ -3,6 +3,17 @@
 
 const { deepFreeze } = require('./contracts.js');
 
+/** @typedef {Readonly<{steamId:string|null,battlemetricsPlayerId:string|null,name:string|null,nameKey:string|null,
+ * nameTrusted:boolean,preferredName:string|null,personId:string}>} CandidateRow */
+/** @typedef {Readonly<{rows:readonly CandidateRow[],rowsBySteamId:Map<string,readonly number[]>,
+ * rowsByBattlemetricsId:Map<string,readonly number[]>,trustedRowsByNameKey:Map<string,readonly number[]>,
+ * battlemetricsIdsBySteamId:Map<string,readonly string[]>,
+ * steamIdsByBattlemetricsId:Map<string,readonly string[]>}>} CandidateIndex */
+/** @type {readonly any[]} */
+const EMPTY = Object.freeze([]);
+/** @type {WeakMap<object, (observation:any) => any>} */
+const projectionConsolidators = new WeakMap();
+
 /** @param {unknown} value */
 function cleanName(value) {
     return `${value || ''}`.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim();
@@ -25,8 +36,9 @@ function battlemetricsId(value) {
     return /^\d{1,32}$/u.test(result) ? result : null;
 }
 
-/** @param {readonly any[]} candidates */
+/** @param {readonly any[]} candidates @returns {readonly CandidateRow[]} */
 function normalizeCandidates(candidates) {
+    /** @type {CandidateRow[]} */
     const rows = [];
     for (const raw of Array.isArray(candidates) ? candidates : []) {
         if (!raw || typeof raw !== 'object') continue;
@@ -49,31 +61,95 @@ function normalizeCandidates(candidates) {
     return Object.freeze(rows);
 }
 
-/** @param {readonly any[]} rows @param {string} knownSteamId */
-function battlemetricsForSteam(rows, knownSteamId) {
-    return [...new Set(rows.filter(row => row.steamId === knownSteamId && row.battlemetricsPlayerId)
-        .map(row => row.battlemetricsPlayerId))];
+/** @param {Map<string, number[]>} index @param {string|null} key @param {number} rowIndex */
+function addRowIndex(index, key, rowIndex) {
+    if (!key) return;
+    const values = index.get(key) || [];
+    values.push(rowIndex);
+    index.set(key, values);
 }
 
-/** @param {readonly any[]} rows @param {string} knownBattlemetricsId */
-function steamForBattlemetrics(rows, knownBattlemetricsId) {
-    return [...new Set(rows.filter(row => row.battlemetricsPlayerId === knownBattlemetricsId && row.steamId)
-        .map(row => row.steamId))];
+/** @param {Map<string, Set<string>>} index @param {string|null} key @param {string|null} value */
+function addUniqueValue(index, key, value) {
+    if (!key || !value) return;
+    const values = index.get(key) || new Set();
+    values.add(value);
+    index.set(key, values);
 }
 
-/** @param {readonly any[]} rows @param {string} knownSteamId @param {string} knownBattlemetricsId */
-function pairConflicts(rows, knownSteamId, knownBattlemetricsId) {
-    return battlemetricsForSteam(rows, knownSteamId).some(value => value !== knownBattlemetricsId) ||
-        steamForBattlemetrics(rows, knownBattlemetricsId).some(value => value !== knownSteamId);
+/** @param {Map<string, any>} index */
+function freezeIndexValues(index) {
+    for (const [key, values] of index) index.set(key, Object.freeze(values));
+    return index;
+}
+
+/** @param {Map<string, Set<string>>} index @returns {Map<string, readonly string[]>} */
+function freezeUniqueValueIndex(index) {
+    return new Map([...index].map(([key, values]) => [key, Object.freeze([...values])]));
+}
+
+/** @param {readonly (readonly number[])[]} groups */
+function mergeRowIndexes(groups) {
+    if (groups.length === 0) return EMPTY;
+    if (groups.length === 1) return groups[0];
+    return Object.freeze([...new Set(groups.flat())].sort((left, right) => left - right));
+}
+
+/** @param {CandidateIndex} prepared @param {string} knownSteamId @returns {readonly string[]} */
+function battlemetricsForSteam(prepared, knownSteamId) {
+    return prepared.battlemetricsIdsBySteamId.get(knownSteamId) || EMPTY;
+}
+
+/** @param {CandidateIndex} prepared @param {string} knownBattlemetricsId @returns {readonly string[]} */
+function steamForBattlemetrics(prepared, knownBattlemetricsId) {
+    return prepared.steamIdsByBattlemetricsId.get(knownBattlemetricsId) || EMPTY;
+}
+
+/** @param {CandidateIndex} prepared @param {string} knownSteamId @param {string} knownBattlemetricsId */
+function pairConflicts(prepared, knownSteamId, knownBattlemetricsId) {
+    return battlemetricsForSteam(prepared, knownSteamId).some(value => value !== knownBattlemetricsId) ||
+        steamForBattlemetrics(prepared, knownBattlemetricsId).some(value => value !== knownSteamId);
+}
+
+/** @param {readonly any[]} candidates @returns {CandidateIndex} */
+function prepareCandidateIndex(candidates) {
+    const rows = normalizeCandidates(candidates);
+    /** @type {Map<string, number[]>} */
+    const rowsBySteamId = new Map();
+    /** @type {Map<string, number[]>} */
+    const rowsByBattlemetricsId = new Map();
+    /** @type {Map<string, number[]>} */
+    const trustedRowsByNameKey = new Map();
+    /** @type {Map<string, Set<string>>} */
+    const battlemetricsIdsBySteamId = new Map();
+    /** @type {Map<string, Set<string>>} */
+    const steamIdsByBattlemetricsId = new Map();
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+        const row = rows[rowIndex];
+        addRowIndex(rowsBySteamId, row.steamId, rowIndex);
+        addRowIndex(rowsByBattlemetricsId, row.battlemetricsPlayerId, rowIndex);
+        if (row.nameTrusted) addRowIndex(trustedRowsByNameKey, row.nameKey, rowIndex);
+        addUniqueValue(battlemetricsIdsBySteamId, row.steamId, row.battlemetricsPlayerId);
+        addUniqueValue(steamIdsByBattlemetricsId, row.battlemetricsPlayerId, row.steamId);
+    }
+    freezeIndexValues(rowsBySteamId);
+    freezeIndexValues(rowsByBattlemetricsId);
+    freezeIndexValues(trustedRowsByNameKey);
+    return Object.freeze({
+        rows,
+        rowsBySteamId,
+        rowsByBattlemetricsId,
+        trustedRowsByNameKey,
+        battlemetricsIdsBySteamId: freezeUniqueValueIndex(battlemetricsIdsBySteamId),
+        steamIdsByBattlemetricsId: freezeUniqueValueIndex(steamIdsByBattlemetricsId)
+    });
 }
 
 /**
- * Consolidates one observation against local identity candidates. Only stable-ID equality or a unique exact trusted
- * name may fill missing fields only when it identifies one trusted local person.
- * @param {readonly any[]} candidates @param {any} observation
+ * @param {CandidateIndex} prepared @param {any} observation
  */
-function consolidateCandidates(candidates, observation) {
-    const rows = normalizeCandidates(candidates);
+function consolidatePrepared(prepared, observation) {
+    const rows = prepared.rows;
     const original = Object.freeze({
         steamId: steamId(observation && observation.steamId),
         battlemetricsPlayerId: battlemetricsId(observation && observation.battlemetricsPlayerId),
@@ -91,12 +167,12 @@ function consolidateCandidates(candidates, observation) {
     const ambiguities = [];
 
     if (resolvedSteamId && resolvedBattlemetricsId &&
-        pairConflicts(rows, resolvedSteamId, resolvedBattlemetricsId)) {
+        pairConflicts(prepared, resolvedSteamId, resolvedBattlemetricsId)) {
         conflicts.push('stable identifiers are already linked to different local identities');
     }
 
     if (conflicts.length === 0 && resolvedSteamId && !resolvedBattlemetricsId) {
-        const matches = battlemetricsForSteam(rows, resolvedSteamId);
+        const matches = battlemetricsForSteam(prepared, resolvedSteamId);
         if (matches.length === 1) {
             resolvedBattlemetricsId = matches[0];
             changedFields.push('battlemetricsPlayerId');
@@ -105,7 +181,7 @@ function consolidateCandidates(candidates, observation) {
         else if (matches.length > 1) ambiguities.push('SteamID64 maps to several BattleMetrics IDs');
     }
     if (conflicts.length === 0 && resolvedBattlemetricsId && !resolvedSteamId) {
-        const matches = steamForBattlemetrics(rows, resolvedBattlemetricsId);
+        const matches = steamForBattlemetrics(prepared, resolvedBattlemetricsId);
         if (matches.length === 1) {
             resolvedSteamId = matches[0];
             changedFields.push('steamId');
@@ -115,8 +191,9 @@ function consolidateCandidates(candidates, observation) {
     }
 
     const exactKey = nameKey(resolvedName);
-    const exact = allowExactName && exactKey && Array.from(exactKey).length >= 3 ?
-        rows.filter(row => row.nameTrusted && row.nameKey === exactKey) : [];
+    const exactRowIndexes = allowExactName && exactKey ?
+        prepared.trustedRowsByNameKey.get(exactKey) || EMPTY : EMPTY;
+    const exact = Array.from(exactKey).length >= 3 ? exactRowIndexes.map(rowIndex => rows[rowIndex]) : EMPTY;
     if (conflicts.length === 0 && exact.length > 0 && !resolvedSteamId && !resolvedBattlemetricsId) {
         const personIds = [...new Set(exact.map(row => row.personId))];
         const steamIds = [...new Set(exact.map(row => row.steamId).filter(Boolean))];
@@ -142,7 +219,7 @@ function consolidateCandidates(candidates, observation) {
             .map(row => row.battlemetricsPlayerId).filter(Boolean))];
         const [matchedBattlemetricsId] = /** @type {string[]} */ (matches);
         if (!foreignSteam && matches.length === 1 && matchedBattlemetricsId &&
-            !pairConflicts(rows, resolvedSteamId, matchedBattlemetricsId)) {
+            !pairConflicts(prepared, resolvedSteamId, matchedBattlemetricsId)) {
             resolvedBattlemetricsId = matchedBattlemetricsId;
             changedFields.push('battlemetricsPlayerId');
             linkVia = 'exact-name';
@@ -157,7 +234,7 @@ function consolidateCandidates(candidates, observation) {
             .map(row => row.steamId).filter(Boolean))];
         const [matchedSteamId] = /** @type {string[]} */ (matches);
         if (!foreignBattlemetrics && matches.length === 1 && matchedSteamId &&
-            !pairConflicts(rows, matchedSteamId, resolvedBattlemetricsId)) {
+            !pairConflicts(prepared, matchedSteamId, resolvedBattlemetricsId)) {
             resolvedSteamId = matchedSteamId;
             changedFields.push('steamId');
             linkVia = 'exact-name';
@@ -168,15 +245,18 @@ function consolidateCandidates(candidates, observation) {
     }
 
     if (resolvedSteamId && resolvedBattlemetricsId &&
-        pairConflicts(rows, resolvedSteamId, resolvedBattlemetricsId)) {
+        pairConflicts(prepared, resolvedSteamId, resolvedBattlemetricsId)) {
         conflicts.push('consolidated stable identifiers conflict with local history');
         if (!original.steamId) resolvedSteamId = null;
         if (!original.battlemetricsPlayerId) resolvedBattlemetricsId = null;
     }
 
-    const stableRows = rows.filter(row =>
-        (resolvedSteamId && row.steamId === resolvedSteamId) ||
-        (resolvedBattlemetricsId && row.battlemetricsPlayerId === resolvedBattlemetricsId));
+    const stableRowIndexes = mergeRowIndexes([
+        ...(resolvedSteamId ? [prepared.rowsBySteamId.get(resolvedSteamId) || EMPTY] : []),
+        ...(resolvedBattlemetricsId ?
+            [prepared.rowsByBattlemetricsId.get(resolvedBattlemetricsId) || EMPTY] : [])
+    ]);
+    const stableRows = stableRowIndexes.map(rowIndex => rows[rowIndex]);
     if (!resolvedName && stableRows.length > 0) {
         const preferred = [...new Set(stableRows.map(row => row.preferredName).filter(Boolean))];
         const available = preferred.length > 0 ? preferred :
@@ -188,12 +268,9 @@ function consolidateCandidates(candidates, observation) {
         else if (available.length > 1) ambiguities.push('stable identifier has several equally current names');
     }
 
-    const matchedPersonIds = [...new Set(rows.filter(row =>
-        (resolvedSteamId && row.steamId === resolvedSteamId) ||
-        (resolvedBattlemetricsId && row.battlemetricsPlayerId === resolvedBattlemetricsId) ||
-        (allowExactName && exactKey && row.nameTrusted && row.nameKey === exactKey))
-        .map(row => row.personId))].sort();
-    if (!linkVia && conflicts.length === 0 && resolvedSteamId && resolvedBattlemetricsId && rows.some(row =>
+    const matchedRowIndexes = mergeRowIndexes([stableRowIndexes, exactRowIndexes]);
+    const matchedPersonIds = [...new Set(matchedRowIndexes.map(rowIndex => rows[rowIndex].personId))].sort();
+    if (!linkVia && conflicts.length === 0 && resolvedSteamId && resolvedBattlemetricsId && stableRows.some(row =>
         (row.steamId === resolvedSteamId || row.battlemetricsPlayerId === resolvedBattlemetricsId) &&
         (!row.steamId || row.steamId === resolvedSteamId) &&
         (!row.battlemetricsPlayerId || row.battlemetricsPlayerId === resolvedBattlemetricsId))) {
@@ -220,6 +297,25 @@ function consolidateCandidates(candidates, observation) {
         status: conflicts.length > 0 ? 'conflict' : ambiguities.length > 0 && changedFields.length === 0 ?
             'ambiguous' : changedFields.length > 0 ? 'enriched' : matchedPersonIds.length > 0 ? 'matched' : 'new'
     });
+}
+
+/**
+ * Prepares one immutable, indexed consolidator for repeated observations against the same candidate snapshot.
+ * Only stable-ID equality or a unique exact trusted name may fill missing fields.
+ * @param {readonly any[]} candidates
+ */
+function prepareIdentityConsolidator(candidates) {
+    const prepared = prepareCandidateIndex(candidates);
+    return Object.freeze((/** @type {any} */ observation) => consolidatePrepared(prepared, observation));
+}
+
+/**
+ * Consolidates one observation against local identity candidates. This compatibility entry point intentionally
+ * snapshots its candidates on every call; repeated callers should use prepareIdentityConsolidator().
+ * @param {readonly any[]} candidates @param {any} observation
+ */
+function consolidateCandidates(candidates, observation) {
+    return prepareIdentityConsolidator(candidates)(observation);
 }
 
 /** @param {any} projection */
@@ -251,11 +347,20 @@ function projectionCandidates(projection) {
 
 /** @param {any} projection @param {any} observation */
 function consolidateProjection(projection, observation) {
-    return consolidateCandidates(projectionCandidates(projection), observation);
+    const cacheable = projection && typeof projection === 'object' && Object.isFrozen(projection) &&
+        projection.identities && Object.isFrozen(projection.identities) &&
+        Array.isArray(projection.identities.persons) && Object.isFrozen(projection.identities.persons);
+    let consolidate = cacheable ? projectionConsolidators.get(projection) : null;
+    if (!consolidate) {
+        consolidate = prepareIdentityConsolidator(projectionCandidates(projection));
+        if (cacheable) projectionConsolidators.set(projection, consolidate);
+    }
+    return consolidate(observation);
 }
 
 module.exports = Object.freeze({
     consolidateCandidates,
     consolidateProjection,
+    prepareIdentityConsolidator,
     projectionCandidates
 });
