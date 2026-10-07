@@ -9,8 +9,8 @@ const BoundedTtlCache = require('../../util/boundedTtlCache.js');
 const RuntimeTelemetry = require('../../util/runtimeTelemetry.js');
 const Core = require('./index.js');
 
-const STATE_SCHEMA_VERSION = 4;
-const COLLECTOR_VERSION = 'player-scan-daemon-4';
+const STATE_SCHEMA_VERSION = 5;
+const COLLECTOR_VERSION = 'player-scan-daemon-5';
 const STATE_FILE = 'scan-daemon.json';
 const MAX_LOCAL_REFRESHES_PER_CYCLE = 100;
 const RESCAN_DELAY_MS = 12 * 60 * 60 * 1000;
@@ -18,6 +18,9 @@ const MANUAL_RESCAN_COOLDOWN_MS = 5 * 60 * 1000;
 const MANUAL_TRIGGER_MAX_ENTRIES = 256;
 const WARNING_TTL_MS = 60 * 60 * 1000;
 const WARNING_MAX_ENTRIES = 256;
+const RETRY_BASE_MS = 60 * 1000;
+const RETRY_MAX_MS = 60 * 60 * 1000;
+const MAX_TARGETED_RETRIES = 10000;
 const ONLINE_SOURCE = 'battlemetrics-online-wipe-daemon';
 const WARBANDITS_SOURCE = 'warbandits-current-wipe-daemon';
 const WARBANDITS_LOOKUP_SOURCE = 'warbandits-direct-lookup-daemon';
@@ -94,9 +97,12 @@ function emptyState(options, now) {
         warBanditsSweeps: 0,
         seenWarBanditsSteamIds: [],
         targetedLookupSteamIds: [],
+        targetedLookupRetries: [],
         refreshedSteamIds: [],
         profiledSteamIds: [],
         profileAttemptedSteamIds: [],
+        warBanditsRetryAt: null,
+        warBanditsFailures: 0,
         updatedAt: now.toISOString()
     };
 }
@@ -107,7 +113,7 @@ function validateState(value, options) {
         throw new TypeError('state must be an object');
     }
     const state = /** @type {any} */ (value);
-    if (![1, 2, 3, STATE_SCHEMA_VERSION].includes(state.schemaVersion) ||
+    if (![1, 2, 3, 4, STATE_SCHEMA_VERSION].includes(state.schemaVersion) ||
         `${state.guildId}` !== `${options.context.guildId}` ||
         typeof state.serverKey !== 'string' || typeof state.wipeId !== 'string' ||
         !Number.isSafeInteger(state.nextWarBanditsPage) || state.nextWarBanditsPage < 1 ||
@@ -122,9 +128,31 @@ function validateState(value, options) {
     const profiledSteamIds = state.schemaVersion < 3 ? [] : state.profiledSteamIds;
     const profileAttemptedSteamIds = state.schemaVersion < 4 ? [...profiledSteamIds] :
         state.profileAttemptedSteamIds;
+    const targetedLookupRetries = state.schemaVersion < 5 ? [] : state.targetedLookupRetries;
+    const warBanditsRetryAt = state.schemaVersion < 5 ? null : state.warBanditsRetryAt;
+    const warBanditsFailures = state.schemaVersion < 5 ? 0 : state.warBanditsFailures;
     if (!Array.isArray(targetedLookupSteamIds)) throw new TypeError('state targeted lookup set is invalid');
     if (!Array.isArray(profiledSteamIds)) throw new TypeError('state Steam profile set is invalid');
     if (!Array.isArray(profileAttemptedSteamIds)) throw new TypeError('state Steam profile attempt set is invalid');
+    if (!Array.isArray(targetedLookupRetries) || targetedLookupRetries.length > MAX_TARGETED_RETRIES) {
+        throw new TypeError('state targeted lookup retries are invalid');
+    }
+    const retryIds = new Set();
+    for (const retry of targetedLookupRetries) {
+        if (!retry || typeof retry !== 'object' || !/^7656119\d{10}$/u.test(`${retry.steamId}`) ||
+            !Number.isSafeInteger(retry.failures) || retry.failures < 1 || retry.failures > 1000 ||
+            typeof retry.nextAttemptAt !== 'string' || Number.isNaN(Date.parse(retry.nextAttemptAt)) ||
+            retryIds.has(`${retry.steamId}`)) {
+            throw new TypeError('state targeted lookup retry is invalid');
+        }
+        retryIds.add(`${retry.steamId}`);
+    }
+    if (!Number.isSafeInteger(warBanditsFailures) || warBanditsFailures < 0 || warBanditsFailures > 1000 ||
+        (warBanditsRetryAt !== null && (typeof warBanditsRetryAt !== 'string' ||
+            Number.isNaN(Date.parse(warBanditsRetryAt)))) ||
+        (warBanditsFailures === 0) !== (warBanditsRetryAt === null)) {
+        throw new TypeError('state WarBandits retry is invalid');
+    }
     for (const values of /** @type {any[][]} */ ([state.seenWarBanditsSteamIds, state.refreshedSteamIds,
         targetedLookupSteamIds, profiledSteamIds, profileAttemptedSteamIds])) {
         if (values.length > 200000 || new Set(values).size !== values.length ||
@@ -136,8 +164,30 @@ function validateState(value, options) {
     if (profiledSteamIds.some((/** @type {string} */ steamId) => !attempted.has(steamId))) {
         throw new TypeError('completed Steam profiles must also be marked attempted');
     }
-    return { ...state, schemaVersion: STATE_SCHEMA_VERSION, targetedLookupSteamIds, profiledSteamIds,
-        profileAttemptedSteamIds };
+    return { ...state, schemaVersion: STATE_SCHEMA_VERSION, targetedLookupSteamIds, targetedLookupRetries,
+        profiledSteamIds, profileAttemptedSteamIds, warBanditsRetryAt, warBanditsFailures };
+}
+
+/** @param {Date} current @param {number} failures @param {unknown} [suggested] */
+function retryAt(current, failures, suggested = null) {
+    const exponent = Math.min(16, Math.max(0, failures - 1));
+    const backoff = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (2 ** exponent));
+    const suggestedMs = typeof suggested === 'string' ? Date.parse(suggested) : Number.NaN;
+    return new Date(Math.max(current.getTime() + backoff,
+        Number.isNaN(suggestedMs) ? 0 : suggestedMs)).toISOString();
+}
+
+/** @param {Map<string,{steamId:string,failures:number,nextAttemptAt:string}>} retries @param {string} steamId
+ * @param {Date} current @param {unknown} [suggested] */
+function recordTargetedRetry(retries, steamId, current, suggested = null) {
+    const previous = retries.get(steamId);
+    if (!previous && retries.size >= MAX_TARGETED_RETRIES) {
+        const oldest = [...retries.values()].sort((left, right) =>
+            left.nextAttemptAt.localeCompare(right.nextAttemptAt) || left.steamId.localeCompare(right.steamId))[0];
+        if (oldest) retries.delete(oldest.steamId);
+    }
+    const failures = Math.min(1000, (previous ? previous.failures : 0) + 1);
+    retries.set(steamId, { steamId, failures, nextAttemptAt: retryAt(current, failures, suggested) });
 }
 
 /** @param {any} options @param {Date} now */
@@ -346,11 +396,16 @@ async function runCycle(options) {
         state.nextWarBanditsPage = 1;
         state.warBanditsResumeAt = null;
         state.targetedLookupSteamIds = [];
+        state.targetedLookupRetries = [];
         state.profileAttemptedSteamIds = [...state.profiledSteamIds];
+        state.warBanditsRetryAt = null;
+        state.warBanditsFailures = 0;
     }
     const seen = new Set(state.seenWarBanditsSteamIds);
     const refreshed = new Set(state.refreshedSteamIds);
     const targeted = new Set(state.targetedLookupSteamIds);
+    const targetedRetries = new Map(state.targetedLookupRetries.map((/** @type {any} */ retry) =>
+        [`${retry.steamId}`, { ...retry, steamId: `${retry.steamId}` }]));
     const profiled = new Set(state.profiledSteamIds);
     const profileAttempts = new Set(state.profileAttemptedSteamIds);
     const existing = await options.store.readAll();
@@ -368,6 +423,12 @@ async function runCycle(options) {
     let metricsObserved = 0;
     let steamProfilesRefreshed = 0;
     let steamProfileAttempts = 0;
+    let targetedLookupFailures = 0;
+    let warBanditsPageFailures = 0;
+    let retryChanged = forcedRescan;
+    for (const steamId of targeted) {
+        if (targetedRetries.delete(steamId)) retryChanged = true;
+    }
     const latestPlaytimes = new Map(projection.metrics.observations
         .filter(value => value.serverKey === options.scope.serverKey && value.provider === 'warbandits' &&
             value.metric === 'playtime' && value.personId.startsWith('steam:'))
@@ -474,13 +535,30 @@ async function runCycle(options) {
     const provider = options.warBanditsProvider;
     if (provider && (typeof provider.resolvePlayerRecent === 'function' ||
         typeof provider.resolvePlayer === 'function')) {
-        const [steamId] = targetedLookupCandidates(existing, projection, options.scope, targeted);
+        const blocked = new Set([...targeted, ...targetedRetries.keys()]);
+        let [steamId] = targetedLookupCandidates(existing, projection, options.scope, blocked);
+        const blockedUntilDue = new Set(targeted);
+        for (const retry of targetedRetries.values()) {
+            if (Date.parse(retry.nextAttemptAt) > current.getTime()) blockedUntilDue.add(retry.steamId);
+        }
+        if (!steamId) [steamId] = targetedLookupCandidates(existing, projection, options.scope, blockedUntilDue);
         if (steamId) {
-            const lookup = typeof provider.resolvePlayerRecent === 'function' ?
-                await provider.resolvePlayerRecent(options.context, options.scope, steamId) :
-                await provider.resolvePlayer(options.context, options.scope, steamId);
-            if (lookup && lookup.available) {
+            let lookup = null;
+            try {
+                lookup = typeof provider.resolvePlayerRecent === 'function' ?
+                    await provider.resolvePlayerRecent(options.context, options.scope, steamId) :
+                    await provider.resolvePlayer(options.context, options.scope, steamId);
+            }
+            catch (error) {
+                logWarningOnce(options.context, `warbandits-lookup:${steamId}`,
+                    `WarBandits targeted lookup paused safely for ${steamId}: ${error instanceof Error ?
+                        error.message : error}.`);
+            }
+            const lookupValid = lookup && lookup.available && (!lookup.player ||
+                `${lookup.player.steamId}` === steamId);
+            if (lookupValid) {
                 targeted.add(steamId);
+                if (targetedRetries.delete(steamId)) retryChanged = true;
                 targetedLookups = 1;
                 const player = lookup.player;
                 if (player && `${player.steamId}` === steamId) {
@@ -512,13 +590,44 @@ async function runCycle(options) {
                     observePlaytime(player, WARBANDITS_LOOKUP_SOURCE, observedAt);
                 }
             }
+            else {
+                recordTargetedRetry(targetedRetries, steamId, current,
+                    lookup && (lookup.retryAt || lookup.cooldownUntil));
+                targetedLookupFailures = 1;
+                retryChanged = true;
+            }
         }
     }
     const resumeDue = state.warBanditsResumeAt === null || Date.parse(state.warBanditsResumeAt) <= current.getTime();
+    const retryDue = state.warBanditsRetryAt === null || Date.parse(state.warBanditsRetryAt) <= current.getTime();
     let scan = null;
-    if (provider && typeof provider.scanCurrentWipePage === 'function' && resumeDue) {
-        scan = await provider.scanCurrentWipePage(options.context, options.scope, state.nextWarBanditsPage);
-        if (scan && scan.available && Array.isArray(scan.rows)) {
+    let scanSucceeded = false;
+    if (provider && typeof provider.scanCurrentWipePage === 'function' && resumeDue && retryDue) {
+        try {
+            scan = await provider.scanCurrentWipePage(options.context, options.scope, state.nextWarBanditsPage);
+        }
+        catch (error) {
+            logWarningOnce(options.context, `warbandits-page:${state.nextWarBanditsPage}`,
+                `WarBandits page ${state.nextWarBanditsPage} paused safely: ${error instanceof Error ?
+                    error.message : error}.`);
+        }
+        scanSucceeded = Boolean(scan && scan.available && Array.isArray(scan.rows) && scan.rows.length <= 100 &&
+            (scan.page === undefined || scan.page === state.nextWarBanditsPage) &&
+            ((scan.complete === true && scan.nextPage === null) ||
+                (scan.complete === false && scan.nextPage === state.nextWarBanditsPage + 1)));
+        if (scanSucceeded) {
+            if (state.warBanditsFailures > 0 || state.warBanditsRetryAt !== null) retryChanged = true;
+            state.warBanditsFailures = 0;
+            state.warBanditsRetryAt = null;
+        }
+        else {
+            state.warBanditsFailures = Math.min(1000, state.warBanditsFailures + 1);
+            state.warBanditsRetryAt = retryAt(current, state.warBanditsFailures,
+                scan && (scan.retryAt || scan.cooldownUntil));
+            warBanditsPageFailures = 1;
+            retryChanged = true;
+        }
+        if (scanSucceeded) {
             const onlineNames = uniqueOnlineNames(online);
             for (const row of scan.rows) {
                 const steamId = `${row && row.steamId || ''}`;
@@ -557,11 +666,12 @@ async function runCycle(options) {
     if (events.length > 0) await options.store.appendMany(events);
     newlySeen.forEach(value => seen.add(value));
     newlyRefreshed.forEach(value => refreshed.add(value));
-    let changed = forcedRescan || events.length > 0 || seen.size !== state.seenWarBanditsSteamIds.length ||
+    let changed = forcedRescan || retryChanged || events.length > 0 ||
+        seen.size !== state.seenWarBanditsSteamIds.length ||
         targeted.size !== state.targetedLookupSteamIds.length ||
         refreshed.size !== state.refreshedSteamIds.length || profiled.size !== state.profiledSteamIds.length ||
         profileAttempts.size !== state.profileAttemptedSteamIds.length;
-    if (scan && scan.available) {
+    if (scanSucceeded) {
         changed = true;
         if (scan.complete || scan.nextPage === null) {
             state.nextWarBanditsPage = 1;
@@ -575,6 +685,8 @@ async function runCycle(options) {
     }
     state.seenWarBanditsSteamIds = [...seen].sort();
     state.targetedLookupSteamIds = [...targeted].sort();
+    state.targetedLookupRetries = [...targetedRetries.values()].sort((left, right) =>
+        left.steamId.localeCompare(right.steamId));
     state.refreshedSteamIds = [...refreshed].sort();
     state.profiledSteamIds = [...profiled].sort();
     state.profileAttemptedSteamIds = [...profileAttempts].sort();
@@ -588,11 +700,14 @@ async function runCycle(options) {
         onlineRefreshed: newlyRefreshed.size,
         warBanditsSeen: newlySeen.size,
         targetedLookups,
+        targetedLookupFailures,
+        warBanditsPageFailures,
         metricsObserved,
         steamProfileAttempts,
         steamProfilesRefreshed,
         nextWarBanditsPage: state.nextWarBanditsPage,
-        warBanditsResumeAt: state.warBanditsResumeAt
+        warBanditsResumeAt: state.warBanditsResumeAt,
+        warBanditsRetryAt: state.warBanditsRetryAt
     });
 }
 

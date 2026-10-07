@@ -17,8 +17,8 @@ Avant toute modification :
 4. ne fais ni reset, ni checkout destructif, ni réécriture globale du worktree ;
 5. ne prétends jamais qu’un comportement fonctionne en production sur la seule base des tests locaux.
 
-État observé avant la release courante : branche master, HEAD/origin/master alignés sur `5917199`, release 1.22.35,
-et worktree propre. La release 1.22.36 borne les petits états dérivés restants sans toucher au journal.
+État observé avant la release courante : branche master, HEAD/origin/master alignés sur `562d04c`, release 1.22.36,
+et worktree propre. La release 1.22.37 rend les reprises WarBandits ciblées/pages durables et équitables.
 Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; `a308c0a` ajoute la
 1.22.27. La release suivante 1.22.28 groupe les alias pending par identité BattleMetrics et ajoute le fallback
 WarBandits courant -> intervalle historique pertinent -> all-time. La release 1.22.29 centralise toute consolidation
@@ -37,13 +37,15 @@ La release 1.22.35 plafonne et expire par LRU les caches Steam, BattleMetrics, W
 de sérialisation OCR réglées sans altérer l'ordre des écritures.
 La release 1.22.36 plafonne les hooks, cooldowns/avertissements du daemon et sélecteurs `/track` abandonnés ; les
 longues concaténations d'identités deviennent des SHA-256 fixes.
+La release 1.22.37 sert les nouveaux SteamID avant les retries dus, applique un backoff persisté et n'avance jamais
+une page WarBandits qui a échoué.
 La première conserve les identifiants de ligne TSV
 Tesseract pour empêcher un pseudo /cinfo replié (U Got Kirkified) d’absorber Established, accepte la confusion l/I/1
 uniquement dans l’ancre et garde une date illisible éditable avec Confirm désactivé. La seconde ajoute la
 réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
 d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La suivante borne les délais de réponse
 Discord/traduction et la dernière fiabilise la sémantique des identités connues et des wipes WarBandits. La dernière
-validation complète a passé 297/297 tests et tsc --noEmit ; le déploiement et la
+validation complète a passé 301/301 tests et tsc --noEmit ; le déploiement et la
 nouvelle capture Discord restent à valider réellement.
 
 Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
@@ -62,8 +64,8 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 - Dépôt : `rustplusplus-plugins`.
 - Branche au moment de la passation : `master`.
-- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur `5917199`, release `1.22.35`, avant la release courante.
-- Version canonique du worktree : `1.22.36` dans `package.json` et `package-lock.json`.
+- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur `562d04c`, release `1.22.36`, avant la release courante.
+- Version canonique du worktree : `1.22.37` dans `package.json` et `package-lock.json`.
 - Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
   métrique d’heures WarBandits.
 - Le commit utilisateur `d327e7d` regroupe les releases `1.22.24` à `1.22.26`, notamment dans :
@@ -154,12 +156,29 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
   - les tests runtime, daemon et player-tracker associés ;
   - l'inventaire et le plan des caches runtime.
 
+- La release `1.22.37` ajoute la reprise durable WarBandits, notamment dans :
+
+  - le checkpoint schema 5 de `src/plugins/playerIntelligence/scanDaemon.js` ;
+  - les tests de file ciblée fresh-first, backoff, exceptions et curseur de page ;
+  - le plan runtime et l'étude player-intelligence.
+
 - Il ne reste qu'une branche locale `master`. Les deux anciennes branches `origin/codex/*`, déjà entièrement intégrées,
   ont été supprimées ; le suivi de l'amont est limité à `upstream/master`, avec pruning automatique des références.
 
 Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
 
-## Dernière correction : release 1.22.36
+## Dernière correction : release 1.22.37
+
+Le checkpoint daemon schema 5 ajoute une liste bornée de retries ciblés et un retry de page séparé. Le backoff
+double de une minute à une heure. Les IDs jamais tentés ont priorité sur tous les retries, même déjà dus ; un échec
+persistant ne peut donc plus rester en tête de la file. Un succès retire son retry.
+
+Les exceptions du lookup ciblé et de la page sont isolées. Les événements Steam/local produits avant elles restent
+appendus, la page en échec garde son numéro et reprend seulement après son backoff. Une page `available` mal formée ou
+un joueur d'un autre SteamID échouent fermés. Aucun checkpoint ne constitue une preuve de présence. Les schemas 1 à 4
+sont migrés en mémoire puis réécrits atomiquement.
+
+## Correction précédente : release 1.22.36
 
 Les états de hook sont plafonnés à 128 répertoires et expirent après 24 heures sans poll calme correspondant. Les
 listes tracker/héritées triées sont réduites à deux SHA-256 fixes. Après expiration, le replay du journal ne crée
@@ -364,9 +383,9 @@ inventer ni commiter silencieusement.
 
 ## Validation déjà effectuée
 
-Le 7 octobre 2026, après la release 1.22.36 :
+Le 7 octobre 2026, après la release 1.22.37 :
 
-- `npm.cmd test` : `297/297` tests unitaires réussis ;
+- `npm.cmd test` : `301/301` tests unitaires réussis ;
 - `tsc --noEmit -p .` : réussi dans la même commande ;
 - `git diff --check` : aucune erreur ;
 - `npm.cmd run test:autotranslate:live` : réussi en 8,9 s pour six scénarios cumulés ; Bing a atteint sa borne de deux
@@ -380,7 +399,7 @@ Le 7 octobre 2026, après la release 1.22.36 :
   conflits/ambiguïtés fermés, alias Steam courants/passés vérifiés, cardinalité de télémétrie fermée,
   isolement des sources de métriques, spans inter-fenêtres, acquittement `/runtime` avant autorisation/lecture,
   expiration absolue/LRU et plafonds des caches Steam, BattleMetrics, WarBandits/OCR, des hooks, du daemon et des
-  sélecteurs player-tracker.
+  sélecteurs player-tracker, reprise fresh-first et curseur WarBandits épinglé sur erreur.
 
 Ces résultats ne prouvent ni le comportement du binaire Tesseract installé sur Linux, ni le téléchargement Discord, ni
 les fournisseurs externes, ni le processus de déploiement.
@@ -463,7 +482,7 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
 
 ## Vérifications de production encore ouvertes
 
-1. Déployer/redémarrer `1.22.36`, vérifier le message `RUSTPLUS v1.22.36 OPERATIONAL`, puis rejouer le lot de 11
+1. Déployer/redémarrer `1.22.37`, vérifier le message `RUSTPLUS v1.22.37 OPERATIONAL`, puis rejouer le lot de 11
    SteamID. Mesurer temps de réponse, RSS et heap avant/après ; exiger les noms locaux connus et aucun Replace/Keep.
    Après une fenêtre, contrôler `/runtime`, `RUNTIME`, `RUNTIME_WORK` et les éventuels `RUNTIME_SLOW`, sans donnée joueur.
 2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent

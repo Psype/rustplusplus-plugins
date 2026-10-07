@@ -849,7 +849,7 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale la plus récente après bornage des états dérivés : `npm.cmd test` passe 297/297 le 7 octobre 2026,
+QA locale la plus récente après reprise durable WarBandits : `npm.cmd test` passe 301/301 le 7 octobre 2026,
 dont le typage strict `tsc --noEmit`. Une
 couverture déterministe reproduit la mauvaise attribution `』Marley』`/`Swizzy`, vérifie le découpage relatif aux
 virgules, la fusion `n444shj, spirit_monger19`, le rejet des comptes/doublons manuels et l'absence d'apprentissage avant
@@ -892,6 +892,13 @@ deux SHA-256 fixes dans un cache de 128 répertoires, renouvelé sur activité c
 Les cooldowns/avertissements du daemon sont plafonnés à 256. Les candidats d'un sélecteur `/track` disparaissent à
 cinq minutes ; un avis minimal borné conserve le message d'expiration pendant 24 heures. Un replay après expiration de
 hook est couvert comme idempotent et n'ajoute aucune preuve au journal.
+
+La release 1.22.37 passe le checkpoint du daemon au schema 5. Un lookup WarBandits ciblé indisponible reçoit un
+backoff exponentiel persisté ; tous les IDs jamais tentés passent avant les retries dus. Une page indisponible garde
+son curseur et un backoff distinct. Les exceptions fournisseur sont isolées avant l'append final, ce qui conserve le
+travail Steam/local déjà calculé. La migration des schemas 1–4 garde les ensembles collectés, et aucune panne fournisseur
+n'est convertie en preuve de présence. Une page `available` mal formée et un SteamID retourné différent de la requête
+restent des échecs retryables ; ils ne valident ni l'ID ni le curseur.
 
 Scénario reproductible `npm run benchmark:player-intelligence` : roster initial de 200 joueurs, 60 polls silencieux,
 puis 10 déconnexions. Le premier profilage lisait/reprojetait le journal à chaque poll silencieux : `25,397 ms/poll`.

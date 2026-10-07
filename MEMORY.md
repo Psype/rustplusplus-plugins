@@ -34,11 +34,12 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   command. Release `1.22.35` adds one reusable absolute-TTL/LRU cache and bounds rebuildable Steam, BattleMetrics,
   WarBandits and OCR documents; settled OCR serialization tails are released without changing write ordering.
   Release `1.22.36` bounds hook fingerprints, daemon cooldown/warning state and abandoned player-tracker selectors.
-  At the latest completed release audit, `master`, `origin/master` and `origin/HEAD` were aligned on `1.22.35`
-  (`5917199`) immediately before this release; `1.22.36` is the current release. Only `master` plus the useful
+  Release `1.22.37` adds persistent fresh-first retries for targeted WarBandits lookups and page failures without
+  advancing a failed page. At the latest completed release audit, `master`, `origin/master` and `origin/HEAD` were
+  aligned on `1.22.36` (`562d04c`) immediately before this release; `1.22.37` is the current release. Only `master` plus the useful
   `origin/master`/`upstream/master` remote-tracking references remained. Do not reset, overwrite, reimplement or
   discard these changes. Re-audit `git status --short` and `git diff` if the observed state differs.
-- Canonical package version is `1.22.36`. The complete local validation on 2026-10-07 passed `297/297` unit tests and
+- Canonical package version is `1.22.37`. The complete local validation on 2026-10-07 passed `301/301` unit tests and
   `tsc --noEmit`; `git diff --check` was clean. This is local deterministic evidence only. Deployment/restart and a
   new Discord import of the reported KIRK screenshot, the SteamID latency/memory improvement and `/runtime` production
   metrics remain unconfirmed, so do not claim production success.
@@ -285,6 +286,12 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   1,024 full selectors for five minutes plus 1 ms at the exact boundary, then only a 1,024-entry minimal expiry notice
   for 24 hours so `Selection expired` remains available without retaining candidate arrays. A successful selection
   removes both records.
+- Release `1.22.37` upgrades the scan-daemon checkpoint to schema 5. Targeted WarBandits failures retain only SteamID,
+  failure count and next-attempt timestamp, with exponential backoff from one minute to one hour and a 10,000-entry
+  cap. Never-attempted IDs always run before due retries, preventing a persistently failing low-sorted ID from
+  starving later imports. Page failures have a separate persisted backoff and never advance `nextWarBanditsPage`.
+  Lookup/page exceptions are isolated so already-produced Steam/local events still append and checkpoint. Provider
+  failures still create no presence evidence. Schema 1–4 checkpoints migrate without deleting collected ID sets.
 - Release `1.22.27` makes `/intel` call Discord's ephemeral `deferReply()` before logging, context loading, permission
   work or player-intelligence journal reads. The command remains administrator-only; this removes local processing
   from Discord's initial response window. AutoTranslate now allows at most two seconds per provider and five seconds
@@ -408,6 +415,10 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 - Superseding QA for release `1.22.36` on 2026-10-07: `npm.cmd test` passes 297/297 including `tsc --noEmit`, and
   `git diff --check` is clean. Coverage proves hook TTL renewal/idempotent rebuild, exact daemon cooldown expiry,
   requester-scoped selector expiration, 1,025-to-1,024 eviction and expiry-notice cleanup.
+- Superseding QA for release `1.22.37` on 2026-10-07: `npm.cmd test` passes 301/301 including `tsc --noEmit`, and
+  `git diff --check` is clean. Coverage proves fresh-first retry fairness, due retry recovery, schema-1 migration,
+  non-trivial schema-4 migration, page-cursor pinning through exceptions/malformed success, preservation of local work,
+  rejection of a mismatched returned SteamID and absence of inferred presence.
 - Performance check for `1.22.3`: the dedicated glyph benchmark recalls the target among 2,000 aliases with 104 stored
   glyph variants and eight graphemes in a 20.797 ms median. The existing 200-player pipeline measured before/after at
   41.702/39.357 ms initial load, 0.044/0.030 ms quiet-poll mean and 51.356/50.742 ms for ten transitions; no measured

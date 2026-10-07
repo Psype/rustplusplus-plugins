@@ -144,17 +144,31 @@ Résultat local : les hooks retiennent au plus 128 états de taille fixe et rejo
 expiration. Les cooldowns/avertissements sont plafonnés à 256. Les 1 024 sélections expirent à cinq minutes ; un
 avis minimal borné conserve le message `expired` pendant 24 heures sans garder les candidats.
 
-### Lot 6 — Équité et reprise du daemon
+### Lot 6a — Reprise durable WarBandits — release 1.22.37
 
-Statut : planifié.
+Statut : implémenté et validé localement ; déploiement à vérifier.
 
-1. Séparer les files Steam, WarBandits et enrichissement local.
-2. Borner le travail et le temps par tick.
-3. Faire progresser le curseur après timeout/erreur et programmer un retry avec backoff.
-4. Empêcher deux ticks BattleMetrics de se chevaucher.
-5. Persister seulement les checkpoints nécessaires à la reprise.
+1. Checkpointer les lookups ciblés indisponibles avec backoff exponentiel de 1 à 60 minutes.
+2. Servir tous les SteamID jamais tentés avant de reprendre les retries dus.
+3. Isoler les exceptions lookup/page afin de conserver le travail Steam/local du cycle.
+4. Épingler une page WarBandits en échec et la reprendre après backoff, sans avancer le curseur.
+5. Migrer atomiquement le checkpoint schema 1–4 vers le schema 5 sans perdre les ensembles collectés.
 
 Critères : un fournisseur lent ne bloque ni les autres IDs ni Discord ; chaque file progresse de façon observable.
+
+Résultat local : A indisponible est checkpointé, B est servi au tick suivant même quand A est déjà redevenu dû,
+puis A reprend une fois les nouveaux IDs épuisés. Une exception lookup/page conserve les événements locaux et la
+page fautive ; une réponse `available` mal formée échoue aussi sans avancer. Aucun événement de présence n'est créé.
+
+### Lot 6b — Bornes temporelles et files fournisseurs
+
+Statut : planifié comme sous-lot séparé.
+
+1. Rendre le retry automatique des profils Steam incomplets/indisponibles, sans rescan manuel.
+2. Séparer l'exécution Steam du pipeline WarBandits sans ouvrir deux cycles pour un même répertoire.
+3. Ajouter des budgets/annulations aux frontières fournisseurs et des compteurs de progression par file.
+
+Critères : durée de cycle bornée, aucun ID en famine et checkpoints suffisants pour reprendre après redémarrage.
 
 ### Lot 7 — Priorité interactive et travail en arrière-plan
 
