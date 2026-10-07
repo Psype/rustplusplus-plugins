@@ -4,6 +4,7 @@
 const Crypto = require('node:crypto');
 const Fs = require('node:fs');
 const Path = require('node:path');
+const Performance = require('node:perf_hooks').performance;
 
 const BoundedTtlCache = require('../../util/boundedTtlCache.js');
 const RuntimeTelemetry = require('../../util/runtimeTelemetry.js');
@@ -11,7 +12,7 @@ const Core = require('./index.js');
 const PendingReconciler = require('./pendingReconciler.js');
 
 const STATE_SCHEMA_VERSION = 7;
-const COLLECTOR_VERSION = 'player-scan-daemon-7';
+const COLLECTOR_VERSION = 'player-scan-daemon-8';
 const STATE_FILE = 'scan-daemon.json';
 const MAX_LOCAL_REFRESHES_PER_CYCLE = 100;
 const RESCAN_DELAY_MS = 12 * 60 * 60 * 1000;
@@ -24,6 +25,9 @@ const RETRY_MAX_MS = 60 * 60 * 1000;
 const MAX_TARGETED_RETRIES = 10000;
 const MAX_STEAM_PROFILE_RETRIES = 10000;
 const FRESH_BURST_LIMIT = 2;
+const PENDING_BATTLEMETRICS_BATCH_SIZE = 4;
+const PENDING_WARBANDITS_BATCH_SIZE = 1;
+const PENDING_RECONCILIATION_BUDGET_MS = 20 * 1000;
 const ONLINE_SOURCE = 'battlemetrics-online-wipe-daemon';
 const WARBANDITS_SOURCE = 'warbandits-current-wipe-daemon';
 const WARBANDITS_LOOKUP_SOURCE = 'warbandits-direct-lookup-daemon';
@@ -502,8 +506,26 @@ async function runCycle(options) {
     let pendingIdentitiesLinked = 0;
     let pendingReconciliationCompleted = false;
     const newlyLinkedPairs = new Set();
+    const cycleBattlemetricsBySteamId = new Map();
+    const cycleSteamByBattlemetricsId = new Map();
     let retryChanged = forcedRescan;
     let reconciliationChanged = forcedRescan;
+
+    /** @param {string|null} steamId @param {string|null} battlemetricsPlayerId */
+    function cyclePairConflicts(steamId, battlemetricsPlayerId) {
+        if (!steamId || !battlemetricsPlayerId) return false;
+        const knownBattlemetricsId = cycleBattlemetricsBySteamId.get(steamId);
+        const knownSteamId = cycleSteamByBattlemetricsId.get(battlemetricsPlayerId);
+        return Boolean((knownBattlemetricsId && knownBattlemetricsId !== battlemetricsPlayerId) ||
+            (knownSteamId && knownSteamId !== steamId));
+    }
+
+    /** @param {string|null} steamId @param {string|null} battlemetricsPlayerId */
+    function rememberCyclePair(steamId, battlemetricsPlayerId) {
+        if (!steamId || !battlemetricsPlayerId) return;
+        cycleBattlemetricsBySteamId.set(steamId, battlemetricsPlayerId);
+        cycleSteamByBattlemetricsId.set(battlemetricsPlayerId, steamId);
+    }
     for (const steamId of targeted) {
         if (targetedRetries.delete(steamId)) retryChanged = true;
     }
@@ -559,17 +581,23 @@ async function runCycle(options) {
             pendingWarBanditsRetries.delete(candidate.key);
         }
     };
-    let pendingCampaignAttempted = false;
+    const pendingClock = typeof dependencies.monotonicNow === 'function' ?
+        dependencies.monotonicNow : () => Performance.now();
+    const pendingStartedAt = Number(pendingClock());
+    const pendingBudgetAvailable = () => {
+        const elapsed = Number(pendingClock()) - pendingStartedAt;
+        return Number.isFinite(elapsed) && elapsed >= 0 && elapsed < PENDING_RECONCILIATION_BUDGET_MS;
+    };
 
     if (reconciliation.active && battlemetricsEnabled && pendingBattlemetricsReady) {
-        const selection = PendingReconciler.selectWork(
-            pendingBattlemetricsCandidates, checkedBattlemetricsIds,
-            battlemetricsRetries, 'battlemetricsPlayerId', current, reconciliation.battlemetricsFreshStreak);
-        const candidate = selection.candidate;
-        if (candidate) {
+        for (let attempt = 0; attempt < PENDING_BATTLEMETRICS_BATCH_SIZE && pendingBudgetAvailable(); attempt += 1) {
+            const selection = PendingReconciler.selectWork(
+                pendingBattlemetricsCandidates, checkedBattlemetricsIds,
+                battlemetricsRetries, 'battlemetricsPlayerId', current, reconciliation.battlemetricsFreshStreak);
+            const candidate = selection.candidate;
+            if (!candidate) break;
             reconciliation.battlemetricsFreshStreak = selection.nextFreshStreak;
-            pendingBattlemetricsAttempts = 1;
-            pendingCampaignAttempted = true;
+            pendingBattlemetricsAttempts += 1;
             reconciliationChanged = true;
             let result = null;
             try {
@@ -598,10 +626,12 @@ async function runCycle(options) {
                 checkedBattlemetricsIds.add(candidate.battlemetricsPlayerId);
                 battlemetricsRetries.delete(candidate.battlemetricsPlayerId);
                 finishWarBanditsPerson(candidate.personId);
-                if (consolidated.status === 'conflict') {
+                if (consolidated.status === 'conflict' ||
+                    cyclePairConflicts(steamId, candidate.battlemetricsPlayerId)) {
                     reconciliation.conflicts += 1;
                 }
                 else {
+                    rememberCyclePair(steamId, candidate.battlemetricsPlayerId);
                     events.push(identityEvent(options.scope, {
                         steamId, battlemetricsPlayerId: candidate.battlemetricsPlayerId, name: null
                     }, {
@@ -631,18 +661,20 @@ async function runCycle(options) {
                     reconciliation.battlemetricsFailures + 1);
                 reconciliation.battlemetricsRetryAt = retryAt(current,
                     reconciliation.battlemetricsFailures, result && result.retryAt);
+                break;
             }
         }
     }
 
-    if (reconciliation.active && warBanditsLookupEnabled && pendingWarBanditsReady && !pendingCampaignAttempted) {
-        const candidates = warBanditsCandidates();
-        const selection = PendingReconciler.selectWork(candidates, checkedWarBanditsKeys,
-            pendingWarBanditsRetries, 'key', current, reconciliation.warBanditsFreshStreak);
-        const candidate = selection.candidate;
-        if (candidate) {
+    if (reconciliation.active && warBanditsLookupEnabled && pendingWarBanditsReady) {
+        for (let attempt = 0; attempt < PENDING_WARBANDITS_BATCH_SIZE && pendingBudgetAvailable(); attempt += 1) {
+            const candidates = warBanditsCandidates();
+            const selection = PendingReconciler.selectWork(candidates, checkedWarBanditsKeys,
+                pendingWarBanditsRetries, 'key', current, reconciliation.warBanditsFreshStreak);
+            const candidate = selection.candidate;
+            if (!candidate) break;
             reconciliation.warBanditsFreshStreak = selection.nextFreshStreak;
-            pendingWarBanditsAttempts = 1;
+            pendingWarBanditsAttempts += 1;
             reconciliationChanged = true;
             let result = null;
             try {
@@ -671,13 +703,15 @@ async function runCycle(options) {
                     checkedBattlemetricsIds.add(candidate.battlemetricsPlayerId);
                     battlemetricsRetries.delete(candidate.battlemetricsPlayerId);
                 }
-                if (consolidated.status === 'conflict') {
+                if (consolidated.status === 'conflict' ||
+                    cyclePairConflicts(steamId, candidate.battlemetricsPlayerId)) {
                     finishWarBanditsPerson(candidate.personId);
                     reconciliation.conflicts += 1;
                 }
                 else {
                     finishWarBanditsPerson(candidate.personId);
                     if (candidate.battlemetricsPlayerId) {
+                        rememberCyclePair(steamId, candidate.battlemetricsPlayerId);
                         events.push(identityEvent(options.scope, {
                             steamId, battlemetricsPlayerId: candidate.battlemetricsPlayerId, name: null
                         }, {
@@ -726,6 +760,7 @@ async function runCycle(options) {
                 reconciliation.warBanditsFailures = Math.min(1000, reconciliation.warBanditsFailures + 1);
                 reconciliation.warBanditsRetryAt = retryAt(current, reconciliation.warBanditsFailures,
                     result && (result.retryAt || result.cooldownUntil));
+                break;
             }
         }
     }
@@ -827,6 +862,8 @@ async function runCycle(options) {
 
     for (const match of onlineSteamMatches(projection, online)) {
         if (events.length >= MAX_LOCAL_REFRESHES_PER_CYCLE || refreshed.has(match.steamId)) continue;
+        if (cyclePairConflicts(match.steamId, match.battlemetricsPlayerId)) continue;
+        rememberCyclePair(match.steamId, match.battlemetricsPlayerId);
         events.push(identityEvent(options.scope, match, {
             guildId: options.context.guildId,
             observedAt: canonicalIso(options.scope.battlemetrics.updatedAt) || recordedAt,
@@ -885,11 +922,22 @@ async function runCycle(options) {
                         let consolidated = Core.consolidateProjection(projection, {
                             steamId, battlemetricsPlayerId: liveBattlemetricsPlayerId, name, caseFidelity: true
                         });
-                        if (consolidated.status === 'conflict') {
+                        if (consolidated.status === 'conflict' || cyclePairConflicts(
+                            consolidated.identity.steamId, consolidated.identity.battlemetricsPlayerId)) {
                             consolidated = Core.consolidateProjection(projection, {
                                 steamId, battlemetricsPlayerId: null, name,
                                 caseFidelity: true, allowExactName: false
                             });
+                        }
+                        if (!cyclePairConflicts(consolidated.identity.steamId,
+                            consolidated.identity.battlemetricsPlayerId)) {
+                            rememberCyclePair(consolidated.identity.steamId,
+                                consolidated.identity.battlemetricsPlayerId);
+                        }
+                        else {
+                            consolidated = { ...consolidated, identity: {
+                                ...consolidated.identity, battlemetricsPlayerId: null
+                            } };
                         }
                         events.push(identityEvent(options.scope, consolidated.identity, {
                             guildId: options.context.guildId,
@@ -956,11 +1004,22 @@ async function runCycle(options) {
                     let consolidated = Core.consolidateProjection(projection, {
                         steamId, battlemetricsPlayerId: liveBattlemetricsPlayerId, name, caseFidelity: true
                     });
-                    if (consolidated.status === 'conflict') {
+                    if (consolidated.status === 'conflict' || cyclePairConflicts(
+                        consolidated.identity.steamId, consolidated.identity.battlemetricsPlayerId)) {
                         consolidated = Core.consolidateProjection(projection, {
                             steamId, battlemetricsPlayerId: null, name,
                             caseFidelity: true, allowExactName: false
                         });
+                    }
+                    if (!cyclePairConflicts(consolidated.identity.steamId,
+                        consolidated.identity.battlemetricsPlayerId)) {
+                        rememberCyclePair(consolidated.identity.steamId,
+                            consolidated.identity.battlemetricsPlayerId);
+                    }
+                    else {
+                        consolidated = { ...consolidated, identity: {
+                            ...consolidated.identity, battlemetricsPlayerId: null
+                        } };
                     }
                     const battlemetricsPlayerId = consolidated.identity.battlemetricsPlayerId;
                     const pairKey = battlemetricsPlayerId ? `${steamId}\u0000${battlemetricsPlayerId}` : null;
@@ -1153,6 +1212,9 @@ function resetRuntimeCachesForTests() {
 module.exports = Object.freeze({
     ONLINE_SOURCE,
     MANUAL_RESCAN_COOLDOWN_MS,
+    PENDING_BATTLEMETRICS_BATCH_SIZE,
+    PENDING_RECONCILIATION_BUDGET_MS,
+    PENDING_WARBANDITS_BATCH_SIZE,
     ScanDaemonStateError,
     WARBANDITS_SOURCE,
     WARBANDITS_LOOKUP_SOURCE,

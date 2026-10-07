@@ -38,11 +38,14 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   advancing a failed page. Release `1.22.38` adds persistent Steam-profile retries and bounded fairness between fresh
   IDs and due retries in both enrichment lanes. Release `1.22.39` combines `!scanplayers` with a manually triggered,
   restart-safe pending-identity reconciliation campaign; it tries BattleMetrics IDs first and accepts only exact
-  WarBandits API aliases as fallback. At the latest completed release audit, `master`, `origin/master` and
-  `origin/HEAD` were aligned on `1.22.38` (`ebf0e7c`) immediately before this release; `1.22.39` is the current release. Only `master` plus the useful
+  WarBandits API aliases as fallback. Release `1.22.40` drains that campaign in bounded batches of four direct
+  BattleMetrics resolutions plus one exact WarBandits fallback per polling tick, with a 20-second admission budget;
+  confirmed non-duplicate clan sightings determine priority before recency. At the latest completed release audit,
+  `master`, `origin/master` and `origin/HEAD` were aligned on `1.22.39` (`680612c`) immediately before this release;
+  `1.22.40` is the current release. Only `master` plus the useful
   `origin/master`/`upstream/master` remote-tracking references remained. Do not reset, overwrite, reimplement or
   discard these changes. Re-audit `git status --short` and `git diff` if the observed state differs.
-- Canonical package version is `1.22.39`. The complete local validation on 2026-10-07 passed `313/313` unit tests and
+- Canonical package version is `1.22.40`. The complete local validation on 2026-10-07 passed `317/317` unit tests and
   `tsc --noEmit`; `git diff --check` was clean. This is local deterministic evidence only. Deployment/restart and a
   new Discord import of the reported KIRK screenshot, the SteamID latency/memory improvement and `/runtime` production
   metrics remain unconfirmed, so do not claim production success.
@@ -313,6 +316,12 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   BM→Steam link consolidates the identity but does not retroactively verify its OCR name. Name verification now uses
   an explicit trusted-source allowlist, so a `discord-cinfo` name stays unverified even when its event already carries
   a SteamID. Campaign events never imply presence.
+- Release `1.22.40` increases only the manually started pending campaign's bounded drain rate: each minute admits at
+  most four direct BattleMetrics resolutions and one exact WarBandits fallback, and stops admitting new calls after
+  20 seconds. The first provider failure ends that provider's batch and activates the existing durable cooldown. Both
+  lanes prioritize the count of distinct confirmed, non-duplicate clan snapshots, then observation recency; duplicate
+  or unconfirmed screenshots add no priority and the ordering never relaxes exact/conflict-safe matching. State schema
+  7 remains compatible, the collector provenance advances to `player-scan-daemon-8`, and no presence is inferred.
 - Release `1.22.27` makes `/intel` call Discord's ephemeral `deferReply()` before logging, context loading, permission
   work or player-intelligence journal reads. The command remains administrator-only; this removes local processing
   from Discord's initial response window. AutoTranslate now allows at most two seconds per provider and five seconds
@@ -448,6 +457,10 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   `git diff --check` is clean. Coverage proves manual-only activation, bounded BM-first processing, exact recent
   WarBandits fallback, non-promotion of OCR aliases, durable global provider cooldown, wipe-safe continuation and
   absence of inferred presence.
+- Superseding QA for release `1.22.40` on 2026-10-07: `npm.cmd test` passes 317/317 including `tsc --noEmit`, and
+  `git diff --check` is clean. Coverage proves the four-item BattleMetrics batch bound, 20-second admission budget,
+  same-cycle exact WarBandits fallback, fail-fast provider cooldown, rejection of stable-ID conflicts inside a batch,
+  and priority from confirmed non-duplicate clan snapshots only.
 - Performance check for `1.22.3`: the dedicated glyph benchmark recalls the target among 2,000 aliases with 104 stored
   glyph variants and eight graphemes in a 20.797 ms median. The existing 200-player pipeline measured before/after at
   41.702/39.357 ms initial load, 0.044/0.030 ms quiet-poll mean and 51.356/50.742 ms for ten transitions; no measured

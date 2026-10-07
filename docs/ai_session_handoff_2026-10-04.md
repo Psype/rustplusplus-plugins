@@ -17,9 +17,10 @@ Avant toute modification :
 4. ne fais ni reset, ni checkout destructif, ni réécriture globale du worktree ;
 5. ne prétends jamais qu’un comportement fonctionne en production sur la seule base des tests locaux.
 
-État observé avant la release courante : branche master, HEAD/origin/master alignés sur `ebf0e7c`, release 1.22.38,
-et worktree propre. La release 1.22.39 combine `!scanplayers` avec une campagne manuelle et durable de réconciliation
-des identités pending, sans déclenchement automatique au wipe ou selon un calendrier.
+État observé avant la release courante : branche master, HEAD/origin/master alignés sur `680612c`, release 1.22.39,
+et worktree propre. La release 1.22.40 traite la campagne manuelle et durable lancée par `!scanplayers` en lots bornés,
+sans déclenchement automatique au wipe ou selon un calendrier, et priorise les identités vues dans des captures de
+clan confirmées/non dupliquées.
 Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; `a308c0a` ajoute la
 1.22.27. La release suivante 1.22.28 groupe les alias pending par identité BattleMetrics et ajoute le fallback
 WarBandits courant -> intervalle historique pertinent -> all-time. La release 1.22.29 centralise toute consolidation
@@ -44,13 +45,15 @@ La release 1.22.38 migre les tentatives Steam incomplètes vers des retries pers
 d'une réponse partielle et sert au plus deux nouveaux IDs avant un retry dû dans chaque file.
 La release 1.22.39 essaie les BattleMetrics IDs pending avant un repli WarBandits strictement exact, persiste sa
 progression/cooldowns et ne transforme jamais une lecture OCR en alias vérifié sans preuve Steam/API.
+La release 1.22.40 admet par tick jusqu'à quatre résolutions BattleMetrics et un repli WarBandits exact, sous un budget
+d'admission de 20 secondes et avec arrêt du fournisseur à sa première panne.
 La première conserve les identifiants de ligne TSV
 Tesseract pour empêcher un pseudo /cinfo replié (U Got Kirkified) d’absorber Established, accepte la confusion l/I/1
 uniquement dans l’ancre et garde une date illisible éditable avec Confirm désactivé. La seconde ajoute la
 réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
 d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La suivante borne les délais de réponse
 Discord/traduction et la dernière fiabilise la sémantique des identités connues et des wipes WarBandits. La dernière
-validation complète a passé 313/313 tests et tsc --noEmit ; le déploiement et la
+validation complète a passé 317/317 tests et tsc --noEmit ; le déploiement et la
 nouvelle capture Discord restent à valider réellement.
 
 Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
@@ -69,8 +72,8 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 - Dépôt : `rustplusplus-plugins`.
 - Branche au moment de la passation : `master`.
-- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur `ebf0e7c`, release `1.22.38`, avant la release courante.
-- Version canonique du worktree : `1.22.39` dans `package.json` et `package-lock.json`.
+- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur `680612c`, release `1.22.39`, avant la release courante.
+- Version canonique du worktree : `1.22.40` dans `package.json` et `package-lock.json`.
 - Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
   métrique d’heures WarBandits.
 - Le commit utilisateur `d327e7d` regroupe les releases `1.22.24` à `1.22.26`, notamment dans :
@@ -186,7 +189,16 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
 
-## Dernière correction : release 1.22.39
+## Dernière correction : release 1.22.40
+
+La campagne pending reste inactive tant que l'opérateur ne lance pas `!scanplayers`. Une fois active, chaque tick
+admet au plus quatre résolutions directes BattleMetrics et un repli WarBandits exact, sans ouvrir de nouvel appel après
+20 secondes. La première panne interrompt le lot du fournisseur concerné et réutilise son cooldown durable. Dans
+chaque file, le nombre de captures de clan confirmées et non dupliquées passe avant la récence ; une capture probable
+ou dupliquée ne donne aucune priorité et ce tri ne rend jamais la correspondance plus permissive. Le schema 7 reste
+compatible et aucun événement de présence n'est créé.
+
+### Correction précédente : release 1.22.39
 
 Le checkpoint daemon schema 7 ajoute une campagne de réconciliation inactive par défaut. `!scanplayers` est son seul
 déclencheur ; le changement de wipe ne lance rien et conserve seulement une campagne déjà demandée. Une identité est
@@ -424,9 +436,9 @@ inventer ni commiter silencieusement.
 
 ## Validation déjà effectuée
 
-Le 7 octobre 2026, après la release 1.22.39 :
+Le 7 octobre 2026, après la release 1.22.40 :
 
-- `npm.cmd test` : `313/313` tests unitaires réussis ;
+- `npm.cmd test` : `317/317` tests unitaires réussis ;
 - `tsc --noEmit -p .` : réussi dans la même commande ;
 - `git diff --check` : aucune erreur ;
 - `npm.cmd run test:autotranslate:live` : réussi en 8,9 s pour six scénarios cumulés ; Bing a atteint sa borne de deux
@@ -525,7 +537,7 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
 
 ## Vérifications de production encore ouvertes
 
-1. Déployer/redémarrer `1.22.39`, vérifier le message `RUSTPLUS v1.22.39 OPERATIONAL`, puis rejouer le lot de 11
+1. Déployer/redémarrer `1.22.40`, vérifier le message `RUSTPLUS v1.22.40 OPERATIONAL`, puis rejouer le lot de 11
    SteamID. Mesurer temps de réponse, RSS et heap avant/après ; exiger les noms locaux connus et aucun Replace/Keep.
    Après une fenêtre, contrôler `/runtime`, `RUNTIME`, `RUNTIME_WORK` et les éventuels `RUNTIME_SLOW`, sans donnée joueur.
 2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent
@@ -535,7 +547,9 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
    l'enrichissement WarBandits, les heures comme borne basse et `!scanplayers` sans inférence de présence. Laisser
    ensuite un profil Steam indisponible reprendre automatiquement après une minute, sans rescan manuel. Choisir un
    moment où les pseudos sont stables, lancer une seule fois `!scanplayers`, puis vérifier que `/intel pending` baisse
-   progressivement sans nouvelle commande, y compris après un redémarrage. Aucun wipe ne doit lancer cette campagne.
+   progressivement sans nouvelle commande, y compris après un redémarrage. Vérifier dans les logs/compteurs que les
+   profils vus dans plusieurs captures de clan passent d'abord et que les erreurs fournisseur suspendent leur lot.
+   Aucun wipe ne doit lancer cette campagne.
 4. Le transport raid/Pair FCM reste non prouvé côté Facepunch malgré une authentification MCS acceptée. Suivre
    `docs/fcm_transport_audit_2026-09-23.md`; `!raidtest` ne valide que la sortie Rust chat.
 5. Continuer à constituer un corpus de PNG originaux variés avant toute affirmation de précision OCR générale ou ajout

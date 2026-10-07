@@ -90,8 +90,10 @@ review/correction output to Rust team chat.
 - **send** - `!send [discord user] [message]` - Send a message through rustplusplus to a person on Discord.
 - **stack** - `!stack [item]` - Display stack size information for an item.
 - **scanplayers** - `!scanplayers` - Trigger or queue the bounded current-wipe scan and a durable reconciliation of
-  pending aliases. Reconciliation starts only on this explicit command, then continues one identity per polling tick;
-  it is never started automatically by a wipe or weekly schedule.
+  pending aliases. Reconciliation starts only on this explicit command, then continues in bounded batches of up to
+  four BattleMetrics IDs plus one exact WarBandits fallback per polling tick. Confirmed, non-duplicate clan sightings
+  determine priority before recency; they never relax identity matching. It is never started automatically by a wipe
+  or weekly schedule.
 - **steamid** - `!steamid [SteamID64|BattleMetrics ID|partial name]` - Compatibility alias for the complete `!intel` server-wide profile.
 - **team** - `!team` - Get team information (names of all teammates).
 - **time** - `!time` - Get in-game time.

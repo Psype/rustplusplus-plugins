@@ -28,6 +28,48 @@ Test('pending work selection retries after a bounded burst of fresh identities',
         'fresh-a');
     Assert.equal(PendingReconciler.selectWork(candidates, new Set(), retries, 'id', now,
         PendingReconciler.FRESH_BURST_LIMIT).candidate.id, 'retry');
+
+    const prioritizedRetries = new Map([
+        ['important', { id: 'important', failures: 1, nextAttemptAt: '2026-10-03T11:59:30.000Z' }],
+        ['ordinary', { id: 'ordinary', failures: 1, nextAttemptAt: '2026-10-03T11:59:00.000Z' }]
+    ]);
+    Assert.equal(PendingReconciler.selectWork([{ id: 'important' }, { id: 'ordinary' }], new Set(),
+        prioritizedRetries, 'id', now, PendingReconciler.FRESH_BURST_LIMIT).candidate.id, 'important');
+});
+
+Test('confirmed non-duplicate clan sightings prioritize pending identities', () => {
+    const observed = '2026-10-03T12:00:00.000Z';
+    const persons = [
+        { personId: 'bm:100', steamId: null, battlemetricsPlayerIds: ['100'], names: [
+            { name: 'No clan evidence', firstObservedAt: observed, lastObservedAt: observed }
+        ] },
+        { personId: 'bm:200', steamId: null, battlemetricsPlayerIds: ['200'], names: [
+            { name: 'Confirmed twice', firstObservedAt: observed, lastObservedAt: observed }
+        ] }
+    ];
+    const member = personId => ({ personId });
+    const projection = {
+        clans: { snapshots: [
+            { confirmed: true, duplicate: false, members: [member('bm:200')] },
+            { confirmed: true, duplicate: false, members: [member('bm:200')] },
+            { confirmed: true, duplicate: true, members: [member('bm:100')] },
+            { confirmed: false, duplicate: false, members: [member('bm:100')] }
+        ] },
+        identities: {
+            persons,
+            displayName: personId => persons.find(person => person.personId === personId).names[0].name
+        }
+    };
+
+    const rows = PendingReconciler.pendingRows(projection);
+    Assert.deepEqual(rows.map(row => [row.personId, row.snapshotCount]), [
+        ['bm:200', 2],
+        ['bm:100', 0]
+    ]);
+    Assert.deepEqual(PendingReconciler.battlemetricsCandidates(projection, rows)
+        .map(candidate => candidate.battlemetricsPlayerId), ['200', '100']);
+    Assert.deepEqual(PendingReconciler.warBanditsCandidates(projection, new Set(['100', '200']), true, rows)
+        .map(candidate => candidate.query), ['Confirmed twice', 'No clan evidence']);
 });
 
 Test('WarBandits fallback rejects a display name owned as an alias by another pending identity', () => {

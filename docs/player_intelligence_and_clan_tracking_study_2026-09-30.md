@@ -858,7 +858,7 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale la plus récente après réconciliation pending manuelle : `npm.cmd test` passe 313/313 le 7 octobre 2026,
+QA locale la plus récente après traitement pending par lots prioritaires : `npm.cmd test` passe 317/317 le 7 octobre 2026,
 dont le typage strict `tsc --noEmit`. Une
 couverture déterministe reproduit la mauvaise attribution `』Marley』`/`Swizzy`, vérifie le découpage relatif aux
 virgules, la fusion `n444shj, spirit_monger19`, le rejet des comptes/doublons manuels et l'absence d'apprentissage avant
@@ -923,6 +923,11 @@ candidat par tick, impose un cooldown global en plus des retries individuels et 
 BattleMetrics ID. WarBandits n'est utilisé en repli qu'après une absence terminale et doit confirmer exactement le
 pseudo courant ou historique. Lier les IDs regroupe les observations locales, mais seul un nom explicitement confirmé
 par Steam ou une API est ajouté à l'historique vérifié.
+
+La release 1.22.40 remplace le candidat unique par un lot borné de quatre résolutions BattleMetrics et un repli
+WarBandits exact par tick, avec un budget d'admission de 20 secondes et arrêt du fournisseur dès sa première panne.
+Le tri métier utilise d'abord le nombre de captures de clan distinctes confirmées/non dupliquées, puis la récence.
+Cette priorité accélère les profils déjà utiles sans transformer une vue de clan, F7 ou OCR en preuve de liaison.
 
 Scénario reproductible `npm run benchmark:player-intelligence` : roster initial de 200 joueurs, 60 polls silencieux,
 puis 10 déconnexions. Le premier profilage lisait/reprojetait le journal à chaque poll silencieux : `25,397 ms/poll`.

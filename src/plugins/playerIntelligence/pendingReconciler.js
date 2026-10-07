@@ -194,13 +194,16 @@ function warBanditsCandidates(projection, checkedBattlemetricsIds, battlemetrics
 function selectWork(candidates, checked, retries, idField, now, freshStreak) {
     const pending = candidates.filter(candidate => !checked.has(`${candidate[idField]}`));
     const fresh = pending.filter(candidate => !retries.has(`${candidate[idField]}`));
+    const priority = new Map(candidates.map((candidate, index) => [`${candidate[idField]}`, index]));
     const due = pending.filter(candidate => {
         const retry = retries.get(`${candidate[idField]}`);
         return retry && Date.parse(retry.nextAttemptAt) <= now.getTime();
     }).sort((left, right) => {
         const leftRetry = retries.get(`${left[idField]}`);
         const rightRetry = retries.get(`${right[idField]}`);
-        return leftRetry.nextAttemptAt.localeCompare(rightRetry.nextAttemptAt) ||
+        return (priority.get(`${left[idField]}`) ?? Number.MAX_SAFE_INTEGER) -
+            (priority.get(`${right[idField]}`) ?? Number.MAX_SAFE_INTEGER) ||
+            leftRetry.nextAttemptAt.localeCompare(rightRetry.nextAttemptAt) ||
             `${left[idField]}`.localeCompare(`${right[idField]}`);
     });
     const useRetry = due.length > 0 && (fresh.length === 0 || freshStreak >= FRESH_BURST_LIMIT);

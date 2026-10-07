@@ -855,8 +855,10 @@ to attach a BattleMetrics ID already linked to another SteamID. It no longer mut
 that file remains private implementation data for translation language preferences only.
 <br>`!scanplayers` immediately acknowledges and starts one bounded WarBandits current-wipe page plus a pending-alias
 reconciliation campaign in the background, or queues them behind an already-running cycle. The reconciliation is
-manual-only: neither a wipe nor a weekly timer starts it. Once requested, its restart-safe checkpoint advances at
-most one pending identity per existing 60-second BattleMetrics tick until the candidates are exhausted; a wipe change
+manual-only: neither a wipe nor a weekly timer starts it. Once requested, its restart-safe checkpoint advances a
+bounded batch of up to four direct BattleMetrics resolutions and one exact WarBandits fallback per existing 60-second
+BattleMetrics tick until the candidates are exhausted. The batch stops opening new requests after 20 seconds and
+stops a provider immediately on its first failure; a wipe change
 does not silently restart or discard that operator-requested campaign. Discord/Rust+ command handling never waits for
 the work. The command bypasses the normal twelve-hour completed-sweep
 delay, has a five-minute manual cooldown, reuses its restart-safe cursor and known-ID sets, and resets the once-per-wipe
@@ -868,6 +870,9 @@ BattleMetrics identifier may fall back to WarBandits in the strict order current
 all-time. Each locally unique alias is tried separately, and the response must exactly match the current or a returned
 historical API alias; fuzzy, truncated, colliding or ambiguous results remain manual. A global
 provider cooldown prevents one outage or invalid token from being retried against thousands of different identities.
+Within each lane, identities seen in the most distinct confirmed, non-duplicate clan captures are processed first,
+then the most recently observed identities. Unconfirmed or duplicate captures do not increase priority, and priority
+never weakens the exact-match requirement.
 When a unique exact response has no conflicting SteamID, the journal records the combined Steam+BM identity and all
 aliases on that BM leave `pending` together. An OCR-only spelling does not become verified merely because its BM ID was
 linked; only an explicitly trusted Steam/API/manual source enters verified alias history. Every observation passes through the same local

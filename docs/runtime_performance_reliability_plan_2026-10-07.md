@@ -197,6 +197,21 @@ le maintien des erreurs OCR hors des alias vérifiés même si l'événement con
 et la reprise de campagne après changement de wipe. Une nouvelle commande pendant une campagne active conserve sa
 progression au lieu de la recommencer.
 
+### Lot 6c.1 — Débit borné et priorité métier — release 1.22.40
+
+Statut : implémenté et validé localement ; déploiement à vérifier.
+
+1. Admettre par tick jusqu'à quatre résolutions directes BattleMetrics et un repli WarBandits exact.
+2. Ne plus ouvrir de requête après 20 secondes de travail pending dans le cycle ; la requête déjà démarrée conserve la
+   borne propre de son fournisseur.
+3. Arrêter immédiatement le lot du fournisseur concerné à sa première panne et conserver le backoff/cooldown durable.
+4. Prioriser, dans chaque file, le nombre de captures de clan distinctes confirmées et non dupliquées, puis la récence.
+5. Ne jamais utiliser cette priorité comme preuve d'identité : les règles exactes, ambiguïtés et conflits sont inchangés.
+
+Résultat local : les tests couvrent la borne de quatre appels BattleMetrics, le budget d'admission, le repli
+WarBandits dans le même cycle, l'arrêt au premier échec fournisseur, le rejet d'un conflit Steam/BM apparu dans le
+même lot et le tri par captures confirmées ; les captures probables ou dupliquées ne comptent pas.
+
 ### Lot 6d — Bornes temporelles des fournisseurs
 
 Statut : planifié comme sous-lot séparé.
@@ -277,7 +292,7 @@ Critères : démarrage reproductible, mémoire stable sur plusieurs wipes et rol
 
 Après `git pull` et redémarrage :
 
-1. vérifier `RUSTPLUS v1.22.39 OPERATIONAL` ;
+1. vérifier `RUSTPLUS v1.22.40 OPERATIONAL` ;
 2. noter RSS, `heapUsed` et temps de réponse avant l’import ;
 3. rejouer le lot de 11 SteamID, puis un lot de 100 ID si disponible ;
 4. exiger un aperçu rapide, les noms locaux déjà vérifiés et aucun dialogue Replace/Keep pour le lot identique ;
