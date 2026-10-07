@@ -17,8 +17,9 @@ Avant toute modification :
 4. ne fais ni reset, ni checkout destructif, ni réécriture globale du worktree ;
 5. ne prétends jamais qu’un comportement fonctionne en production sur la seule base des tests locaux.
 
-État observé avant la release courante : branche master, HEAD/origin/master alignés sur la release 1.22.31 et
-worktree propre. La release 1.22.32 prépare et indexe un consolidateur réutilisable par projection immuable.
+État observé avant la release courante : branche master, HEAD/origin/master alignés sur la release 1.22.32 et
+worktree propre. La release 1.22.33 pré-agrège les candidats OCR globaux et respecte les supersessions sans copie
+profonde durable du journal.
 Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; `a308c0a` ajoute la
 1.22.27. La release suivante 1.22.28 groupe les alias pending par identité BattleMetrics et ajoute le fallback
 WarBandits courant -> intervalle historique pertinent -> all-time. La release 1.22.29 centralise toute consolidation
@@ -29,13 +30,15 @@ La release 1.22.31 résout uniquement les SteamID collés, conserve les alias St
 conflictuels, et préfère le nom BM live puis le persona Steam courant.
 La release 1.22.32 indexe SteamID/BattleMetrics/nom fiable une fois par projection et vérifie tous les résultats contre
 un oracle linéaire figé de la 1.22.31.
+La release 1.22.33 déduplique avant consolidation, lit seulement les tags utiles et exclut toute ancienne observation
+supersédée du réservoir actif.
 La première conserve les identifiants de ligne TSV
 Tesseract pour empêcher un pseudo /cinfo replié (U Got Kirkified) d’absorber Established, accepte la confusion l/I/1
 uniquement dans l’ancre et garde une date illisible éditable avec Confirm désactivé. La seconde ajoute la
 réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
 d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La suivante borne les délais de réponse
 Discord/traduction et la dernière fiabilise la sémantique des identités connues et des wipes WarBandits. La dernière
-validation complète a passé 273/273 tests et tsc --noEmit ; le déploiement et la
+validation complète a passé 276/276 tests et tsc --noEmit ; le déploiement et la
 nouvelle capture Discord restent à valider réellement.
 
 Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
@@ -54,8 +57,8 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 - Dépôt : `rustplusplus-plugins`.
 - Branche au moment de la passation : `master`.
-- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur la release `1.22.31` avant la release courante.
-- Version canonique du worktree : `1.22.32` dans `package.json` et `package-lock.json`.
+- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur la release `1.22.32` avant la release courante.
+- Version canonique du worktree : `1.22.33` dans `package.json` et `package-lock.json`.
 - Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
   métrique d’heures WarBandits.
 - Le commit utilisateur `d327e7d` regroupe les releases `1.22.24` à `1.22.26`, notamment dans :
@@ -118,12 +121,30 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
   - `test/playerIntelligenceConsolidator.test.js` et son oracle linéaire sous `test/fixtures/` ;
   - `benchmark/player-intelligence-consolidator.js`, le script npm associé et les documentations architecture/runtime.
 
+- La release `1.22.33` déduplique les candidats avant consolidation, notamment dans :
+
+  - `src/plugins/playerIntelligence/contracts.js`, `index.js`, `clanProjector.js` et `runtime.js` ;
+  - `test/playerIntelligenceCandidates.test.js` ;
+  - `benchmark/player-intelligence-candidates.js`, le script npm associé et les documentations architecture/runtime.
+
 - Il ne reste qu'une branche locale `master`. Les deux anciennes branches `origin/codex/*`, déjà entièrement intégrées,
   ont été supprimées ; le suivi de l'amont est limité à `upstream/master`, avec pruning automatique des références.
 
 Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
 
-## Dernière correction : release 1.22.32
+## Dernière correction : release 1.22.33
+
+La vue globale utilisée par l'OCR agrège chaque triplet SteamID/BattleMetrics/nom avant consolidation. Elle combine la
+fidélité de casse, unit les tags et ne consolide qu'une fois les événements identiques. `getKnownTags()` évite de
+construire `playedWith` pour chaque personne. Les données live tracker/BattleMetrics/équipe sont toujours relues à
+chaque appel ; alias Steam actuels/passés, BM-only pending et collisions de noms gardent leur sémantique.
+
+Les observations supersédées sont désormais exclues via la primitive canonique `effectiveEvents`. Un événement déjà
+validé est reconnu par un `WeakSet` et réutilisé comme objet profondément immuable ; une copie ou falsification repasse
+par toute la validation. Le cache retient donc seulement un tableau filtré de références, pas une deuxième copie du
+journal. Le benchmark de 20 000 événements/2 500 triplets mesure environ 307 ms à froid et 52 ms à chaud localement.
+
+## Correction précédente : release 1.22.32
 
 `prepareIdentityConsolidator()` normalise une fois le snapshot candidat, puis construit des index ordonnés SteamID,
 BattleMetrics et nom exact fiable. `consolidateProjection()` le réutilise via un `WeakMap` uniquement pour les
@@ -284,9 +305,9 @@ inventer ni commiter silencieusement.
 
 ## Validation déjà effectuée
 
-Le 7 octobre 2026, après la release 1.22.32 :
+Le 7 octobre 2026, après la release 1.22.33 :
 
-- `npm.cmd test` : `273/273` tests unitaires réussis ;
+- `npm.cmd test` : `276/276` tests unitaires réussis ;
 - `tsc --noEmit -p .` : réussi dans la même commande ;
 - `git diff --check` : aucune erreur ;
 - `npm.cmd run test:autotranslate:live` : réussi en 8,9 s pour six scénarios cumulés ; Bing a atteint sa borne de deux
@@ -378,7 +399,7 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
 
 ## Vérifications de production encore ouvertes
 
-1. Déployer/redémarrer `1.22.32`, vérifier le message `RUSTPLUS v1.22.32 OPERATIONAL`, puis rejouer le lot de 11
+1. Déployer/redémarrer `1.22.33`, vérifier le message `RUSTPLUS v1.22.33 OPERATIONAL`, puis rejouer le lot de 11
    SteamID. Mesurer temps de réponse, RSS et heap avant/après ; exiger les noms locaux connus et aucun Replace/Keep.
 2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent
    des boîtes déterministes et ne remplacent pas ce contrôle.

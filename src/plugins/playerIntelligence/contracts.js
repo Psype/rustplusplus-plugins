@@ -22,6 +22,7 @@ const CLAN_ROLES = Object.freeze(['leader', 'moderator', 'member', 'unknown']);
 const STEAM_ID_PATTERN = /^7656119\d{10}$/;
 const BATTLEMETRICS_ID_PATTERN = /^\d{1,32}$/;
 const HASH_PATTERN = /^[a-f0-9]{64}$/i;
+const canonicalEvents = new WeakSet();
 
 /**
  * @template T
@@ -363,11 +364,14 @@ function computeEventId(event) {
 }
 
 /**
- * Validates, clones and deeply freezes one canonical event.
+ * Returns an already canonical event by identity, otherwise validates, clones and deeply freezes it.
  * @param {unknown} input
  * @returns {Readonly<Record<string, any>>}
  */
 function createEvent(input) {
+    if (input && typeof input === 'object' && canonicalEvents.has(/** @type {object} */ (input))) {
+        return /** @type {Readonly<Record<string, any>>} */ (input);
+    }
     if (!input || typeof input !== 'object' || Array.isArray(input)) {
         throw new TypeError('Player-intelligence event must be an object.');
     }
@@ -403,7 +407,9 @@ function createEvent(input) {
         throw new TypeError('eventId does not match the deterministic event identity.');
     }
     clone.eventId = computed;
-    return deepFreeze(clone);
+    const canonical = deepFreeze(clone);
+    canonicalEvents.add(canonical);
+    return canonical;
 }
 
 module.exports = Object.freeze({

@@ -74,9 +74,9 @@ l’algorithme linéaire 1.22.31, soit environ 1 280× sur ce corpus. Le test di
 générées, Unicode/NFKC, doublons, conflits et ambiguïtés. Le cache faible accepte uniquement les projections profondes
 immuables ; une projection de test mutable est recalculée. Ces mesures locales ne préjugent pas du gain de production.
 
-### Lot 3 — Construction et déduplication des candidats
+### Lot 3 — Construction et déduplication des candidats — release 1.22.33
 
-Statut : planifié.
+Statut : implémenté et validé localement ; déploiement à vérifier.
 
 1. Éviter de consolider plusieurs fois le même triplet nom/Steam/BattleMetrics dans un cycle.
 2. Séparer les candidats nécessaires aux commandes des événements historiques détaillés.
@@ -84,6 +84,14 @@ Statut : planifié.
 4. Conserver les alias passés vérifiés sans les faire participer aux liens exacts interdits.
 
 Critères : aucune différence dans les profils projetés et baisse mesurable des allocations sur une projection réelle.
+
+Résultat local : les triplets bruts identiques sont agrégés avant consolidation, `caseFidelity` reste combiné par OR,
+les tags sont unis/triés et une déduplication finale conserve les convergences après consolidation. Les observations
+supersédées restent dans le journal append-only mais sont exclues des candidats effectifs. `getKnownTags()` évite de
+construire et trier `playedWith`. Un événement déjà validé est réutilisé par identité d’objet, donc le cache effectif ne
+retient qu’un tableau filtré de références et pas une seconde copie profonde du journal. Sur 20 000 événements formant
+2 500 triplets, le benchmark local produit 2 500 candidats en environ 307 ms à froid et 52 ms à chaud. Les deltas de
+heap en fin d’appel étaient environ 21,3 MiB et 32,7 MiB ; ce ne sont ni des pics ni des mesures de production.
 
 ### Lot 4 — Télémétrie de latence et de mémoire
 
@@ -185,11 +193,11 @@ Statut : planifié après stabilisation applicative.
 
 Critères : démarrage reproductible, mémoire stable sur plusieurs wipes et rollback sans toucher aux données persistantes.
 
-## Vérifications de production des lots 1 et 2
+## Vérifications de production des lots 1 à 3
 
 Après `git pull` et redémarrage :
 
-1. vérifier `RUSTPLUS v1.22.32 OPERATIONAL` ;
+1. vérifier `RUSTPLUS v1.22.33 OPERATIONAL` ;
 2. noter RSS, `heapUsed` et temps de réponse avant l’import ;
 3. rejouer le lot de 11 SteamID, puis un lot de 100 ID si disponible ;
 4. exiger un aperçu rapide, les noms locaux déjà vérifiés et aucun dialogue Replace/Keep pour le lot identique ;
@@ -197,6 +205,8 @@ Après `git pull` et redémarrage :
 6. vérifier que `/intel pending`, le daemon et la traduction continuent de progresser pendant et après l’import.
 7. comparer les durées d’un import image et d’une consolidation daemon avant/après, puis vérifier que le heap reste
    stable lors de consolidations répétées contre une même projection.
+8. réinterpréter une capture remplacée et vérifier que son ancienne lecture OCR supersédée ne réapparaît pas parmi les
+   candidats, puis observer temps et heap d’un import image répété.
 
-Les lots 1 et 2 suppriment le chemin chaud précisément observé, mais ne prétendent pas à eux seuls résoudre toutes les
+Les lots 1 à 3 suppriment le chemin chaud précisément observé, mais ne prétendent pas à eux seuls résoudre toutes les
 rétentions. Les lots suivants doivent être décidés à partir des métriques, sans migration MySQL préalable.

@@ -19,9 +19,14 @@ const IdentityConsolidator = require('./identityConsolidator.js');
  * }>} Projection */
 /** @type {WeakMap<readonly Readonly<Record<string, any>>[], Projection>} */
 const rebuildCache = new WeakMap();
+/** @type {WeakMap<readonly Readonly<Record<string, any>>[], readonly Readonly<Record<string, any>>[]>} */
+const effectiveEventsCache = new WeakMap();
 
 /** @param {readonly Readonly<Record<string, any>>[]} events */
 function effectiveEvents(events) {
+    if (Object.isFrozen(events) && effectiveEventsCache.has(events)) {
+        return /** @type {readonly Readonly<Record<string, any>>[]} */ (effectiveEventsCache.get(events));
+    }
     const canonical = events.map(event => Contracts.createEvent(event));
     const byId = new Map(canonical.map(event => [event.eventId, event]));
     const superseded = new Set();
@@ -39,8 +44,12 @@ function effectiveEvents(events) {
             superseded.add(eventId);
         }
     }
-    return Contracts.deepFreeze(canonical.filter(event => event.kind !== 'events_superseded' &&
+    const effective = Contracts.deepFreeze(canonical.filter(event => event.kind !== 'events_superseded' &&
         !superseded.has(event.eventId)));
+    if (Object.isFrozen(events) && canonical.every((event, index) => event === events[index])) {
+        effectiveEventsCache.set(events, effective);
+    }
+    return effective;
 }
 
 /** @param {readonly Readonly<Record<string, any>>[]} events @returns {Projection} */

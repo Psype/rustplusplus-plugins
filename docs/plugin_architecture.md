@@ -48,6 +48,12 @@ evidence retain their previous behavior. A deterministic linear oracle is kept u
 `npm run benchmark:consolidator` reports preparation, heap and both linear/prepared timings without contacting a
 provider.
 
+The global OCR candidate view pre-aggregates identical SteamID/BattleMetrics/name triplets before consolidation and
+uses `clans.getKnownTags()` instead of materializing co-player affinity. It iterates only the canonical effective
+events, so superseded OCR remains append-only but cannot return as an active candidate. Canonical event objects are
+recognized through an internal weak identity set: replay reuses the same deeply immutable objects, while copied or
+forged objects still pass the full contract validation. `npm run benchmark:candidates` exercises this boundary.
+
 ## Stable hooks
 
 The core currently calls these plugin-manager operations:

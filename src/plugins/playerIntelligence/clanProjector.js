@@ -181,11 +181,21 @@ function projectClans(events, identities) {
         }
     }
 
+    /** @param {string} personId */
+    function knownTagsForPerson(personId) {
+        return deepFreeze([...(known.get(personId) || new Map()).values()]
+            .sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag)));
+    }
+
+    /** @param {{steamId: string|null, battlemetricsPlayerId: string|null, exactName: string|null}} subject */
+    function getKnownTags(subject) {
+        return knownTagsForPerson(identities.resolveSubject(subject).personId);
+    }
+
     /** @param {{steamId: string|null, battlemetricsPlayerId: string|null, exactName: string|null}} subject */
     function getAffinity(subject) {
         const resolution = identities.resolveSubject(subject);
-        const knownTags = [...(known.get(resolution.personId) || new Map()).values()]
-            .sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag));
+        const knownTags = knownTagsForPerson(resolution.personId);
         const playedWith = [];
         for (const [otherPersonId, count] of (playedByPerson.get(resolution.personId) || new Map()).entries()) {
             playedWith.push({
@@ -221,6 +231,7 @@ function projectClans(events, identities) {
         })).sort((left, right) => right.wipeCount - left.wipeCount ||
             right.snapshotCount - left.snapshotCount || left.tag.localeCompare(right.tag)),
         getAffinity,
+        getKnownTags,
         getTagHistory
     });
 }

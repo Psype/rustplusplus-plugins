@@ -311,15 +311,36 @@ async function identityCandidates(context) {
     if (!scope) return Object.freeze([]);
     const events = await getStore(context, scope).readAll();
     const projection = Core.rebuild(events);
-    /** @type {any[]} */
-    const values = [];
+    const effective = Core.effectiveEvents(events);
+    const inputs = new Map();
+    /** @param {any} value */
+    function addInput(value) {
+        const name = sanitize(value && value.name);
+        const steamId = /^7656119\d{10}$/u.test(`${value && value.steamId || ''}`) ?
+            `${value.steamId}` : null;
+        const battlemetricsPlayerId = /^\d{1,32}$/u.test(`${value && value.battlemetricsPlayerId || ''}`) ?
+            `${value.battlemetricsPlayerId}` : null;
+        if (!name || (!steamId && !battlemetricsPlayerId)) return;
+        const key = `${steamId || ''}\u0000${battlemetricsPlayerId || ''}\u0000${name}`;
+        const previous = inputs.get(key);
+        if (previous) {
+            previous.caseFidelity = previous.caseFidelity || value.caseFidelity !== false;
+            for (const tag of value.knownClanTags || []) previous.knownClanTags.add(tag);
+            return;
+        }
+        inputs.set(key, {
+            name, steamId, battlemetricsPlayerId,
+            caseFidelity: value.caseFidelity !== false,
+            knownClanTags: new Set(value.knownClanTags || [])
+        });
+    }
     for (const person of projection.identities.persons) {
-        const knownClanTags = projection.clans.getAffinity({
+        const knownClanTags = projection.clans.getKnownTags({
             steamId: person.steamId,
             battlemetricsPlayerId: person.battlemetricsPlayerIds[0] || null,
             exactName: person.names[0] ? person.names[0].name : null
-        }).knownTags.map((/** @type {any} */ tag) => normalize(tag.tag));
-        for (const alias of person.names.filter((/** @type {any} */ alias) => alias.verified)) values.push({
+        }).map((/** @type {any} */ tag) => normalize(tag.tag));
+        for (const alias of person.names.filter((/** @type {any} */ alias) => alias.verified)) addInput({
             name: alias.name,
             steamId: person.steamId,
             battlemetricsPlayerId: person.battlemetricsPlayerIds[0] || null,
@@ -327,33 +348,40 @@ async function identityCandidates(context) {
             knownClanTags
         });
     }
-    for (const event of events) {
+    for (const event of effective) {
         if (event.kind !== 'identity_observed' || event.subject.exactName === null ||
             (event.subject.steamId === null && event.subject.battlemetricsPlayerId === null)) continue;
-        values.push({
+        addInput({
             name: event.subject.exactName,
             steamId: event.subject.steamId,
             battlemetricsPlayerId: event.subject.battlemetricsPlayerId,
             caseFidelity: event.payload.caseFidelity
         });
     }
-    values.push(...trackedIdentities(scope).map(value => ({ ...value, caseFidelity: true })));
+    for (const value of trackedIdentities(scope)) addInput({ ...value, caseFidelity: true });
     for (const player of Object.values(scope.battlemetrics && scope.battlemetrics.players || {})) {
         const record = /** @type {any} */ (player);
         const name = sanitize(record && record.name);
         const battlemetricsPlayerId = /^\d{1,32}$/u.test(`${record && record.id || ''}`) ? `${record.id}` : null;
         const steamId = /^7656119\d{10}$/u.test(`${record && record.steamId || ''}`) ? `${record.steamId}` : null;
-        if (name && (steamId || battlemetricsPlayerId)) values.push({
+        if (name && (steamId || battlemetricsPlayerId)) addInput({
             name, steamId, battlemetricsPlayerId, caseFidelity: true
         });
     }
     for (const player of context.rustplus && context.rustplus.team && context.rustplus.team.players || []) {
         const name = sanitize(player && player.name);
         const steamId = /^7656119\d{10}$/u.test(`${player && player.steamId || ''}`) ? `${player.steamId}` : null;
-        if (name && steamId) values.push({ name, steamId, battlemetricsPlayerId: null, caseFidelity: true });
+        if (name && steamId) addInput({ name, steamId, battlemetricsPlayerId: null, caseFidelity: true });
     }
     const unique = new Map();
-    for (const value of values) {
+    for (const input of inputs.values()) {
+        const value = Object.freeze({
+            name: input.name,
+            steamId: input.steamId,
+            battlemetricsPlayerId: input.battlemetricsPlayerId,
+            caseFidelity: input.caseFidelity,
+            knownClanTags: Object.freeze([...input.knownClanTags].sort())
+        });
         const consolidated = consolidateIdentity(projection, value);
         if (consolidated.status === 'conflict' || !consolidated.identity.name) continue;
         const identity = consolidated.identity;

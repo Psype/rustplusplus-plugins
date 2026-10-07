@@ -28,13 +28,14 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   Release `1.22.30` makes repeated SteamID text lots idempotent and prevents one unavailable Steam profile from
   starving every later ID in the enrichment queue. Release `1.22.31` removes the global identity-candidate scan from
   pasted SteamID previews and resolves only the 1–100 requested IDs. Release `1.22.32` prepares and indexes one
-  reusable identity consolidator per immutable projection. At the latest completed release audit, `master`,
-  `origin/master` and `origin/HEAD` were aligned on `1.22.31` immediately before this release; `1.22.32` is the current release. Only
+  reusable identity consolidator per immutable projection. Release `1.22.33` pre-aggregates global OCR candidates and
+  excludes superseded observations without retaining a cloned journal. At the latest completed release audit,
+  `master`, `origin/master` and `origin/HEAD` were aligned on `1.22.32` immediately before this release; `1.22.33` is the current release. Only
   `master` plus
   the useful
   `origin/master`/`upstream/master` remote-tracking references remained. Do not reset, overwrite, reimplement or
   discard these changes. Re-audit `git status --short` and `git diff` if the observed state differs.
-- Canonical package version is `1.22.32`. The complete local validation on 2026-10-07 passed `273/273` unit tests and
+- Canonical package version is `1.22.33`. The complete local validation on 2026-10-07 passed `276/276` unit tests and
   `tsc --noEmit`; `git diff --check` was clean. This is local deterministic evidence only. Deployment/restart and a
   new Discord import of the reported KIRK screenshot and the SteamID latency/memory improvement remain unconfirmed,
   so do not claim production success.
@@ -251,6 +252,15 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   ambiguity and duplicates. The local 2,500-person/7,500-row benchmark measured about 38 ms preparation, 4.8 MiB
   retained indexes and 0.011 ms/prepared observation versus 14.3 ms/observation for the linear algorithm (about
   1,280× on that synthetic workload). This is not production evidence.
+- Release `1.22.33` pre-aggregates identical SteamID/BattleMetrics/name inputs before the global OCR candidate view
+  calls the prepared consolidator. It preserves first-seen order, ORs `caseFidelity`, unions/sorts clan tags and keeps
+  the final post-consolidation deduplication. `clans.getKnownTags()` avoids allocating/sorting `playedWith` when only
+  cinfo context is needed. The runtime now iterates `Core.effectiveEvents(events)`, so superseded OCR remains durable in
+  JSONL but cannot reappear as active evidence. Canonical contract events are tracked only by a `WeakSet`; replaying one
+  returns the same deeply immutable object, while a copy/forgery undergoes full validation. The effective cache thus
+  retains a filtered array of references, not a second deep copy of the current journal, and a new store snapshot after
+  append invalidates it by construction. On 20,000 synthetic events collapsing to 2,500 triplets,
+  `benchmark:candidates` measured about 307 ms cold and 52 ms warm; production still needs measurement.
 - Release `1.22.27` makes `/intel` call Discord's ephemeral `deferReply()` before logging, context loading, permission
   work or player-intelligence journal reads. The command remains administrator-only; this removes local processing
   from Discord's initial response window. AutoTranslate now allows at most two seconds per provider and five seconds
@@ -361,6 +371,9 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 - Superseding QA for release `1.22.32` on 2026-10-07: `npm.cmd test` passes 273/273 including `tsc --noEmit`, and
   `git diff --check` is clean. Differential coverage compares the prepared resolver to the frozen 1.22.31 oracle and
   proves repeated immutable projections prepare display names once while mutable projections never reuse stale data.
+- Superseding QA for release `1.22.33` on 2026-10-07: `npm.cmd test` passes 276/276 including `tsc --noEmit`, and
+  `git diff --check` is clean. Coverage proves duplicate aggregation, verified/pending separation, live refresh,
+  collision preservation, canonical-event reuse, forged-copy rejection and immediate supersession after append.
 - Performance check for `1.22.3`: the dedicated glyph benchmark recalls the target among 2,000 aliases with 104 stored
   glyph variants and eight graphemes in a 20.797 ms median. The existing 200-player pipeline measured before/after at
   41.702/39.357 ms initial load, 0.044/0.030 ms quiet-poll mean and 51.356/50.742 ms for ten transitions; no measured

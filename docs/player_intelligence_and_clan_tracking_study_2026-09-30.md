@@ -869,6 +869,12 @@ lignes mesure localement environ 38 ms de préparation, 4,8 MiB d’index et 0,0
 14,3 ms avec l’algorithme linéaire 1.22.31. Le test compare strictement les deux résultats ; ces valeurs synthétiques ne
 remplacent pas la mesure RSS/CPU/latence après déploiement.
 
+La release 1.22.33 agrège ensuite les événements répétés par triplet SteamID/BattleMetrics/nom avant consolidation,
+lit directement les tags connus sans construire `playedWith` et exclut des candidats les observations supersédées.
+Le cache du journal effectif ne duplique pas les événements : il retient seulement un tableau filtré de références vers
+les mêmes objets canoniques profondément immuables. Sur 20 000 événements synthétiques réduits à 2 500 triplets,
+`npm run benchmark:candidates` mesure environ 307 ms à froid et 52 ms à chaud. La validation Linux réelle reste requise.
+
 Scénario reproductible `npm run benchmark:player-intelligence` : roster initial de 200 joueurs, 60 polls silencieux,
 puis 10 déconnexions. Le premier profilage lisait/reprojetait le journal à chaque poll silencieux : `25,397 ms/poll`.
 Après ajout d'une garde de poll inchangé fondée sur la fiabilité fournisseur, le wipe, les deltas et les liens tracker,
