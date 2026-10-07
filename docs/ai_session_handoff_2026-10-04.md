@@ -42,6 +42,8 @@ dictionnaires persistants sous data/player-intelligence ne doivent jamais être 
 
 Pour toute nouvelle modification de code ou de configuration runtime, incrémente le SemVer dans package.json et
 package-lock.json, mets à jour MEMORY.md et les docs concernées, puis exécute npm.cmd test et git diff --check.
+Après validation, committe la release et pousse systématiquement `master` sur `origin/master` afin que le serveur Linux
+n'ait besoin que d'un `git pull`; si le push échoue, signale-le explicitement.
 Commence par résumer l’état réellement observé, puis poursuis la nouvelle demande sans refaire l’étude depuis zéro.
 ```
 
@@ -357,6 +359,7 @@ Pour toute évolution de code ou de configuration runtime :
 3. mettre à jour `MEMORY.md` et la documentation utilisateur/architecture concernée ;
 4. ajouter des tests déterministes couvrant la régression réelle ;
 5. exécuter `npm.cmd test` puis `git diff --check` ;
-6. annoncer séparément ce qui est validé localement et ce qui reste à vérifier en production.
+6. créer le commit de release puis pousser automatiquement `master` vers `origin/master` ;
+7. annoncer séparément ce qui est validé localement et ce qui reste à vérifier en production.
 
 Une modification exclusivement documentaire ne nécessite pas de nouvelle version applicative.

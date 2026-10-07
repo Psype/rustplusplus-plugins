@@ -11,6 +11,9 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 - Every completed code or runtime-configuration change must increment the canonical SemVer in both `package.json` and
   `package-lock.json`. Use a patch increment unless the user explicitly requests a minor/major release; the
   `RUSTPLUS v<version> OPERATIONAL` message is derived from that package version.
+- Standing deployment workflow: after every completed and validated release, commit it and push `master` to
+  `origin/master` automatically. The Linux deployment should then need only `git pull`; never leave a finished release
+  only in the local Windows repository unless a push fails, in which case report that failure explicitly.
 
 ## Current handoff (2026-10-04)
 - Read `docs/ai_session_handoff_2026-10-04.md` first for the compact, copy-ready resumption context, exact worktree
