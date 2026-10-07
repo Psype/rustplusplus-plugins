@@ -34,6 +34,7 @@ review/correction output to Rust team chat.
 - **/research** - Display the cost to research an item.
 - **/reset** - Reset Discord Channels.
 - **/role** - Setup a specific role to use rustplusplus.
+- **/runtime** - Privately show the last bounded aggregate memory, CPU, event-loop, queue and work-latency window to a Discord administrator; no player or message data is exposed and the command does not collect on demand.
 - **/stack** - Display stack size information for an item.
 - **/storagemonitor** - Change image of paired Storage Monitors.
 - **/switch** - Change image of paired Storage Monitors.

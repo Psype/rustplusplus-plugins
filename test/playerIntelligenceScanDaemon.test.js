@@ -325,11 +325,13 @@ Test('the scheduler coalesces cycles for the same server directory', async t => 
     };
 
     Assert.equal(ScanDaemon.schedule({ ...value, warBanditsProvider }), true);
+    Assert.deepEqual(ScanDaemon.getRuntimeStatus(), { active: 1, forcedRerunsQueued: 0 });
     await new Promise(resolve => setImmediate(resolve));
     Assert.equal(ScanDaemon.schedule({ ...value, warBanditsProvider }), false);
     release();
     await ScanDaemon.waitForIdle(value.directory);
     Assert.equal(calls, 1);
+    Assert.deepEqual(ScanDaemon.getRuntimeStatus(), { active: 0, forcedRerunsQueued: 0 });
 });
 
 Test('a manual rescan bypasses the completed-sweep delay and enforces a cooldown', async t => {
@@ -372,7 +374,9 @@ Test('a manual rescan queues one forced cycle behind an active cycle', async t =
     await new Promise(resolve => setImmediate(resolve));
     Assert.deepEqual(ScanDaemon.requestRescan({ ...value, warBanditsProvider }),
         { accepted: true, state: 'queued', retryAfterSeconds: 0 });
+    Assert.deepEqual(ScanDaemon.getRuntimeStatus(), { active: 1, forcedRerunsQueued: 1 });
     release();
     await ScanDaemon.waitForIdle(value.directory);
     Assert.equal(calls, 2);
+    Assert.deepEqual(ScanDaemon.getRuntimeStatus(), { active: 0, forcedRerunsQueued: 0 });
 });

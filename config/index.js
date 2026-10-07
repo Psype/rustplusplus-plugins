@@ -20,6 +20,18 @@
 
 require('dotenv').config({ quiet: true });
 
+function environmentBoolean(name, fallback) {
+    const value = process.env[name];
+    if (value === undefined || value === null || value.trim() === '') return fallback;
+    return !['0', 'false', 'off', 'no'].includes(value.trim().toLowerCase());
+}
+
+function environmentInteger(name, fallback, minimum, maximum) {
+    const value = Number(process.env[name]);
+    if (!Number.isSafeInteger(value) || value < minimum || value > maximum) return fallback;
+    return value;
+}
+
 module.exports = {
     general: {
         language: process.env.RPP_LANGUAGE || 'en',
@@ -35,5 +47,9 @@ module.exports = {
     },
     battlemetrics: {
         token: (process.env.RPP_BATTLEMETRICS_TOKEN || '').trim()
+    },
+    runtimeTelemetry: {
+        enabled: environmentBoolean('RPP_RUNTIME_TELEMETRY', true),
+        intervalMs: environmentInteger('RPP_RUNTIME_TELEMETRY_INTERVAL_MS', 60000, 10000, 300000)
     }
 };

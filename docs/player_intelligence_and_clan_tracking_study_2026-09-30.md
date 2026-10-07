@@ -849,7 +849,7 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale la plus récente après ciblage des imports SteamID : `npm.cmd test` passe 269/269 le 7 octobre 2026,
+QA locale la plus récente après ajout de la télémétrie bornée : `npm.cmd test` passe 288/288 le 7 octobre 2026,
 dont le typage strict `tsc --noEmit`. Une
 couverture déterministe reproduit la mauvaise attribution `』Marley』`/`Swizzy`, vérifie le découpage relatif aux
 virgules, la fusion `n444shj, spirit_monger19`, le rejet des comptes/doublons manuels et l'absence d'apprentissage avant
@@ -874,6 +874,12 @@ lit directement les tags connus sans construire `playedWith` et exclut des candi
 Le cache du journal effectif ne duplique pas les événements : il retient seulement un tableau filtré de références vers
 les mêmes objets canoniques profondément immuables. Sur 20 000 événements synthétiques réduits à 2 500 triplets,
 `npm run benchmark:candidates` mesure environ 307 ms à froid et 52 ms à chaud. La validation Linux réelle reste requise.
+
+La release 1.22.34 ajoute une télémétrie runtime à cardinalité fixe sur les traductions, files/exécutions OCR,
+imports et cycles du daemon. Chaque fenêtre conserve uniquement des compteurs et buckets de durée, plus RSS, heap,
+CPU, retard de boucle et tailles de files numériques. `/runtime` expose le dernier snapshot uniquement à un
+administrateur dans une réponse éphémère ; aucun nom, SteamID, texte, chemin ou token n’entre dans ces structures.
+Cette observation doit guider les lots suivants et ne constitue pas encore une preuve de stabilité en production.
 
 Scénario reproductible `npm run benchmark:player-intelligence` : roster initial de 200 joueurs, 60 polls silencieux,
 puis 10 déconnexions. Le premier profilage lisait/reprojetait le journal à chaque poll silencieux : `25,397 ms/poll`.

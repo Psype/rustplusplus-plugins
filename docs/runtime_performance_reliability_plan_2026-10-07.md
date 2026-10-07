@@ -93,16 +93,25 @@ retient qu’un tableau filtré de références et pas une seconde copie profond
 2 500 triplets, le benchmark local produit 2 500 candidats en environ 307 ms à froid et 52 ms à chaud. Les deltas de
 heap en fin d’appel étaient environ 21,3 MiB et 32,7 MiB ; ce ne sont ni des pics ni des mesures de production.
 
-### Lot 4 — Télémétrie de latence et de mémoire
+### Lot 4 — Télémétrie de latence et de mémoire — release 1.22.34
 
-Statut : planifié.
+Statut : implémenté et validé localement ; déploiement à vérifier.
 
-1. Mesurer sans contenu sensible les durées des imports, commandes, projections, providers et traductions.
-2. Échantillonner `heapUsed`, RSS, taille des files et retards de boucle événementielle.
-3. Journaliser les opérations lentes avec leur métier et leur taille d’entrée, jamais les tokens ou messages privés.
-4. Fournir une commande d’état administrateur compacte et bornée.
+1. Mesurer avec six opérations fixes les traductions, attente/exécution OCR, préparation/décision d’import et cycles
+   du daemon. Ces enveloppes couvrent les projections et appels fournisseurs effectués dans leurs chemins critiques.
+2. Échantillonner `heapUsed`, RSS, mémoire externe, CPU, utilisation/retard de boucle et tailles numériques des files.
+3. Journaliser au plus une alerte lente par métier et fenêtre, uniquement avec opération, issue et durée ; aucun
+   identifiant, texte, chemin, token ou dimension libre n’est accepté.
+4. Fournir `/runtime`, commande administrateur éphémère qui acquitte Discord avant lecture et affiche seulement la
+   dernière fenêtre terminée, sans lancer de collecte ni de scan.
 
 Critères : faible coût à vide, métriques plafonnées et diagnostic possible avant saturation.
+
+Résultat local : une seule fenêtre courante et un snapshot profondément immuable sont conservés. Les opérations,
+issues, buckets de durée et champs de source sont des listes fermées ; 10 000 spans dans un test ne créent aucune
+dimension supplémentaire. Le timer est `unref`, l’intervalle est borné à 10 s–5 min et désactivable. Les pannes de
+collecte sont isolées du travail du bot. La pression heap est comparée à la limite V8, pas au heap momentanément
+réservé. La preuve de stabilité mémoire reste une observation Linux après redémarrage, pas ce test déterministe.
 
 ### Lot 5 — Caches bornés et expirables
 
@@ -193,11 +202,11 @@ Statut : planifié après stabilisation applicative.
 
 Critères : démarrage reproductible, mémoire stable sur plusieurs wipes et rollback sans toucher aux données persistantes.
 
-## Vérifications de production des lots 1 à 3
+## Vérifications de production des lots 1 à 4
 
 Après `git pull` et redémarrage :
 
-1. vérifier `RUSTPLUS v1.22.33 OPERATIONAL` ;
+1. vérifier `RUSTPLUS v1.22.34 OPERATIONAL` ;
 2. noter RSS, `heapUsed` et temps de réponse avant l’import ;
 3. rejouer le lot de 11 SteamID, puis un lot de 100 ID si disponible ;
 4. exiger un aperçu rapide, les noms locaux déjà vérifiés et aucun dialogue Replace/Keep pour le lot identique ;
@@ -207,6 +216,9 @@ Après `git pull` et redémarrage :
    stable lors de consolidations répétées contre une même projection.
 8. réinterpréter une capture remplacée et vérifier que son ancienne lecture OCR supersédée ne réapparaît pas parmi les
    candidats, puis observer temps et heap d’un import image répété.
+9. attendre une fenêtre, exécuter `/runtime`, puis corréler `RUNTIME`, `RUNTIME_WORK` et les éventuels `RUNTIME_SLOW`
+   avec RSS/heap systemd avant, pendant et après un import ; la réponse doit rester éphémère et sans donnée joueur.
 
-Les lots 1 à 3 suppriment le chemin chaud précisément observé, mais ne prétendent pas à eux seuls résoudre toutes les
-rétentions. Les lots suivants doivent être décidés à partir des métriques, sans migration MySQL préalable.
+Les lots 1 à 3 suppriment le chemin chaud précisément observé et le lot 4 rend les prochaines décisions mesurables,
+mais aucun ne prétend à lui seul résoudre toutes les rétentions. Les lots suivants doivent être décidés à partir de
+ces métriques, sans migration MySQL préalable.

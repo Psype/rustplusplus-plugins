@@ -3,6 +3,7 @@ const Path = require('path');
 
 const Languages = require('../../util/languages.js');
 const LanguageDetector = require('../../util/languageDetector.js');
+const RuntimeTelemetry = require('../../util/runtimeTelemetry.js');
 const TeammateLanguageDatabase = require('../teammateLanguageDatabase/index.js');
 const Translator = require('./translator.js');
 
@@ -10,6 +11,7 @@ const CONFIG_DIR = Path.join(__dirname, '..', '..', '..', 'config');
 const SETTINGS_PATH = Path.join(CONFIG_DIR, 'autotranslate-settings.json');
 const LEGACY_SETTINGS_PATH = Path.join(__dirname, '..', '..', '..', 'data', 'autotranslate-settings.json');
 const DEFAULT_SETTINGS = Object.freeze({ enabled: false, targets: Object.freeze(['en']) });
+let activeTranslations = 0;
 
 function getSettings(rustplus) {
     const all = readAll();
@@ -35,7 +37,7 @@ function parseCommand(rustplus, command) {
     return setSettings(rustplus, { enabled: true, targets });
 }
 
-async function translateMessage(rustplus, message, dependencies = {}) {
+async function translateMessageInternal(rustplus, message, dependencies = {}) {
     if (!message || typeof message.message !== 'string') return null;
     if (isBotOrTranslationMessage(message.message)) return null;
 
@@ -82,6 +84,29 @@ async function translateMessage(rustplus, message, dependencies = {}) {
     logDecision(rustplus, message, 'TRANSLATED', 'ok', settings.targets, source, knownLanguages, target, provider,
         Date.now() - translationStartedAt);
     return Object.freeze({ source, target, translated });
+}
+
+async function translateMessage(rustplus, message, dependencies = {}) {
+    const span = RuntimeTelemetry.startSpan('translation');
+    activeTranslations += 1;
+    try {
+        const result = await translateMessageInternal(rustplus, message, dependencies);
+        span.finish(result === null ? 'skipped' : 'success');
+        return result;
+    }
+    catch (error) {
+        const timedOut = Boolean(error && Array.isArray(error.failures) &&
+            error.failures.some(failure => failure && failure.reason === 'ETIMEDOUT'));
+        span.finish(timedOut ? 'timeout' : 'failure');
+        throw error;
+    }
+    finally {
+        activeTranslations = Math.max(0, activeTranslations - 1);
+    }
+}
+
+function getRuntimeStatus() {
+    return Object.freeze({ active: activeTranslations, queued: 0 });
 }
 
 function logProviderFallbacks(rustplus, message, failures) {
@@ -169,4 +194,4 @@ function normalizeSettings(settings) {
     });
 }
 
-module.exports = { getSettings, parseCommand, translateMessage };
+module.exports = { getRuntimeStatus, getSettings, parseCommand, translateMessage };

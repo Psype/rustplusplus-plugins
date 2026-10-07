@@ -5,6 +5,7 @@ const Crypto = require('node:crypto');
 const Fs = require('node:fs');
 const Path = require('node:path');
 
+const RuntimeTelemetry = require('../../util/runtimeTelemetry.js');
 const Core = require('./index.js');
 
 const STATE_SCHEMA_VERSION = 4;
@@ -592,7 +593,12 @@ function schedule(options) {
     if (!options || typeof options.directory !== 'string' || !options.scope || !options.scope.wipeId) return false;
     const key = Path.resolve(options.directory);
     if (inFlight.has(key)) return false;
-    const promise = Promise.resolve().then(() => runCycle(options)).catch(error => {
+    const span = RuntimeTelemetry.startSpan('scan_cycle');
+    const promise = Promise.resolve().then(() => runCycle(options)).then(result => {
+        span.finish('success');
+        return result;
+    }).catch(error => {
+        span.finish('failure');
         logWarningOnce(options.context, key,
             `Background player scan paused safely: ${error && error.message ? error.message : error}.`);
         return null;
@@ -637,12 +643,17 @@ async function waitForIdle(directory) {
     while (inFlight.has(key)) await inFlight.get(key);
 }
 
+function getRuntimeStatus() {
+    return Object.freeze({ active: inFlight.size, forcedRerunsQueued: forcedReruns.size });
+}
+
 module.exports = Object.freeze({
     ONLINE_SOURCE,
     MANUAL_RESCAN_COOLDOWN_MS,
     ScanDaemonStateError,
     WARBANDITS_SOURCE,
     WARBANDITS_LOOKUP_SOURCE,
+    getRuntimeStatus,
     requestRescan,
     runCycle,
     schedule,

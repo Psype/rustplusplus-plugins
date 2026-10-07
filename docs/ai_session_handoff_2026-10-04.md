@@ -17,9 +17,8 @@ Avant toute modification :
 4. ne fais ni reset, ni checkout destructif, ni réécriture globale du worktree ;
 5. ne prétends jamais qu’un comportement fonctionne en production sur la seule base des tests locaux.
 
-État observé avant la release courante : branche master, HEAD/origin/master alignés sur la release 1.22.32 et
-worktree propre. La release 1.22.33 pré-agrège les candidats OCR globaux et respecte les supersessions sans copie
-profonde durable du journal.
+État observé avant la release courante : branche master, HEAD/origin/master alignés sur la release 1.22.33 et
+worktree propre. La release 1.22.34 ajoute une télémétrie runtime bornée et la commande administrateur `/runtime`.
 Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; `a308c0a` ajoute la
 1.22.27. La release suivante 1.22.28 groupe les alias pending par identité BattleMetrics et ajoute le fallback
 WarBandits courant -> intervalle historique pertinent -> all-time. La release 1.22.29 centralise toute consolidation
@@ -32,13 +31,15 @@ La release 1.22.32 indexe SteamID/BattleMetrics/nom fiable une fois par projecti
 un oracle linéaire figé de la 1.22.31.
 La release 1.22.33 déduplique avant consolidation, lit seulement les tags utiles et exclut toute ancienne observation
 supersédée du réservoir actif.
+La release 1.22.34 mesure sans contenu privé la mémoire, le CPU, la boucle Node, les files et six opérations critiques
+dans des fenêtres à cardinalité fixe ; `/runtime` expose le dernier snapshot dans une réponse Discord éphémère.
 La première conserve les identifiants de ligne TSV
 Tesseract pour empêcher un pseudo /cinfo replié (U Got Kirkified) d’absorber Established, accepte la confusion l/I/1
 uniquement dans l’ancre et garde une date illisible éditable avec Confirm désactivé. La seconde ajoute la
 réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
 d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La suivante borne les délais de réponse
 Discord/traduction et la dernière fiabilise la sémantique des identités connues et des wipes WarBandits. La dernière
-validation complète a passé 276/276 tests et tsc --noEmit ; le déploiement et la
+validation complète a passé 288/288 tests et tsc --noEmit ; le déploiement et la
 nouvelle capture Discord restent à valider réellement.
 
 Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
@@ -57,8 +58,8 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 - Dépôt : `rustplusplus-plugins`.
 - Branche au moment de la passation : `master`.
-- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur la release `1.22.32` avant la release courante.
-- Version canonique du worktree : `1.22.33` dans `package.json` et `package-lock.json`.
+- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur la release `1.22.33` avant la release courante.
+- Version canonique du worktree : `1.22.34` dans `package.json` et `package-lock.json`.
 - Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
   métrique d’heures WarBandits.
 - Le commit utilisateur `d327e7d` regroupe les releases `1.22.24` à `1.22.26`, notamment dans :
@@ -127,12 +128,31 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
   - `test/playerIntelligenceCandidates.test.js` ;
   - `benchmark/player-intelligence-candidates.js`, le script npm associé et les documentations architecture/runtime.
 
+- La release `1.22.34` ajoute l'observabilité runtime bornée, notamment dans :
+
+  - `src/util/runtimeTelemetry.js` et `src/commands/runtime.js` ;
+  - l'instrumentation ciblée de traduction, OCR, imports et scan daemon ;
+  - `test/runtimeTelemetry.test.js`, `test/runtimeCommand.test.js` et les tests de statut numérique des métiers ;
+  - `.env.example`, `docs/installation.md`, les documents de commandes et le plan runtime.
+
 - Il ne reste qu'une branche locale `master`. Les deux anciennes branches `origin/codex/*`, déjà entièrement intégrées,
   ont été supprimées ; le suivi de l'amont est limité à `upstream/master`, avec pruning automatique des références.
 
 Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
 
-## Dernière correction : release 1.22.33
+## Dernière correction : release 1.22.34
+
+`runtimeTelemetry` conserve une seule fenêtre courante et le dernier snapshot profondément immuable. Les opérations,
+issues, buckets de durée et champs de sources sont fermés : aucune dimension libre, identité joueur, chaîne de message,
+chemin ou token n'est accepté. RSS, heap V8, mémoire externe, CPU, utilisation/retard de boucle, tailles des files et
+latences p95/max sont journalisés par fenêtre. Une source de métriques défaillante ne peut pas interrompre le bot.
+
+`/runtime` appelle `deferReply({ ephemeral: true })` avant l'autorisation et toute lecture. Seul un administrateur voit
+le dernier snapshot ; la commande ne lance ni scan ni collecte. Les spans traversant deux fenêtres exposent
+explicitement leurs compteurs `started` et `completed`. La pression heap utilise la limite V8 et l'intervalle reste
+borné à 10 s–5 min, configurable ou désactivable. La stabilité réelle doit encore être vérifiée sur Linux.
+
+## Correction précédente : release 1.22.33
 
 La vue globale utilisée par l'OCR agrège chaque triplet SteamID/BattleMetrics/nom avant consolidation. Elle combine la
 fidélité de casse, unit les tags et ne consolide qu'une fois les événements identiques. `getKnownTags()` évite de
@@ -305,9 +325,9 @@ inventer ni commiter silencieusement.
 
 ## Validation déjà effectuée
 
-Le 7 octobre 2026, après la release 1.22.33 :
+Le 7 octobre 2026, après la release 1.22.34 :
 
-- `npm.cmd test` : `276/276` tests unitaires réussis ;
+- `npm.cmd test` : `288/288` tests unitaires réussis ;
 - `tsc --noEmit -p .` : réussi dans la même commande ;
 - `git diff --check` : aucune erreur ;
 - `npm.cmd run test:autotranslate:live` : réussi en 8,9 s pour six scénarios cumulés ; Bing a atteint sa borne de deux
@@ -318,7 +338,8 @@ Le 7 octobre 2026, après la release 1.22.33 :
   réponses Discord éphémères, historique filtré, révocation, accusé `/intel` avant tout travail, budget total de
   traduction, regroupement des alias BattleMetrics pending, liens `/cinfo` adossés à un identifiant et fallback de
   wipes WarBandits avec ambiguïté manuelle et jointure Steam/BM exacte non conflictuelle, consolidation locale unique,
-  conflits/ambiguïtés fermés et alias Steam courants/passés vérifiés.
+  conflits/ambiguïtés fermés, alias Steam courants/passés vérifiés, cardinalité de télémétrie fermée,
+  isolement des sources de métriques, spans inter-fenêtres et acquittement `/runtime` avant autorisation/lecture.
 
 Ces résultats ne prouvent ni le comportement du binaire Tesseract installé sur Linux, ni le téléchargement Discord, ni
 les fournisseurs externes, ni le processus de déploiement.
@@ -360,6 +381,8 @@ les fournisseurs externes, ni le processus de déploiement.
   identité/clan/activité/présence/métriques.
 - `src/plugins/playerIntelligence/scanDaemon.js` : une page WarBandits bornée par tick BattleMetrics existant, état
   reprenable, aucune seconde boucle de présence.
+- `src/util/runtimeTelemetry.js` et `src/commands/runtime.js` : agrégats runtime bornés, logs sans contenu privé et
+  consultation administrateur éphémère du dernier snapshot terminé.
 - `!intel` est la vue complète ; `!steamid` est son alias exact ; `!who` expose les alias ; `!record` ajoute une liaison
   manuelle stricte ; `!scanplayers` force un passage borné en arrière-plan.
 
@@ -399,8 +422,9 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
 
 ## Vérifications de production encore ouvertes
 
-1. Déployer/redémarrer `1.22.33`, vérifier le message `RUSTPLUS v1.22.33 OPERATIONAL`, puis rejouer le lot de 11
+1. Déployer/redémarrer `1.22.34`, vérifier le message `RUSTPLUS v1.22.34 OPERATIONAL`, puis rejouer le lot de 11
    SteamID. Mesurer temps de réponse, RSS et heap avant/après ; exiger les noms locaux connus et aucun Replace/Keep.
+   Après une fenêtre, contrôler `/runtime`, `RUNTIME`, `RUNTIME_WORK` et les éventuels `RUNTIME_SLOW`, sans donnée joueur.
 2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent
    des boîtes déterministes et ne remplacent pas ce contrôle.
 3. Réimporter l’image KIRK originale dans le canal d’intelligence et exiger `U Got Kirkified` plus un `Established`

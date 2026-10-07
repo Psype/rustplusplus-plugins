@@ -14,6 +14,12 @@ Never commit the populated `.env`. A `TokenInvalid` startup log means the local 
 registered slash commands can remain visible in Discord but will display `The application did not respond` until a
 valid bot process is connected. Restart the deployed process after changing its environment.
 
+Bounded runtime telemetry is enabled by default. `RPP_RUNTIME_TELEMETRY_INTERVAL_MS` selects a 10,000–300,000 ms
+aggregation window (60,000 ms by default); invalid values safely use the default. Set `RPP_RUNTIME_TELEMETRY=false`
+to disable its timer and `/runtime` data. The telemetry writes two fixed-cardinality aggregate log lines per completed
+window and never records player names, SteamID values, message bodies, paths or tokens. `/runtime` is administrator-only
+and ephemeral.
+
 ## Optional Software
 To enable step-trace for cargoship and patrol helicopter, [**GraphicsMagick**](http://www.graphicsmagick.org/download.html) needs to be downloaded.
 

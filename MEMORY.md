@@ -29,16 +29,16 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   starving every later ID in the enrichment queue. Release `1.22.31` removes the global identity-candidate scan from
   pasted SteamID previews and resolves only the 1–100 requested IDs. Release `1.22.32` prepares and indexes one
   reusable identity consolidator per immutable projection. Release `1.22.33` pre-aggregates global OCR candidates and
-  excludes superseded observations without retaining a cloned journal. At the latest completed release audit,
-  `master`, `origin/master` and `origin/HEAD` were aligned on `1.22.32` immediately before this release; `1.22.33` is the current release. Only
-  `master` plus
-  the useful
+  excludes superseded observations without retaining a cloned journal. Release `1.22.34` adds bounded aggregate
+  runtime telemetry for translations, OCR, imports and daemon scans plus the administrator-only ephemeral `/runtime`
+  command. At the latest completed release audit, `master`, `origin/master` and `origin/HEAD` were aligned on
+  `1.22.33` immediately before this release; `1.22.34` is the current release. Only `master` plus the useful
   `origin/master`/`upstream/master` remote-tracking references remained. Do not reset, overwrite, reimplement or
   discard these changes. Re-audit `git status --short` and `git diff` if the observed state differs.
-- Canonical package version is `1.22.33`. The complete local validation on 2026-10-07 passed `276/276` unit tests and
+- Canonical package version is `1.22.34`. The complete local validation on 2026-10-07 passed `288/288` unit tests and
   `tsc --noEmit`; `git diff --check` was clean. This is local deterministic evidence only. Deployment/restart and a
-  new Discord import of the reported KIRK screenshot and the SteamID latency/memory improvement remain unconfirmed,
-  so do not claim production success.
+  new Discord import of the reported KIRK screenshot, the SteamID latency/memory improvement and `/runtime` production
+  metrics remain unconfirmed, so do not claim production success.
 - Primary unresolved production fact: raid and **Pair with Server** notifications were observed on the Rust+ phone but not on the bot. The 2026-09-23/24 journal showed accepted MCS logins and quick reconnects but no inbound notification. Phone receipt proves Facepunch delivery to the phone only; MCS login proves Google accepted the bot's GCM identity only. Facepunch delivery to the bot's virtual device still requires a live capture. Canonical transport audit: `docs/fcm_transport_audit_2026-09-23.md`.
 - Implemented receiver path: `src/util/reliableFcmReceiver.js` owns accepted-login readiness, stream position, heartbeat/ack, inactivity detection, ports 5228/443 and capped reconnect; `fcmAlarmRouter.js` routes Host/Lite `alarm`; `src/plugins/raidAlarm/` performs immediate authoritative Rust-chat delivery and five-second duplicate suppression. Current Facepunch/Liam/RustPlusApi evidence still uses GCM/FCM/MCS and `appData.channelId=alarm`; no schema migration was found.
 - `!alarmstatus` reports MCS, generic push proof, matching server-pair age, alarm age, Host/account match, output/mute, raw logging and up to five alarms. An operational Rust+ connection with a saved `playerToken` reports `pair active` and **does not** arm a re-pair watcher. Only an unpaired/non-operational server arms one guild-scoped 120-second watcher; repeating the command does not add another timer. Entity-pair or another server/account cannot satisfy it. `!raidtest` validates outbound Rust chat only.
@@ -261,6 +261,13 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   retains a filtered array of references, not a second deep copy of the current journal, and a new store snapshot after
   append invalidates it by construction. On 20,000 synthetic events collapsing to 2,500 triplets,
   `benchmark:candidates` measured about 307 ms cold and 52 ms warm; production still needs measurement.
+- Release `1.22.34` adds fixed-cardinality runtime telemetry for translation, OCR queue/run, import prepare/decision
+  and daemon scan cycles. One current window and one deeply immutable completed snapshot retain only numeric process,
+  event-loop, queue and bounded operation aggregates. Source fields, operations, outcomes and latency buckets are
+  closed lists; player names, SteamID values, message text, paths and tokens cannot enter the telemetry. Slow work is
+  warned once per operation/window. `/runtime` defers ephemerally before its administrator check and displays the last
+  completed snapshot without scanning on demand. Intervals are limited to 10 seconds–5 minutes and the timer is
+  optional/unref'd. Heap pressure uses the V8 limit; cross-window work reports starts and completions separately.
 - Release `1.22.27` makes `/intel` call Discord's ephemeral `deferReply()` before logging, context loading, permission
   work or player-intelligence journal reads. The command remains administrator-only; this removes local processing
   from Discord's initial response window. AutoTranslate now allows at most two seconds per provider and five seconds
@@ -374,6 +381,10 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 - Superseding QA for release `1.22.33` on 2026-10-07: `npm.cmd test` passes 276/276 including `tsc --noEmit`, and
   `git diff --check` is clean. Coverage proves duplicate aggregation, verified/pending separation, live refresh,
   collision preservation, canonical-event reuse, forged-copy rejection and immediate supersession after append.
+- Superseding QA for release `1.22.34` on 2026-10-07: `npm.cmd test` passes 288/288 including `tsc --noEmit`, and
+  `git diff --check` is clean. Coverage proves bounded dimensions, frozen/reset windows, source/logger fault isolation,
+  interval limits, cross-window accounting, CPU/ELU rebaselining after transient collection failure, aggregate-only
+  status sources and `/runtime` acknowledgement/privacy.
 - Performance check for `1.22.3`: the dedicated glyph benchmark recalls the target among 2,000 aliases with 104 stored
   glyph variants and eight graphemes in a 20.797 ms median. The existing 200-player pipeline measured before/after at
   41.702/39.357 ms initial load, 0.044/0.030 ms quiet-poll mean and 51.356/50.742 ms for ten transitions; no measured

@@ -5,6 +5,7 @@ const Path = require('node:path');
 const Discord = require('discord.js');
 
 const Scrape = require('../../util/scrape.js');
+const RuntimeTelemetry = require('../../util/runtimeTelemetry.js');
 const ImageAttachment = require('./imageAttachment.js');
 const CinfoPanelRefinement = require('./cinfoPanelRefinement.js');
 const CinfoRoles = require('./cinfoRoles.js');
@@ -39,6 +40,8 @@ const pending = new Map();
 const decisionQueues = new Map();
 /** @type {Set<string>} */
 const decisionClaims = new Set();
+let activePreparations = 0;
+let activeDecisions = 0;
 
 /** @param {unknown} value @param {number} limit */
 function truncateCharacters(value, limit) {
@@ -949,7 +952,7 @@ function joinCorroboratedStableIds(known, corroborated) {
  * @param {readonly {kindHint:'cinfo'|'f7'|null,attachment:any}[]} requests
  * @param {string|null} requesterUserId @param {string} reference @param {string|null} captureTime
  */
-async function prepareImports(client, source, requests, requesterUserId, reference, captureTime = null) {
+async function prepareImportsInternal(client, source, requests, requesterUserId, reference, captureTime = null) {
     if (!Array.isArray(requests) || requests.length < 1 || requests.length > 10) {
         throw new Error('Attach between 1 and 10 PNG/JPEG/WebP images.');
     }
@@ -1156,6 +1159,27 @@ async function prepareImports(client, source, requests, requesterUserId, referen
     return Object.freeze({
         content: preview, components: actionRows(token, items), allowedMentions: { parse: [] }
     });
+}
+
+/** @param {any} client @param {any} source
+ * @param {readonly {kindHint:'cinfo'|'f7'|null,attachment:any}[]} requests
+ * @param {string|null} requesterUserId @param {string} reference @param {string|null} captureTime */
+async function prepareImports(client, source, requests, requesterUserId, reference, captureTime = null) {
+    const span = RuntimeTelemetry.startSpan('import_prepare');
+    activePreparations += 1;
+    try {
+        const result = await prepareImportsInternal(
+            client, source, requests, requesterUserId, reference, captureTime);
+        span.finish('success');
+        return result;
+    }
+    catch (error) {
+        span.finish('failure');
+        throw error;
+    }
+    finally {
+        activePreparations = Math.max(0, activePreparations - 1);
+    }
 }
 
 /** @param {any} client @param {any} interaction */
@@ -1406,7 +1430,7 @@ async function resolveCorrectedItem(context, pendingItem, itemIndex, corrected, 
 
 /** @param {any} client @param {any} interaction @param {string} token @param {any} item
  * @param {boolean} confirm @param {boolean} replace @param {boolean} keep @param {boolean} acknowledged */
-async function executeDecision(client, interaction, token, item, confirm, replace, keep, acknowledged) {
+async function executeDecisionInternal(client, interaction, token, item, confirm, replace, keep, acknowledged) {
     const current = pending.get(token);
     if (current !== item || item.expiresAt < Date.now()) {
         if (current === item) pending.delete(token);
@@ -1523,6 +1547,26 @@ async function executeDecision(client, interaction, token, item, confirm, replac
         }
         void recrossWarBandits(context,
             committedItems.map((/** @type {any} */ entry) => entry.parsed), client);
+    }
+}
+
+/** @param {any} client @param {any} interaction @param {string} token @param {any} item
+ * @param {boolean} confirm @param {boolean} replace @param {boolean} keep @param {boolean} acknowledged */
+async function executeDecision(client, interaction, token, item, confirm, replace, keep, acknowledged) {
+    const span = RuntimeTelemetry.startSpan('import_decision');
+    activeDecisions += 1;
+    try {
+        const result = await executeDecisionInternal(
+            client, interaction, token, item, confirm, replace, keep, acknowledged);
+        span.finish('success');
+        return result;
+    }
+    catch (error) {
+        span.finish('failure');
+        throw error;
+    }
+    finally {
+        activeDecisions = Math.max(0, activeDecisions - 1);
     }
 }
 
@@ -1748,6 +1792,15 @@ async function handleModal({ client, interaction }) {
     return true;
 }
 
+function getRuntimeStatus() {
+    return Object.freeze({
+        active: activePreparations + activeDecisions,
+        previewsPending: pending.size,
+        decisionsClaimed: decisionClaims.size,
+        decisionQueues: decisionQueues.size
+    });
+}
+
 module.exports = Object.freeze({
     CONFIRM_PREFIX,
     EDIT_MODAL_PREFIX,
@@ -1760,6 +1813,7 @@ module.exports = Object.freeze({
     applyCorrectedCinfo,
     applyCorrectedRoster,
     beginImport,
+    getRuntimeStatus,
     handleMessage,
     handleButton,
     handleModal,

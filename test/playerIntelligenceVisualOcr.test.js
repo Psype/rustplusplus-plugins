@@ -81,13 +81,16 @@ Test('Tesseract receives the generated user-word file and removes it after recog
         });
         return child;
     };
-    const words = await TesseractOcr.recognize(Buffer.from('image').toString('base64'), {
+    const recognition = TesseractOcr.recognize(Buffer.from('image').toString('base64'), {
         spawnImpl, userWords: ['Nirks', 'Jeffrey Kirkstein'], characterWhitelist: '0123456789/: '
     });
+    Assert.deepEqual(TesseractOcr.getRuntimeStatus(), { active: 0, queued: 1, queuedBytes: 5 });
+    const words = await recognition;
     Assert.equal(words[0].text, 'Nirks');
     Assert.equal(contents, 'Nirks\nJeffrey\nKirkstein\n');
     Assert.equal(Fs.existsSync(temporaryFile), false);
     Assert.equal(Fs.existsSync(Path.dirname(temporaryFile)), false);
+    Assert.deepEqual(TesseractOcr.getRuntimeStatus(), { active: 0, queued: 0, queuedBytes: 0 });
 });
 
 Test('visual aliases persist outside code and exact collisions remain explicit candidates', async t => {

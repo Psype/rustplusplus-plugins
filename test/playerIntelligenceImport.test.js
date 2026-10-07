@@ -1538,3 +1538,11 @@ Test('dedicated channel auto-detects multiple attachments and multiple cinfo pan
     Assert.match(value.updates.at(-1).content, /Existing import kept/);
     Assert.equal((await store.readAll()).length, afterFreshReplacement.length);
 });
+
+Test('import runtime status exposes fixed numeric aggregates without pending identifiers', () => {
+    const status = ImportWorkflow.getRuntimeStatus();
+    Assert.deepEqual(Object.keys(status),
+        ['active', 'previewsPending', 'decisionsClaimed', 'decisionQueues']);
+    Assert.equal(Object.values(status).every(value => Number.isSafeInteger(value) && value >= 0), true);
+    Assert.equal(Object.isFrozen(status), true);
+});

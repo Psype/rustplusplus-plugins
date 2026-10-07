@@ -176,3 +176,20 @@ Test('ignores bot translations and messages without letters', async () => {
         message: '123'
     }, { settings, knownLanguage: 'en', translator }), null);
 });
+
+Test('reports only numeric aggregate runtime translation status', async () => {
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const pending = AutoTranslate.translateMessage(rustplus, {
+        steamId: 'private-player', message: 'need help now'
+    }, {
+        settings: { enabled: true, targets: ['en', 'zh'] },
+        knownLanguage: 'en',
+        translator: async () => gate
+    });
+    Assert.deepEqual(AutoTranslate.getRuntimeStatus(), { active: 1, queued: 0 });
+    release('现在需要帮助');
+    await pending;
+    Assert.deepEqual(AutoTranslate.getRuntimeStatus(), { active: 0, queued: 0 });
+    Assert.deepEqual(Object.keys(AutoTranslate.getRuntimeStatus()), ['active', 'queued']);
+});

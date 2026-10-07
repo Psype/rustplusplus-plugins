@@ -4,10 +4,15 @@ const Fs = require('node:fs');
 const Os = require('node:os');
 const Path = require('node:path');
 
+const RuntimeTelemetry = require('../../util/runtimeTelemetry.js');
+
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const TIMEOUT_MS = 45 * 1000;
 const MAX_USER_WORDS = 1000;
 let queue = Promise.resolve();
+let activeRecognitions = 0;
+let queuedRecognitions = 0;
+let queuedBytes = 0;
 
 /** @typedef {{executable?:string,language?:string,psm?:number,spawnImpl?:Function,timeoutMs?:number,
  * maxOutputBytes?:number,userWords?:unknown,characterWhitelist?:unknown}} OcrOptions */
@@ -146,9 +151,39 @@ async function recognizeOnce(imageBase64, options = {}) {
 
 /** @param {string} imageBase64 @param {OcrOptions} options */
 function recognize(imageBase64, options = {}) {
-    const task = queue.then(() => recognizeOnce(imageBase64, options));
+    const padding = typeof imageBase64 === 'string' && imageBase64.endsWith('==') ? 2 :
+        typeof imageBase64 === 'string' && imageBase64.endsWith('=') ? 1 : 0;
+    const estimatedBytes = typeof imageBase64 === 'string' ?
+        Math.max(0, Math.floor(imageBase64.length * 3 / 4) - padding) : 0;
+    const waitSpan = RuntimeTelemetry.startSpan('ocr_queue_wait');
+    queuedRecognitions += 1;
+    queuedBytes += estimatedBytes;
+    const task = queue.then(async () => {
+        queuedRecognitions = Math.max(0, queuedRecognitions - 1);
+        queuedBytes = Math.max(0, queuedBytes - estimatedBytes);
+        waitSpan.finish('success');
+        activeRecognitions += 1;
+        const runSpan = RuntimeTelemetry.startSpan('ocr_run');
+        try {
+            const result = await recognizeOnce(imageBase64, options);
+            runSpan.finish('success');
+            return result;
+        }
+        catch (error) {
+            runSpan.finish(error instanceof Error && error.message === 'Tesseract OCR timed out.' ?
+                'timeout' : 'failure');
+            throw error;
+        }
+        finally {
+            activeRecognitions = Math.max(0, activeRecognitions - 1);
+        }
+    });
     queue = task.catch(() => undefined);
     return task;
 }
 
-module.exports = Object.freeze({ normalizeUserWords, parseTsv, recognize });
+function getRuntimeStatus() {
+    return Object.freeze({ active: activeRecognitions, queued: queuedRecognitions, queuedBytes });
+}
+
+module.exports = Object.freeze({ getRuntimeStatus, normalizeUserWords, parseTsv, recognize });

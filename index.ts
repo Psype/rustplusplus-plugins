@@ -22,7 +22,13 @@ const Discord = require('discord.js');
 const Fs = require('fs');
 const Path = require('path');
 
+const Config = require('./config');
 const DiscordBot = require('./src/structures/DiscordBot');
+const AutoTranslate = require('./src/plugins/autoTranslate');
+const PlayerIntelligenceImports = require('./src/plugins/playerIntelligence/importWorkflow.js');
+const PlayerScanDaemon = require('./src/plugins/playerIntelligence/scanDaemon.js');
+const TesseractOcr = require('./src/plugins/playerIntelligence/tesseractOcr.js');
+const RuntimeTelemetry = require('./src/util/runtimeTelemetry.js');
 
 createMissingDirectories();
 
@@ -40,6 +46,18 @@ const client = new DiscordBot({
 
 /* Rust+ startup may run before Discord is ready; expose the client before build(). */
 exports.client = client;
+RuntimeTelemetry.start({
+    enabled: Config.runtimeTelemetry.enabled,
+    intervalMs: Config.runtimeTelemetry.intervalMs,
+    logger: (title: string, message: string, level: string) =>
+        client.log(title, message, level),
+    sources: {
+        imports: PlayerIntelligenceImports.getRuntimeStatus,
+        ocr: TesseractOcr.getRuntimeStatus,
+        scans: PlayerScanDaemon.getRuntimeStatus,
+        translations: AutoTranslate.getRuntimeStatus
+    }
+});
 client.build();
 
 function createMissingDirectories() {

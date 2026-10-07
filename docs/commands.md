@@ -33,6 +33,7 @@ Slash Command | Description
 [**/research**](commands.md#research) | Display the cost to research an item.
 [**/reset**](commands.md#reset) | Reset Discord channels.
 [**/role**](commands.md#role) | Set/Clear a specific role that will be able to see the rustplusplus category content.
+[**/runtime**](commands.md#runtime) | Privately show bounded aggregate runtime health to an administrator.
 [**/stack**](commands.md#stack) | Display stack size information for an item.
 [**/storagemonitor**](commands.md#storagemonitors) | Operations on Storage Monitors.
 [**/switch**](commands.md#switch) | Operations on Smart Switches.
@@ -456,6 +457,17 @@ Subcommand | Options | Description | Required
 `clear` | &nbsp; | Clear the role (to allow everyone to see the rustplusplus channels). | &nbsp;
 
 ![Discord Slash Command role Image](images/slash_commands/role.png)
+
+
+## **/runtime**
+
+> **Privately show aggregate bot runtime health. Administrator-only.**
+
+The command acknowledges Discord immediately, then displays the last completed telemetry window: RSS and V8 heap,
+CPU, event-loop utilization/delay, active and queued work, and bounded success/failure/timeout plus p95/max duration
+for translation, OCR, imports and background scans. It never triggers a scan and never includes player names,
+SteamID values, message text, file paths or provider tokens. The reply is always ephemeral. Immediately after startup,
+the first window may not yet be available.
 
 
 ## **/stack**
