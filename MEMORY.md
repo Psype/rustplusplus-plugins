@@ -31,11 +31,13 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   reusable identity consolidator per immutable projection. Release `1.22.33` pre-aggregates global OCR candidates and
   excludes superseded observations without retaining a cloned journal. Release `1.22.34` adds bounded aggregate
   runtime telemetry for translations, OCR, imports and daemon scans plus the administrator-only ephemeral `/runtime`
-  command. At the latest completed release audit, `master`, `origin/master` and `origin/HEAD` were aligned on
-  `1.22.33` immediately before this release; `1.22.34` is the current release. Only `master` plus the useful
+  command. Release `1.22.35` adds one reusable absolute-TTL/LRU cache and bounds rebuildable Steam, BattleMetrics,
+  WarBandits and OCR documents; settled OCR serialization tails are released without changing write ordering. At the
+  latest completed release audit, `master`, `origin/master` and `origin/HEAD` were aligned on `1.22.34` immediately
+  before this release; `1.22.35` is the current release. Only `master` plus the useful
   `origin/master`/`upstream/master` remote-tracking references remained. Do not reset, overwrite, reimplement or
   discard these changes. Re-audit `git status --short` and `git diff` if the observed state differs.
-- Canonical package version is `1.22.34`. The complete local validation on 2026-10-07 passed `288/288` unit tests and
+- Canonical package version is `1.22.35`. The complete local validation on 2026-10-07 passed `295/295` unit tests and
   `tsc --noEmit`; `git diff --check` was clean. This is local deterministic evidence only. Deployment/restart and a
   new Discord import of the reported KIRK screenshot, the SteamID latency/memory improvement and `/runtime` production
   metrics remain unconfirmed, so do not claim production success.
@@ -268,6 +270,13 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   warned once per operation/window. `/runtime` defers ephemerally before its administrator check and displays the last
   completed snapshot without scanning on demand. Intervals are limited to 10 seconds–5 minutes and the timer is
   optional/unref'd. Heap pressure uses the V8 limit; cross-window work reports starts and completions separately.
+- Release `1.22.35` introduces `boundedTtlCache` only for rebuildable runtime state. Steam persona/identity entries are
+  capped at 1,024, Steam warning suppression at 2,048, BattleMetrics responses at 256 and 429 client cooldowns at 128,
+  WarBandits responses at 256, and OCR correction documents at 64. Reads update LRU order without extending the
+  absolute TTL. Provider failures keep their short/normal existing TTL semantics; eviction only causes a bounded
+  provider call or sidecar reread. Settled visual/correction serialization tails delete themselves only when still
+  current, preserving per-path ordering. The canonical JSONL and every file under `data/player-intelligence` remain
+  outside this mechanism. Inventory: `docs/runtime_cache_inventory_2026-10-07.md`.
 - Release `1.22.27` makes `/intel` call Discord's ephemeral `deferReply()` before logging, context loading, permission
   work or player-intelligence journal reads. The command remains administrator-only; this removes local processing
   from Discord's initial response window. AutoTranslate now allows at most two seconds per provider and five seconds
@@ -385,6 +394,9 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   `git diff --check` is clean. Coverage proves bounded dimensions, frozen/reset windows, source/logger fault isolation,
   interval limits, cross-window accounting, CPU/ELU rebaselining after transient collection failure, aggregate-only
   status sources and `/runtime` acknowledgement/privacy.
+- Superseding QA for release `1.22.35` on 2026-10-07: `npm.cmd test` passes 295/295 including `tsc --noEmit`, and
+  `git diff --check` is clean. Coverage proves absolute expiration, LRU eviction, fixed Steam/BattleMetrics/WarBandits
+  cache limits and cleanup of completed OCR correction queues. No persistent player-intelligence data is evicted.
 - Performance check for `1.22.3`: the dedicated glyph benchmark recalls the target among 2,000 aliases with 104 stored
   glyph variants and eight graphemes in a 20.797 ms median. The existing 200-player pipeline measured before/after at
   41.702/39.357 ms initial load, 0.044/0.030 ms quiet-poll mean and 51.356/50.742 ms for ten transitions; no measured

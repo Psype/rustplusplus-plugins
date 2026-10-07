@@ -80,6 +80,7 @@ function harness(t, options = {}) {
         requestGapMs: options.requestGapMs === undefined ? 0 : options.requestGapMs,
         catalogTtlMs: options.catalogTtlMs === undefined ? 3600000 : options.catalogTtlMs,
         statsTtlMs: options.statsTtlMs === undefined ? 300000 : options.statsTtlMs,
+        statsCacheMaxEntries: options.statsCacheMaxEntries,
         cloudflareCooldownMs: options.cloudflareCooldownMs,
         now: () => new Date(currentMs),
         sleep: async milliseconds => {
@@ -208,6 +209,17 @@ Test('player lookups isolate current, historical-ID and all-time caches', async 
     Assert.deepEqual(test.calls.slice(1).map(call => call.config.params.wipe), [0, 'all-time', 8398]);
     Assert.equal((await test.provider.resolvePlayer(null, scope, 'Psype', { wipe: -1 })).reason,
         'invalid wipe');
+});
+
+Test('player lookup cache evicts old WarBandits responses at a fixed limit', async t => {
+    const test = harness(t, { statsCacheMaxEntries: 2 });
+    const scope = { battlemetricsId: '42' };
+    await test.provider.resolvePlayer(null, scope, 'first');
+    await test.provider.resolvePlayer(null, scope, 'second');
+    await test.provider.resolvePlayer(null, scope, 'third');
+    Assert.equal(test.calls.length, 4);
+    await test.provider.resolvePlayer(null, scope, 'first');
+    Assert.equal(test.calls.length, 5);
 });
 
 Test('recent resolution tries current then the interval matching Established and stops before all-time', async t => {

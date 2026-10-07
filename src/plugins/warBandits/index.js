@@ -1,6 +1,8 @@
 /* Detached WarBandits identity/activity provider. It never infers player presence. */
 
 const Axios = require('axios');
+
+const BoundedTtlCache = require('../../util/boundedTtlCache.js');
 const Fs = require('fs');
 const Path = require('path');
 
@@ -12,6 +14,7 @@ const DEFAULT_CATALOG_TTL_MS = 60 * 60 * 1000;
 const DEFAULT_CLOUDFLARE_COOLDOWN_MS = 15 * 60 * 1000;
 const DEFAULT_REQUEST_GAP_MS = 5000;
 const DEFAULT_STATS_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_STATS_CACHE_MAX_ENTRIES = 256;
 const CURRENT_WIPE_PAGE_SIZE = 100;
 const DATA_DIRECTORY = Path.join(__dirname, '..', '..', '..', 'data', 'warbandits');
 const SCHEMA_VERSION = 1;
@@ -302,10 +305,16 @@ function createProvider(dependencies = {}) {
         Math.max(0, Number(dependencies.catalogTtlMs));
     const statsTtlMs = dependencies.statsTtlMs === undefined ? DEFAULT_STATS_TTL_MS :
         Math.max(0, Number(dependencies.statsTtlMs));
+    const statsCacheMaxEntries = dependencies.statsCacheMaxEntries === undefined ?
+        DEFAULT_STATS_CACHE_MAX_ENTRIES : Number(dependencies.statsCacheMaxEntries);
     const cloudflareCooldownMs = dependencies.cloudflareCooldownMs === undefined ?
         DEFAULT_CLOUDFLARE_COOLDOWN_MS : Math.max(0, Number(dependencies.cloudflareCooldownMs));
     const serversPath = Path.join(dataDirectory, 'servers.json');
-    const responseCache = new Map();
+    const responseCache = BoundedTtlCache.createBoundedTtlCache({
+        maxEntries: statsCacheMaxEntries,
+        defaultTtlMs: Math.max(1, statsTtlMs),
+        now: () => dateNow().getTime()
+    });
     const inFlight = new Map();
     let requestTail = Promise.resolve();
     let lastRequestStartedAt = null;
@@ -529,12 +538,12 @@ function createProvider(dependencies = {}) {
     }
 
     function statsCacheGet(key) {
-        const cached = responseCache.get(key);
-        if (!cached || dateNow().getTime() - cached.savedAt > statsTtlMs) {
-            responseCache.delete(key);
-            return null;
-        }
-        return cached.value;
+        return responseCache.get(key) || null;
+    }
+
+    function statsCacheSet(key, value) {
+        if (statsTtlMs > 0) responseCache.set(key, value, statsTtlMs);
+        return value;
     }
 
     function resultTotal(utils) {
@@ -568,7 +577,7 @@ function createProvider(dependencies = {}) {
                     `${apiRoot}/wipes/${encodeURIComponent(server.slug)}`, {});
                 const value = deepFreeze({ available: true, reason: null, server,
                     wipes: parseWipeCatalog(response && response.data), observedAt: dateNow().toISOString() });
-                responseCache.set(key, { savedAt: dateNow().getTime(), value });
+                statsCacheSet(key, value);
                 return value;
             }
             catch (error) {
@@ -651,7 +660,7 @@ function createProvider(dependencies = {}) {
                         observedAt: dateNow().toISOString(),
                         utils: parsed.utils
                     });
-                    responseCache.set(key, { savedAt: dateNow().getTime(), value });
+                    statsCacheSet(key, value);
                     return value;
                 }
                 catch (error) {
@@ -757,7 +766,7 @@ function createProvider(dependencies = {}) {
                     rows: parsed.rows,
                     utils: parsed.utils
                 });
-                responseCache.set(key, { savedAt: dateNow().getTime(), value });
+                statsCacheSet(key, value);
                 return value;
             }
             catch (error) {

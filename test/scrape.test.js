@@ -120,3 +120,27 @@ Test('Steam identity lookup returns the current persona separately from verified
         Scrape.scrape = original;
     }
 });
+
+Test('Steam profile caches evict old derived entries at their fixed limits', async () => {
+    const original = Scrape.scrape;
+    Scrape.resetRuntimeCachesForTests();
+    Scrape.scrape = async () => ({ status: 200, data: '<profile><steamID>bounded</steamID></profile>' });
+    try {
+        for (let index = 0; index < 1025; index += 1) {
+            const steamId = (76561198000000000n + BigInt(index)).toString();
+            Assert.equal(await Scrape.scrapeSteamProfileName(client([]), steamId), 'bounded');
+        }
+        const status = Scrape.getRuntimeCacheStatus();
+        Assert.deepEqual(status, {
+            profileNames: 1024,
+            profileIdentities: 0,
+            warnings: 0,
+            profileLimit: 1024,
+            warningLimit: 2048
+        });
+    }
+    finally {
+        Scrape.resetRuntimeCachesForTests();
+        Scrape.scrape = original;
+    }
+});

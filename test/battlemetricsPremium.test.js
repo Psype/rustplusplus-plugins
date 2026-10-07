@@ -107,15 +107,22 @@ test('BattleMetrics Premium parsers retain only current-server sessions and norm
 
 test('BattleMetrics 429 establishes a provider cooldown without a blind retry', async () => {
     let calls = 0;
+    let current = NOW;
     const httpClient = {
         get: async () => {
             calls += 1;
+            if (calls > 1) {
+                return {
+                    status: 200,
+                    data: { data: { type: 'playerServer', attributes: { name: 'Recovered' } } }
+                };
+            }
             const error = new Error('rate limit body must not escape');
             error.response = { status: 429, headers: { 'retry-after': '120' } };
             throw error;
         }
     };
-    const dependencies = { token: 'token', httpClient, now: () => NOW };
+    const dependencies = { token: 'token', httpClient, now: () => current };
 
     const first = await Battlemetrics.getServerPlayer('1001', '42', dependencies);
     const second = await Battlemetrics.getSessions('1001', '42', dependencies);
@@ -129,6 +136,12 @@ test('BattleMetrics 429 establishes a provider cooldown without a blind retry', 
     });
     Assert.deepEqual(second, first);
     Assert.equal(JSON.stringify(first).includes('rate limit body'), false);
+
+    current = new Date('2026-09-10T12:02:00.000Z');
+    const recovered = await Battlemetrics.getServerPlayer('1001', '42', dependencies);
+    Assert.equal(calls, 2);
+    Assert.equal(recovered.available, true);
+    Assert.equal(recovered.player.name, 'Recovered');
 });
 
 test('BattleMetrics server-player metadata is validated and normalized', async () => {
@@ -155,5 +168,26 @@ test('BattleMetrics server-player metadata is validated and normalized', async (
         battlemetricsPlayerId: '1001', battlemetricsServerId: '42', name: 'Nirks', online: false,
         firstSeenAt: '2026-06-01T00:00:00.000Z', lastSeenAt: '2026-09-09T22:00:00.000Z',
         timePlayedSeconds: 3633
+    });
+});
+
+test('BattleMetrics response cache evicts old provider documents at a fixed limit', async () => {
+    const httpClient = {
+        get: async () => ({
+            status: 200,
+            data: { data: { type: 'playerServer', attributes: { name: 'bounded' } } }
+        })
+    };
+    const dependencies = { token: 'token', httpClient, now: () => NOW };
+    for (let index = 1; index <= 257; index += 1) {
+        const result = await Battlemetrics.getServerPlayer(`${index}`, '42', dependencies);
+        Assert.equal(result.available, true);
+    }
+    Assert.deepEqual(Battlemetrics.getRuntimeCacheStatus(NOW.getTime()), {
+        responses: 256,
+        responseLimit: 256,
+        inFlight: 0,
+        cooldowns: 0,
+        cooldownLimit: 128
     });
 });

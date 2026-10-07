@@ -22,19 +22,27 @@ const Axios = require('axios');
 
 const Constants = require('../util/constants.js');
 const Utils = require('../util/utils.js');
+const BoundedTtlCache = require('./boundedTtlCache.js');
 
 const REQUEST_TIMEOUT_MS = 5000;
 const PROFILE_CACHE_MS = 60 * 60 * 1000;
 const PROFILE_FAILURE_CACHE_MS = 30 * 1000;
-const profileNameCache = new Map();
-const profileIdentityCache = new Map();
-const warningCache = new Map();
+const PROFILE_CACHE_MAX_ENTRIES = 1024;
+const WARNING_CACHE_MAX_ENTRIES = 2048;
+const profileNameCache = BoundedTtlCache.createBoundedTtlCache({
+    maxEntries: PROFILE_CACHE_MAX_ENTRIES, defaultTtlMs: PROFILE_CACHE_MS
+});
+const profileIdentityCache = BoundedTtlCache.createBoundedTtlCache({
+    maxEntries: PROFILE_CACHE_MAX_ENTRIES, defaultTtlMs: PROFILE_CACHE_MS
+});
+const warningCache = BoundedTtlCache.createBoundedTtlCache({
+    maxEntries: WARNING_CACHE_MAX_ENTRIES, defaultTtlMs: PROFILE_CACHE_MS
+});
 
 function logWarningOnce(client, key, message) {
     const now = Date.now();
-    const previous = warningCache.get(key) || 0;
-    if (now - previous < PROFILE_CACHE_MS) return;
-    warningCache.set(key, now);
+    if (warningCache.get(key, now)) return;
+    warningCache.set(key, true, PROFILE_CACHE_MS, now);
     client.log(client.intlGet(null, 'warningCap'), message, 'warn');
 }
 
@@ -61,15 +69,14 @@ module.exports = {
         const id = String(steamId);
         if (!/^\d{17}$/.test(id)) return null;
         const cached = profileNameCache.get(id);
-        const cacheDuration = cached && cached.name === null ? PROFILE_FAILURE_CACHE_MS : PROFILE_CACHE_MS;
-        if (cached && Date.now() - cached.cachedAt < cacheDuration) return cached.name;
+        if (cached) return cached.name;
 
         const link = `${Constants.STEAM_PROFILES_URL}${id}?xml=1`;
         const response = await module.exports.scrape(link);
 
         if (response.status !== 200) {
             logWarningOnce(client, `name:${id}`, client.intlGet(null, 'failedToScrapeProfileName', { link }));
-            profileNameCache.set(id, Object.freeze({ name: null, cachedAt: Date.now() }));
+            profileNameCache.set(id, Object.freeze({ name: null }), PROFILE_FAILURE_CACHE_MS);
             return null;
         }
 
@@ -78,12 +85,12 @@ module.exports = {
             /<steamID>([\s\S]*?)<\/steamID>/i.exec(xml);
         if (match && match[1].trim() !== '') {
             const name = Utils.decodeHtml(match[1].trim());
-            profileNameCache.set(id, Object.freeze({ name, cachedAt: Date.now() }));
+            profileNameCache.set(id, Object.freeze({ name }));
             return name;
         }
 
         logWarningOnce(client, `name:${id}`, client.intlGet(null, 'failedToScrapeProfileName', { link }));
-        profileNameCache.set(id, Object.freeze({ name: null, cachedAt: Date.now() }));
+        profileNameCache.set(id, Object.freeze({ name: null }), PROFILE_FAILURE_CACHE_MS);
         return null;
     },
 
@@ -91,8 +98,7 @@ module.exports = {
         const id = String(steamId);
         if (!/^\d{17}$/.test(id)) return null;
         const cached = profileIdentityCache.get(id);
-        const cacheDuration = cached && cached.complete ? PROFILE_CACHE_MS : PROFILE_FAILURE_CACHE_MS;
-        if (cached && Date.now() - cached.cachedAt < cacheDuration) return cached.identity;
+        if (cached) return cached.identity;
 
         const aliasLink = `${Constants.STEAM_PROFILES_URL}${id}/ajaxaliases/`;
         const [currentName, aliasResponse] = await Promise.all([
@@ -100,7 +106,7 @@ module.exports = {
             module.exports.scrape(aliasLink)
         ]);
         if (!currentName) {
-            profileIdentityCache.set(id, Object.freeze({ identity: null, complete: false, cachedAt: Date.now() }));
+            profileIdentityCache.set(id, Object.freeze({ identity: null }), PROFILE_FAILURE_CACHE_MS);
             return null;
         }
 
@@ -127,11 +133,24 @@ module.exports = {
             pastAliases: Object.freeze(aliases),
             aliasesComplete: aliasResponse.status === 200 && Array.isArray(aliasResponse.data)
         });
-        profileIdentityCache.set(id, Object.freeze({
-            identity,
-            complete: identity.aliasesComplete,
-            cachedAt: Date.now()
-        }));
+        profileIdentityCache.set(id, Object.freeze({ identity }),
+            identity.aliasesComplete ? PROFILE_CACHE_MS : PROFILE_FAILURE_CACHE_MS);
         return identity;
+    },
+
+    getRuntimeCacheStatus: function () {
+        return Object.freeze({
+            profileNames: profileNameCache.size,
+            profileIdentities: profileIdentityCache.size,
+            warnings: warningCache.size,
+            profileLimit: PROFILE_CACHE_MAX_ENTRIES,
+            warningLimit: WARNING_CACHE_MAX_ENTRIES
+        });
+    },
+
+    resetRuntimeCachesForTests: function () {
+        profileNameCache.clear();
+        profileIdentityCache.clear();
+        warningCache.clear();
     },
 }

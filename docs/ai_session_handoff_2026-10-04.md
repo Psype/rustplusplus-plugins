@@ -17,8 +17,8 @@ Avant toute modification :
 4. ne fais ni reset, ni checkout destructif, ni réécriture globale du worktree ;
 5. ne prétends jamais qu’un comportement fonctionne en production sur la seule base des tests locaux.
 
-État observé avant la release courante : branche master, HEAD/origin/master alignés sur la release 1.22.33 et
-worktree propre. La release 1.22.34 ajoute une télémétrie runtime bornée et la commande administrateur `/runtime`.
+État observé avant la release courante : branche master, HEAD/origin/master alignés sur `7fe4e72`, release 1.22.34,
+et worktree propre. La release 1.22.35 borne les caches fournisseurs/OCR reconstructibles sans toucher au journal.
 Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; `a308c0a` ajoute la
 1.22.27. La release suivante 1.22.28 groupe les alias pending par identité BattleMetrics et ajoute le fallback
 WarBandits courant -> intervalle historique pertinent -> all-time. La release 1.22.29 centralise toute consolidation
@@ -33,13 +33,15 @@ La release 1.22.33 déduplique avant consolidation, lit seulement les tags utile
 supersédée du réservoir actif.
 La release 1.22.34 mesure sans contenu privé la mémoire, le CPU, la boucle Node, les files et six opérations critiques
 dans des fenêtres à cardinalité fixe ; `/runtime` expose le dernier snapshot dans une réponse Discord éphémère.
+La release 1.22.35 plafonne et expire par LRU les caches Steam, BattleMetrics, WarBandits et OCR, puis libère les tails
+de sérialisation OCR réglées sans altérer l'ordre des écritures.
 La première conserve les identifiants de ligne TSV
 Tesseract pour empêcher un pseudo /cinfo replié (U Got Kirkified) d’absorber Established, accepte la confusion l/I/1
 uniquement dans l’ancre et garde une date illisible éditable avec Confirm désactivé. La seconde ajoute la
 réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
 d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La suivante borne les délais de réponse
 Discord/traduction et la dernière fiabilise la sémantique des identités connues et des wipes WarBandits. La dernière
-validation complète a passé 288/288 tests et tsc --noEmit ; le déploiement et la
+validation complète a passé 295/295 tests et tsc --noEmit ; le déploiement et la
 nouvelle capture Discord restent à valider réellement.
 
 Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
@@ -58,8 +60,8 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 - Dépôt : `rustplusplus-plugins`.
 - Branche au moment de la passation : `master`.
-- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur la release `1.22.33` avant la release courante.
-- Version canonique du worktree : `1.22.34` dans `package.json` et `package-lock.json`.
+- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur `7fe4e72`, release `1.22.34`, avant la release courante.
+- Version canonique du worktree : `1.22.35` dans `package.json` et `package-lock.json`.
 - Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
   métrique d’heures WarBandits.
 - Le commit utilisateur `d327e7d` regroupe les releases `1.22.24` à `1.22.26`, notamment dans :
@@ -135,12 +137,30 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
   - `test/runtimeTelemetry.test.js`, `test/runtimeCommand.test.js` et les tests de statut numérique des métiers ;
   - `.env.example`, `docs/installation.md`, les documents de commandes et le plan runtime.
 
+- La release `1.22.35` borne les caches reconstructibles, notamment dans :
+
+  - `src/util/boundedTtlCache.js` et `src/util/scrape.js` ;
+  - les fournisseurs BattleMetrics et WarBandits ;
+  - les documents et queues de sérialisation OCR correction/alias visuels ;
+  - les tests d'expiration, d'éviction et de libération des queues ;
+  - `docs/runtime_cache_inventory_2026-10-07.md` et le plan runtime.
+
 - Il ne reste qu'une branche locale `master`. Les deux anciennes branches `origin/codex/*`, déjà entièrement intégrées,
   ont été supprimées ; le suivi de l'amont est limité à `upstream/master`, avec pruning automatique des références.
 
 Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
 
-## Dernière correction : release 1.22.34
+## Dernière correction : release 1.22.35
+
+`boundedTtlCache` applique un TTL absolu non glissant et une éviction LRU après purge des expirés. Les plafonds sont
+1 024 personas Steam, 1 024 identités Steam, 2 048 avertissements Steam, 256 réponses et 128 cooldowns BattleMetrics,
+256 réponses WarBandits et 64 documents OCR. Toutes ces valeurs sont reconstructibles ; leur éviction ne supprime
+aucune preuve. Les tailles, TTL et reports vers les lots 10/11 sont consignés dans l'inventaire des caches runtime.
+
+Les queues par chemin de correction OCR et d'alias visuels suppriment leur Promise réglée seulement si elle reste la
+tail courante. Une nouvelle écriture enchaînée garde ainsi l'exclusion mutuelle. Aucun fichier persistant n'est purgé.
+
+## Correction précédente : release 1.22.34
 
 `runtimeTelemetry` conserve une seule fenêtre courante et le dernier snapshot profondément immuable. Les opérations,
 issues, buckets de durée et champs de sources sont fermés : aucune dimension libre, identité joueur, chaîne de message,
@@ -325,9 +345,9 @@ inventer ni commiter silencieusement.
 
 ## Validation déjà effectuée
 
-Le 7 octobre 2026, après la release 1.22.34 :
+Le 7 octobre 2026, après la release 1.22.35 :
 
-- `npm.cmd test` : `288/288` tests unitaires réussis ;
+- `npm.cmd test` : `295/295` tests unitaires réussis ;
 - `tsc --noEmit -p .` : réussi dans la même commande ;
 - `git diff --check` : aucune erreur ;
 - `npm.cmd run test:autotranslate:live` : réussi en 8,9 s pour six scénarios cumulés ; Bing a atteint sa borne de deux
@@ -339,7 +359,8 @@ Le 7 octobre 2026, après la release 1.22.34 :
   traduction, regroupement des alias BattleMetrics pending, liens `/cinfo` adossés à un identifiant et fallback de
   wipes WarBandits avec ambiguïté manuelle et jointure Steam/BM exacte non conflictuelle, consolidation locale unique,
   conflits/ambiguïtés fermés, alias Steam courants/passés vérifiés, cardinalité de télémétrie fermée,
-  isolement des sources de métriques, spans inter-fenêtres et acquittement `/runtime` avant autorisation/lecture.
+  isolement des sources de métriques, spans inter-fenêtres, acquittement `/runtime` avant autorisation/lecture,
+  expiration absolue/LRU et plafonds des caches Steam, BattleMetrics, WarBandits et OCR.
 
 Ces résultats ne prouvent ni le comportement du binaire Tesseract installé sur Linux, ni le téléchargement Discord, ni
 les fournisseurs externes, ni le processus de déploiement.
@@ -422,7 +443,7 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
 
 ## Vérifications de production encore ouvertes
 
-1. Déployer/redémarrer `1.22.34`, vérifier le message `RUSTPLUS v1.22.34 OPERATIONAL`, puis rejouer le lot de 11
+1. Déployer/redémarrer `1.22.35`, vérifier le message `RUSTPLUS v1.22.35 OPERATIONAL`, puis rejouer le lot de 11
    SteamID. Mesurer temps de réponse, RSS et heap avant/après ; exiger les noms locaux connus et aucun Replace/Keep.
    Après une fenêtre, contrôler `/runtime`, `RUNTIME`, `RUNTIME_WORK` et les éventuels `RUNTIME_SLOW`, sans donnée joueur.
 2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent

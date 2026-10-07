@@ -113,16 +113,32 @@ dimension supplémentaire. Le timer est `unref`, l’intervalle est borné à 10
 collecte sont isolées du travail du bot. La pression heap est comparée à la limite V8, pas au heap momentanément
 réservé. La preuve de stabilité mémoire reste une observation Linux après redémarrage, pas ce test déterministe.
 
-### Lot 5 — Caches bornés et expirables
+### Lot 5a — Caches fournisseurs et OCR bornés — release 1.22.35
 
-Statut : planifié.
+Statut : implémenté et validé localement ; déploiement à vérifier.
 
 1. Inventorier les Maps de Steam, WarBandits, BattleMetrics, OCR et traduction.
-2. Donner à chaque cache une taille maximale, un TTL et une politique d’éviction documentés.
-3. Ne jamais confondre cache dérivé et preuve append-only.
-4. Tester expiration, éviction, panne fournisseur et redémarrage.
+2. Centraliser une politique LRU+TTL absolue, bornée et réservée aux données reconstructibles.
+3. Borner les profils Steam (1 024), avertissements Steam (2 048), documents BattleMetrics (256), cooldowns BM (128),
+   réponses WarBandits (256) et documents OCR (64).
+4. Retirer les tails de sérialisation OCR une fois réglés sans briser l'ordre des écritures.
+5. Reporter explicitement les previews/Tesseract au lot 10 et le journal/projections au lot 11.
 
 Critères : aucune croissance sans borne et aucune perte de données canoniques.
+
+Résultat local : expiration à la frontière, LRU sans TTL glissant et limites réelles sont couvertes par tests.
+Les évictions obligent seulement un nouvel appel ou une relecture de sidecar. L'inventaire canonique et les raisons de
+ne pas traiter certaines structures comme des caches sont dans `runtime_cache_inventory_2026-10-07.md`.
+
+### Lot 5b — Petits états dérivés
+
+Statut : planifié comme sous-lot séparé.
+
+1. Borner les fingerprints de hooks player-intelligence.
+2. Expirer les timestamps de cooldown/anti-spam du daemon.
+3. Plafonner les sélecteurs player-tracker abandonnés sans perdre le message `expired`.
+
+Critères : cardinalité fixe, comportement de cooldown/sélection identique et aucune réingestion non idempotente.
 
 ### Lot 6 — Équité et reprise du daemon
 

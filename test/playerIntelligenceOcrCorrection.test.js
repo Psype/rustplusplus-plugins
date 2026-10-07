@@ -85,3 +85,23 @@ Test('a corrupt correction memory is preserved and rejected', async t => {
     await Assert.rejects(() => Memory.read(file), Memory.OcrCorrectionMemoryCorruptionError);
     Assert.equal(Fs.readFileSync(file, 'utf8'), '{broken');
 });
+
+Test('OCR correction document cache is bounded and completed file queues are released', async t => {
+    Memory.resetRuntimeCachesForTests();
+    const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-ocr-correction-cache-'));
+    t.after(() => {
+        Memory.resetRuntimeCachesForTests();
+        Fs.rmSync(directory, { recursive: true, force: true });
+    });
+    for (let index = 0; index < 65; index += 1) {
+        const file = Path.join(directory, `memory-${index}.json`);
+        Fs.writeFileSync(file, '{"schemaVersion":1,"templates":[]}\n', 'utf8');
+        Assert.deepEqual(await Memory.confirmedWords(file), []);
+    }
+    await new Promise(resolve => setImmediate(resolve));
+    Assert.deepEqual(Memory.getRuntimeCacheStatus(), {
+        documents: 64,
+        documentLimit: 64,
+        queues: 0
+    });
+});

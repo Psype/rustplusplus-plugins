@@ -266,7 +266,11 @@ function serialized(file, operation) {
     const key = Path.resolve(file);
     const previous = sharedQueues.get(key) || Promise.resolve();
     const current = previous.then(operation);
-    sharedQueues.set(key, current.then(() => undefined, () => undefined));
+    const tail = current.then(() => undefined, () => undefined);
+    sharedQueues.set(key, tail);
+    void tail.then(() => {
+        if (sharedQueues.get(key) === tail) sharedQueues.delete(key);
+    });
     return current;
 }
 

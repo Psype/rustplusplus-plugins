@@ -3,6 +3,7 @@ const Crypto = require('node:crypto');
 const Fs = require('node:fs');
 const Path = require('node:path');
 
+const BoundedTtlCache = require('../../util/boundedTtlCache.js');
 const VisualAliasLibrary = require('./visualAliasLibrary.js');
 
 const SCHEMA_VERSION = 1;
@@ -10,8 +11,12 @@ const MAX_TEMPLATES = 2000;
 const MAX_TEMPLATES_PER_NAME = 4;
 const APPROXIMATE_THRESHOLD = 0.985;
 const APPROXIMATE_MARGIN = 0.03;
+const DOCUMENT_CACHE_MAX_ENTRIES = 64;
+const DOCUMENT_CACHE_TTL_MS = 10 * 60 * 1000;
 const sharedQueues = new Map();
-const documentCache = new Map();
+const documentCache = BoundedTtlCache.createBoundedTtlCache({
+    maxEntries: DOCUMENT_CACHE_MAX_ENTRIES, defaultTtlMs: DOCUMENT_CACHE_TTL_MS
+});
 const indexCache = new WeakMap();
 
 class OcrCorrectionMemoryCorruptionError extends Error {
@@ -161,8 +166,25 @@ function serialized(file, operation) {
     const key = Path.resolve(file);
     const previous = sharedQueues.get(key) || Promise.resolve();
     const current = previous.then(operation);
-    sharedQueues.set(key, current.then(() => undefined, () => undefined));
+    const tail = current.then(() => undefined, () => undefined);
+    sharedQueues.set(key, tail);
+    void tail.then(() => {
+        if (sharedQueues.get(key) === tail) sharedQueues.delete(key);
+    });
     return current;
+}
+
+function getRuntimeCacheStatus() {
+    return Object.freeze({
+        documents: documentCache.size,
+        documentLimit: DOCUMENT_CACHE_MAX_ENTRIES,
+        queues: sharedQueues.size
+    });
+}
+
+function resetRuntimeCachesForTests() {
+    documentCache.clear();
+    sharedQueues.clear();
 }
 
 /** @param {string} observed @param {readonly string[]} confirmedNames */
@@ -347,8 +369,10 @@ module.exports = Object.freeze({
     confirmedWords,
     decoratedCore,
     match,
+    getRuntimeCacheStatus,
     read,
     recordConfirmed,
+    resetRuntimeCachesForTests,
     validateDocument,
     validateTemplate
 });

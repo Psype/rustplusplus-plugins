@@ -3,6 +3,7 @@
 const Axios = require('axios');
 
 const Config = require('../../../config');
+const BoundedTtlCache = require('../../util/boundedTtlCache.js');
 
 const API_ROOT = 'https://api.battlemetrics.com';
 const API_TIMEOUT_MS = 5000;
@@ -10,10 +11,17 @@ const MAX_CONTENT_LENGTH = 2 * 1024 * 1024;
 const MAX_PLAYER_NAME_LENGTH = 128;
 const MAX_RELATED_PLAYERS = 10;
 const MAX_SESSIONS = 10;
-const cache = new Map();
+const CACHE_MAX_ENTRIES = 256;
+const COOLDOWN_MAX_ENTRIES = 128;
+const CACHE_DEFAULT_TTL_MS = 10 * 60 * 1000;
+const cache = BoundedTtlCache.createBoundedTtlCache({
+    maxEntries: CACHE_MAX_ENTRIES, defaultTtlMs: CACHE_DEFAULT_TTL_MS
+});
 const inFlight = new Map();
 const clientIds = new WeakMap();
-const cooldowns = new Map();
+const cooldowns = BoundedTtlCache.createBoundedTtlCache({
+    maxEntries: COOLDOWN_MAX_ENTRIES, defaultTtlMs: 60 * 60 * 1000
+});
 let nextClientId = 1;
 
 class BattlemetricsApiError extends Error {
@@ -120,8 +128,10 @@ function normalizeHttpError(error, dependencies, cooldownKey) {
         if (status === 403) return new BattlemetricsApiError('subscription or permission denied', status);
         if (status === 404) return new BattlemetricsApiError('not found', status);
         if (status === 429) {
-            const retryAt = parseRetryAt(error.response.headers, getNow(dependencies));
-            cooldowns.set(cooldownKey, Math.max(cooldowns.get(cooldownKey) || 0, Date.parse(retryAt)));
+            const current = getNow(dependencies);
+            const retryAt = parseRetryAt(error.response.headers, current);
+            const retryAtMs = Math.max(cooldowns.get(cooldownKey, current.getTime()) || 0, Date.parse(retryAt));
+            cooldowns.set(cooldownKey, retryAtMs, Math.max(1, retryAtMs - current.getTime()), current.getTime());
             return new BattlemetricsApiError('HTTP 429', status, retryAt);
         }
         return new BattlemetricsApiError(`HTTP ${status}`, status);
@@ -146,13 +156,13 @@ async function requestDocument(path, params, dependencies = {}, options = {}) {
     const httpClient = dependencies.httpClient || Axios;
     if (!clientIds.has(httpClient)) clientIds.set(httpClient, nextClientId++);
     const clientId = clientIds.get(httpClient);
-    const cooldownUntilMs = cooldowns.get(clientId) || 0;
+    const cooldownUntilMs = cooldowns.get(clientId, now.getTime()) || 0;
     if (cooldownUntilMs > now.getTime()) {
         throw new BattlemetricsApiError('HTTP 429', 429, new Date(cooldownUntilMs).toISOString());
     }
     const key = `${clientId}:${path}?${stableParams(params)}`;
-    const cached = cache.get(key);
-    if (cached && cached.expiresAt > now.getTime()) return cached.document;
+    const cached = cache.get(key, now.getTime());
+    if (cached) return cached;
     if (inFlight.has(key)) return inFlight.get(key);
 
     const promise = (async () => {
@@ -178,10 +188,7 @@ async function requestDocument(path, params, dependencies = {}, options = {}) {
                 options.allowMissingPrimary === true);
             const frozen = immutable(document);
             if (Number.isFinite(options.cacheTtlMs) && options.cacheTtlMs > 0) {
-                cache.set(key, Object.freeze({
-                    expiresAt: now.getTime() + options.cacheTtlMs,
-                    document: frozen
-                }));
+                cache.set(key, frozen, options.cacheTtlMs, now.getTime());
             }
             return frozen;
         }
@@ -455,9 +462,20 @@ function resetForTests() {
     cooldowns.clear();
 }
 
+function getRuntimeCacheStatus(nowMs = Date.now()) {
+    return Object.freeze({
+        responses: cache.count(nowMs),
+        responseLimit: CACHE_MAX_ENTRIES,
+        inFlight: inFlight.size,
+        cooldowns: cooldowns.count(nowMs),
+        cooldownLimit: COOLDOWN_MAX_ENTRIES
+    });
+}
+
 module.exports = Object.freeze({
     API_TIMEOUT_MS,
     getRelatedPlayers,
+    getRuntimeCacheStatus,
     getServerPlayer,
     getSessions,
     parseRelatedPlayers,

@@ -849,7 +849,7 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale la plus récente après ajout de la télémétrie bornée : `npm.cmd test` passe 288/288 le 7 octobre 2026,
+QA locale la plus récente après bornage des caches fournisseurs/OCR : `npm.cmd test` passe 295/295 le 7 octobre 2026,
 dont le typage strict `tsc --noEmit`. Une
 couverture déterministe reproduit la mauvaise attribution `』Marley』`/`Swizzy`, vérifie le découpage relatif aux
 virgules, la fusion `n444shj, spirit_monger19`, le rejet des comptes/doublons manuels et l'absence d'apprentissage avant
@@ -880,6 +880,12 @@ imports et cycles du daemon. Chaque fenêtre conserve uniquement des compteurs e
 CPU, retard de boucle et tailles de files numériques. `/runtime` expose le dernier snapshot uniquement à un
 administrateur dans une réponse éphémère ; aucun nom, SteamID, texte, chemin ou token n’entre dans ces structures.
 Cette observation doit guider les lots suivants et ne constitue pas encore une preuve de stabilité en production.
+
+La release 1.22.35 applique ensuite un TTL absolu et un plafond LRU aux données reconstructibles Steam,
+BattleMetrics, WarBandits et aux documents de correction OCR. Les tails de sérialisation OCR réglées sont retirées
+conditionnellement, sans ouvrir deux écritures concurrentes. Les preuves JSONL, sidecars persistants et projections
+canoniques restent hors de ce mécanisme. L'inventaire `docs/runtime_cache_inventory_2026-10-07.md` documente chaque
+TTL/plafond et reporte les previews/Tesseract et le cycle de vie du journal aux lots spécialisés.
 
 Scénario reproductible `npm run benchmark:player-intelligence` : roster initial de 200 joueurs, 60 polls silencieux,
 puis 10 déconnexions. Le premier profilage lisait/reprojetait le journal à chaque poll silencieux : `25,397 ms/poll`.
