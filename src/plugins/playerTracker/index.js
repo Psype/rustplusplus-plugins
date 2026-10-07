@@ -4,6 +4,7 @@ const Axios = require('axios');
 const Fs = require('fs');
 const Path = require('path');
 
+const BoundedTtlCache = require('../../util/boundedTtlCache.js');
 const Constants = require('../../util/constants.js');
 const PlayerNameReconciler = require('../../util/playerNameReconciler.js');
 const Utils = require('../../util/utils.js');
@@ -16,9 +17,17 @@ const MAX_PREMIUM_RESULTS = 10;
 const MAX_QUERY_LENGTH = 64;
 const SCHEMA_VERSION = 2;
 const SELECTION_TTL_MS = 5 * 60 * 1000;
+const EXPIRED_SELECTION_NOTICE_TTL_MS = 24 * 60 * 60 * 1000;
+const SELECTION_MAX_ENTRIES = 1024;
 const STATUS_VALUES = Object.freeze(['online', 'offline', 'unknown']);
 const mutationLocks = new Map();
-const pendingSelections = new Map();
+const pendingSelections = BoundedTtlCache.createBoundedTtlCache({
+    maxEntries: SELECTION_MAX_ENTRIES, defaultTtlMs: SELECTION_TTL_MS + 1
+});
+const expiredSelectionNotices = BoundedTtlCache.createBoundedTtlCache({
+    maxEntries: SELECTION_MAX_ENTRIES,
+    defaultTtlMs: SELECTION_TTL_MS + EXPIRED_SELECTION_NOTICE_TTL_MS + 1
+});
 
 function handled(response) {
     return Object.freeze({ handled: true, response, logType: 'PlayerTracker' });
@@ -594,15 +603,27 @@ function getNowMs(dependencies) {
 function rememberSelection(context, scope, commandQuery, lookupQuery, requestedSteamId, candidates, dependencies) {
     const key = getSelectionKey(context, scope);
     const choices = Object.freeze(candidates.slice(0, 5));
-    pendingSelections.set(key, Object.freeze({
+    const current = getNowMs(dependencies);
+    const pending = Object.freeze({
         commandQuery: normalize(commandQuery),
         displayQuery: commandQuery,
         lookupQuery,
         requestedSteamId,
         candidates: choices,
-        expiresAt: getNowMs(dependencies) + SELECTION_TTL_MS
-    }));
+        expiresAt: current + SELECTION_TTL_MS
+    });
+    pendingSelections.set(key, pending, SELECTION_TTL_MS + 1, current);
+    expiredSelectionNotices.set(key, Object.freeze({
+        commandQuery: pending.commandQuery,
+        displayQuery: pending.displayQuery,
+        expiresAt: pending.expiresAt
+    }), SELECTION_TTL_MS + EXPIRED_SELECTION_NOTICE_TTL_MS + 1, current);
     return Object.freeze({ key, choices });
+}
+
+function deleteRememberedSelection(key) {
+    pendingSelections.delete(key);
+    expiredSelectionNotices.delete(key);
 }
 
 function resolveRememberedSelection(context, scope, query, dependencies) {
@@ -610,9 +631,15 @@ function resolveRememberedSelection(context, scope, query, dependencies) {
     const qualified = /^(.+?)\s+([1-9]\d*)$/.exec(query);
     if (!shorthand && !qualified) return null;
     const key = getSelectionKey(context, scope);
-    const pending = pendingSelections.get(key);
-    if (!pending || (qualified && pending.commandQuery !== normalize(qualified[1]))) return null;
-    if (pending.expiresAt < getNowMs(dependencies)) {
+    const current = getNowMs(dependencies);
+    const pending = pendingSelections.get(key, current);
+    if (!pending) {
+        const expired = expiredSelectionNotices.get(key, current);
+        if (!expired || (qualified && expired.commandQuery !== normalize(qualified[1]))) return null;
+        return Object.freeze({ error: 'expired', key, pending: expired });
+    }
+    if (qualified && pending.commandQuery !== normalize(qualified[1])) return null;
+    if (pending.expiresAt < current) {
         pendingSelections.delete(key);
         return Object.freeze({ error: 'expired', key, pending });
     }
@@ -930,7 +957,7 @@ async function track(context, query, dependencies) {
         await linkWarBanditsPlayer(
             context, scope, existingSteamPlayer, existingWarBanditsPlayer,
             requestedSteamId, dependencies);
-        if (selectionKey) pendingSelections.delete(selectionKey);
+        if (selectionKey) deleteRememberedSelection(selectionKey);
         return handled(`Already tracked: ${existingSteamPlayer.name} (BM:${existingSteamPlayer.playerId}).`);
     }
 
@@ -983,7 +1010,7 @@ async function track(context, query, dependencies) {
         await linkWarBanditsPlayer(
             context, scope, existingPlayer, existingWarBanditsPlayer,
             existingPlayer.steamId || (existingWarBanditsPlayer && existingWarBanditsPlayer.steamId), dependencies);
-        if (selectionKey) pendingSelections.delete(selectionKey);
+        if (selectionKey) deleteRememberedSelection(selectionKey);
         return handled(`Already tracked: ${candidate.name} (BM:${candidate.playerId}).`);
     }
 
@@ -1031,10 +1058,10 @@ async function track(context, query, dependencies) {
                     { [candidate.playerId]: candidate }, dependencies);
                 await linkWarBanditsPlayer(
                     context, freshScope, duplicate, warBanditsPlayer, requestedSteamId, dependencies);
-                if (selectionKey) pendingSelections.delete(selectionKey);
+                if (selectionKey) deleteRememberedSelection(selectionKey);
                 return handled(`Tracking updated: ${duplicate.name} | BM:${duplicate.playerId} | Steam:${requestedSteamId}.`);
             }
-            if (selectionKey) pendingSelections.delete(selectionKey);
+            if (selectionKey) deleteRememberedSelection(selectionKey);
             return handled(`Already tracked: ${duplicate.name} (BM:${duplicate.playerId}).`);
         }
         const tracker = {
@@ -1051,7 +1078,7 @@ async function track(context, query, dependencies) {
             { [candidate.playerId]: candidate }, dependencies);
         await linkWarBanditsPlayer(
             context, freshScope, candidate, warBanditsPlayer, steamId, dependencies);
-        if (selectionKey) pendingSelections.delete(selectionKey);
+        if (selectionKey) deleteRememberedSelection(selectionKey);
         return handled(`Tracking: ${candidate.name} | BM:${candidate.playerId} | Steam:${steamId || 'unavailable'} | ${candidate.status}.`);
     });
 }
@@ -1201,10 +1228,26 @@ async function onBattlemetricsUpdated(context) {
     }
 }
 
+function getRuntimeCacheStatus(nowMs = Date.now()) {
+    return Object.freeze({
+        pendingSelections: pendingSelections.count(nowMs),
+        pendingSelectionLimit: SELECTION_MAX_ENTRIES,
+        expiredNotices: expiredSelectionNotices.count(nowMs),
+        expiredNoticeLimit: SELECTION_MAX_ENTRIES
+    });
+}
+
+function resetRuntimeCachesForTests() {
+    pendingSelections.clear();
+    expiredSelectionNotices.clear();
+}
+
 module.exports = Object.freeze({
+    getRuntimeCacheStatus,
     handleCommand,
     onBattlemetricsUpdated,
     parseSteamProfileName,
     parseSteamId,
+    resetRuntimeCachesForTests,
     selectCandidate
 });

@@ -2,6 +2,7 @@
 const Crypto = require('node:crypto');
 const Path = require('node:path');
 
+const BoundedTtlCache = require('../../util/boundedTtlCache.js');
 const Scrape = require('../../util/scrape.js');
 const Core = require('./index.js');
 const F7IdentityValidation = require('./f7IdentityValidation.js');
@@ -13,7 +14,11 @@ const COLLECTOR_VERSION = 'player-intelligence-1';
 const DATA_DIRECTORY = Path.join(__dirname, '..', '..', '..', 'data', 'player-intelligence');
 const MAX_QUERY_LENGTH = 128;
 const IN_GAME_BUDGET = 122;
-const hookStates = new Map();
+const HOOK_STATE_MAX_ENTRIES = 128;
+const HOOK_STATE_TTL_MS = 24 * 60 * 60 * 1000;
+const hookStates = BoundedTtlCache.createBoundedTtlCache({
+    maxEntries: HOOK_STATE_MAX_ENTRIES, defaultTtlMs: HOOK_STATE_TTL_MS
+});
 
 /** @param {any} context @returns {any} */
 function getDependencies(context) {
@@ -28,6 +33,13 @@ function normalize(value) {
 /** @param {unknown} value */
 function sanitize(value) {
     return `${value || ''}`.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** @param {string[]} values */
+function stableFingerprint(values) {
+    const hash = Crypto.createHash('sha256');
+    for (const value of values.sort()) hash.update(`${value.length}:`, 'utf8').update(value, 'utf8');
+    return hash.digest('hex');
 }
 
 /** @param {unknown} value */
@@ -526,19 +538,21 @@ async function onBattlemetricsUpdated(context) {
     const identityHistory = dependencies.identityHistory;
     const legacyRows = identityHistory && typeof identityHistory.getIdentityRows === 'function' ?
         identityHistory.getIdentityRows({ guildId: context.guildId, serverId: scope.serverId }) : [];
-    const trackerFingerprint = trackerIdentities.map(identity =>
-        `${identity.steamId}:${identity.battlemetricsPlayerId}:${identity.name}`).sort().join('|');
-    const legacyFingerprint = legacyRows.map((/** @type {any} */ identity) =>
+    const trackerFingerprint = stableFingerprint(trackerIdentities.map(identity =>
+        `${identity.steamId}:${identity.battlemetricsPlayerId}:${identity.name}`));
+    const legacyFingerprint = stableFingerprint(legacyRows.map((/** @type {any} */ identity) =>
         `${identity.observedAt}:${identity.steamId}:${identity.battlemetricsPlayerId || ''}:${identity.name}`)
-        .sort().join('|');
+    );
     const hasDeltas = reliable && (context.firstTime ||
         ['newPlayers', 'loginPlayers', 'logoutPlayers', 'nameChangedPlayers']
             .some(key => Array.isArray(scope.battlemetrics[key]) && scope.battlemetrics[key].length > 0));
     const stateKey = typeof store.directory === 'string' ? store.directory : null;
-    const previousHookState = stateKey ? hookStates.get(stateKey) : null;
+    const hookTime = stateKey ? Date.parse(nowIso(dependencies)) : undefined;
+    const previousHookState = stateKey ? hookStates.get(stateKey, hookTime) : null;
     if (previousHookState && previousHookState.reliable === reliable && !hasDeltas &&
         previousHookState.wipeId === scope.wipeId && previousHookState.trackerFingerprint === trackerFingerprint &&
         previousHookState.legacyFingerprint === legacyFingerprint) {
+        hookStates.set(stateKey, previousHookState, HOOK_STATE_TTL_MS, hookTime);
         schedulePlayerScan(context, scope, store, dependencies);
         return;
     }
@@ -580,7 +594,7 @@ async function onBattlemetricsUpdated(context) {
         if (events.length > 0) await store.appendMany(events);
         if (stateKey) hookStates.set(stateKey, {
             reliable, wipeId: scope.wipeId, trackerFingerprint, legacyFingerprint
-        });
+        }, HOOK_STATE_TTL_MS, hookTime);
         schedulePlayerScan(context, scope, store, dependencies);
         return;
     }
@@ -648,7 +662,7 @@ async function onBattlemetricsUpdated(context) {
     if (events.length > 0) await store.appendMany(events);
     if (stateKey) hookStates.set(stateKey, {
         reliable, wipeId: scope.wipeId, trackerFingerprint, legacyFingerprint
-    });
+    }, HOOK_STATE_TTL_MS, hookTime);
     schedulePlayerScan(context, scope, store, dependencies);
 }
 
@@ -1362,6 +1376,14 @@ async function recordWarBanditsIdentity(context, player, observedAt) {
     return (await store.append(event)).appended;
 }
 
+function getRuntimeCacheStatus(nowMs = Date.now()) {
+    return Object.freeze({ hookStates: hookStates.count(nowMs), hookStateLimit: HOOK_STATE_MAX_ENTRIES });
+}
+
+function resetRuntimeCachesForTests() {
+    hookStates.clear();
+}
+
 module.exports = Object.freeze({
     DATA_DIRECTORY,
     boundedList,
@@ -1369,6 +1391,7 @@ module.exports = Object.freeze({
     commitParsedImports,
     consolidateIdentity,
     getDataDirectory,
+    getRuntimeCacheStatus,
     getScope,
     handleCommand,
     identityCandidates,
@@ -1384,6 +1407,7 @@ module.exports = Object.freeze({
     recordWarBanditsIdentity,
     recordManualIdentity,
     regularWipeStart,
+    resetRuntimeCachesForTests,
     resolveEstablishedScope,
     resolveHistoricalScope,
     resolveIdentityTarget,

@@ -5,6 +5,7 @@ const Crypto = require('node:crypto');
 const Fs = require('node:fs');
 const Path = require('node:path');
 
+const BoundedTtlCache = require('../../util/boundedTtlCache.js');
 const RuntimeTelemetry = require('../../util/runtimeTelemetry.js');
 const Core = require('./index.js');
 
@@ -14,6 +15,9 @@ const STATE_FILE = 'scan-daemon.json';
 const MAX_LOCAL_REFRESHES_PER_CYCLE = 100;
 const RESCAN_DELAY_MS = 12 * 60 * 60 * 1000;
 const MANUAL_RESCAN_COOLDOWN_MS = 5 * 60 * 1000;
+const MANUAL_TRIGGER_MAX_ENTRIES = 256;
+const WARNING_TTL_MS = 60 * 60 * 1000;
+const WARNING_MAX_ENTRIES = 256;
 const ONLINE_SOURCE = 'battlemetrics-online-wipe-daemon';
 const WARBANDITS_SOURCE = 'warbandits-current-wipe-daemon';
 const WARBANDITS_LOOKUP_SOURCE = 'warbandits-direct-lookup-daemon';
@@ -21,8 +25,12 @@ const STEAM_CURRENT_SOURCE = 'steam-profile-current';
 const STEAM_ALIAS_SOURCE = 'steam-profile-alias-history';
 const inFlight = new Map();
 const forcedReruns = new Map();
-const manualTriggerTimes = new Map();
-const warningTimes = new Map();
+const manualTriggerTimes = BoundedTtlCache.createBoundedTtlCache({
+    maxEntries: MANUAL_TRIGGER_MAX_ENTRIES, defaultTtlMs: MANUAL_RESCAN_COOLDOWN_MS
+});
+const warningTimes = BoundedTtlCache.createBoundedTtlCache({
+    maxEntries: WARNING_MAX_ENTRIES, defaultTtlMs: WARNING_TTL_MS
+});
 let temporaryCounter = 0;
 
 class ScanDaemonStateError extends Error {
@@ -186,8 +194,8 @@ function logWarning(context, message) {
 /** @param {any} context @param {string} key @param {string} message */
 function logWarningOnce(context, key, message) {
     const current = Date.now();
-    if (current - (warningTimes.get(key) || 0) < 60 * 60 * 1000) return;
-    warningTimes.set(key, current);
+    if (warningTimes.get(key, current)) return;
+    warningTimes.set(key, true, WARNING_TTL_MS, current);
     logWarning(context, message);
 }
 
@@ -621,13 +629,13 @@ function requestRescan(options) {
     }
     const key = Path.resolve(options.directory);
     const current = nowDate(options.dependencies || {}).getTime();
-    const previous = manualTriggerTimes.get(key);
+    const previous = manualTriggerTimes.get(key, current);
     const retryAfter = previous === undefined ? 0 : MANUAL_RESCAN_COOLDOWN_MS - (current - previous);
     if (retryAfter > 0) {
         return Object.freeze({ accepted: false, state: 'cooldown',
             retryAfterSeconds: Math.ceil(retryAfter / 1000) });
     }
-    manualTriggerTimes.set(key, current);
+    manualTriggerTimes.set(key, current, MANUAL_RESCAN_COOLDOWN_MS, current);
     const forced = Object.freeze({ ...options, forceWarBanditsRescan: true });
     if (inFlight.has(key)) {
         forcedReruns.set(key, forced);
@@ -647,14 +655,30 @@ function getRuntimeStatus() {
     return Object.freeze({ active: inFlight.size, forcedRerunsQueued: forcedReruns.size });
 }
 
+function getRuntimeCacheStatus(nowMs = Date.now()) {
+    return Object.freeze({
+        manualTriggers: manualTriggerTimes.count(nowMs),
+        manualTriggerLimit: MANUAL_TRIGGER_MAX_ENTRIES,
+        warnings: warningTimes.count(nowMs),
+        warningLimit: WARNING_MAX_ENTRIES
+    });
+}
+
+function resetRuntimeCachesForTests() {
+    manualTriggerTimes.clear();
+    warningTimes.clear();
+}
+
 module.exports = Object.freeze({
     ONLINE_SOURCE,
     MANUAL_RESCAN_COOLDOWN_MS,
     ScanDaemonStateError,
     WARBANDITS_SOURCE,
     WARBANDITS_LOOKUP_SOURCE,
+    getRuntimeCacheStatus,
     getRuntimeStatus,
     requestRescan,
+    resetRuntimeCachesForTests,
     runCycle,
     schedule,
     waitForIdle

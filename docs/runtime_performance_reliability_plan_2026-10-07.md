@@ -130,15 +130,19 @@ Résultat local : expiration à la frontière, LRU sans TTL glissant et limites 
 Les évictions obligent seulement un nouvel appel ou une relecture de sidecar. L'inventaire canonique et les raisons de
 ne pas traiter certaines structures comme des caches sont dans `runtime_cache_inventory_2026-10-07.md`.
 
-### Lot 5b — Petits états dérivés
+### Lot 5b — Petits états dérivés — release 1.22.36
 
-Statut : planifié comme sous-lot séparé.
+Statut : implémenté et validé localement ; déploiement à vérifier.
 
 1. Borner les fingerprints de hooks player-intelligence.
 2. Expirer les timestamps de cooldown/anti-spam du daemon.
 3. Plafonner les sélecteurs player-tracker abandonnés sans perdre le message `expired`.
 
 Critères : cardinalité fixe, comportement de cooldown/sélection identique et aucune réingestion non idempotente.
+
+Résultat local : les hooks retiennent au plus 128 états de taille fixe et rejouent sans nouvel événement après
+expiration. Les cooldowns/avertissements sont plafonnés à 256. Les 1 024 sélections expirent à cinq minutes ; un
+avis minimal borné conserve le message `expired` pendant 24 heures sans garder les candidats.
 
 ### Lot 6 — Équité et reprise du daemon
 
@@ -218,11 +222,11 @@ Statut : planifié après stabilisation applicative.
 
 Critères : démarrage reproductible, mémoire stable sur plusieurs wipes et rollback sans toucher aux données persistantes.
 
-## Vérifications de production des lots 1 à 4
+## Vérifications de production des lots 1 à 5
 
 Après `git pull` et redémarrage :
 
-1. vérifier `RUSTPLUS v1.22.34 OPERATIONAL` ;
+1. vérifier `RUSTPLUS v1.22.36 OPERATIONAL` ;
 2. noter RSS, `heapUsed` et temps de réponse avant l’import ;
 3. rejouer le lot de 11 SteamID, puis un lot de 100 ID si disponible ;
 4. exiger un aperçu rapide, les noms locaux déjà vérifiés et aucun dialogue Replace/Keep pour le lot identique ;
@@ -235,6 +239,6 @@ Après `git pull` et redémarrage :
 9. attendre une fenêtre, exécuter `/runtime`, puis corréler `RUNTIME`, `RUNTIME_WORK` et les éventuels `RUNTIME_SLOW`
    avec RSS/heap systemd avant, pendant et après un import ; la réponse doit rester éphémère et sans donnée joueur.
 
-Les lots 1 à 3 suppriment le chemin chaud précisément observé et le lot 4 rend les prochaines décisions mesurables,
-mais aucun ne prétend à lui seul résoudre toutes les rétentions. Les lots suivants doivent être décidés à partir de
-ces métriques, sans migration MySQL préalable.
+Les lots 1 à 3 suppriment le chemin chaud précisément observé, le lot 4 rend les prochaines décisions mesurables et
+le lot 5 borne les caches/états dérivés identifiés. Aucun ne prétend à lui seul résoudre toutes les rétentions. Les lots
+suivants doivent être décidés à partir de ces métriques, sans migration MySQL préalable.

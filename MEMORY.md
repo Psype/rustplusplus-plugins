@@ -32,12 +32,13 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   excludes superseded observations without retaining a cloned journal. Release `1.22.34` adds bounded aggregate
   runtime telemetry for translations, OCR, imports and daemon scans plus the administrator-only ephemeral `/runtime`
   command. Release `1.22.35` adds one reusable absolute-TTL/LRU cache and bounds rebuildable Steam, BattleMetrics,
-  WarBandits and OCR documents; settled OCR serialization tails are released without changing write ordering. At the
-  latest completed release audit, `master`, `origin/master` and `origin/HEAD` were aligned on `1.22.34` immediately
-  before this release; `1.22.35` is the current release. Only `master` plus the useful
+  WarBandits and OCR documents; settled OCR serialization tails are released without changing write ordering.
+  Release `1.22.36` bounds hook fingerprints, daemon cooldown/warning state and abandoned player-tracker selectors.
+  At the latest completed release audit, `master`, `origin/master` and `origin/HEAD` were aligned on `1.22.35`
+  (`5917199`) immediately before this release; `1.22.36` is the current release. Only `master` plus the useful
   `origin/master`/`upstream/master` remote-tracking references remained. Do not reset, overwrite, reimplement or
   discard these changes. Re-audit `git status --short` and `git diff` if the observed state differs.
-- Canonical package version is `1.22.35`. The complete local validation on 2026-10-07 passed `295/295` unit tests and
+- Canonical package version is `1.22.36`. The complete local validation on 2026-10-07 passed `297/297` unit tests and
   `tsc --noEmit`; `git diff --check` was clean. This is local deterministic evidence only. Deployment/restart and a
   new Discord import of the reported KIRK screenshot, the SteamID latency/memory improvement and `/runtime` production
   metrics remain unconfirmed, so do not claim production success.
@@ -277,6 +278,13 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   provider call or sidecar reread. Settled visual/correction serialization tails delete themselves only when still
   current, preserving per-path ordering. The canonical JSONL and every file under `data/player-intelligence` remain
   outside this mechanism. Inventory: `docs/runtime_cache_inventory_2026-10-07.md`.
+- Release `1.22.36` completes the small derived-state pass. Player-intelligence hook state is capped at 128 active
+  directories, expires after 24 idle hours, renews only on a matching quiet poll and retains two fixed SHA-256 values
+  instead of concatenated player lists. A rebuild after expiry is proven idempotent. Manual scan cooldowns and warning
+  suppression are capped at 256 with their original five-minute/one-hour boundaries. Player-tracker keeps at most
+  1,024 full selectors for five minutes plus 1 ms at the exact boundary, then only a 1,024-entry minimal expiry notice
+  for 24 hours so `Selection expired` remains available without retaining candidate arrays. A successful selection
+  removes both records.
 - Release `1.22.27` makes `/intel` call Discord's ephemeral `deferReply()` before logging, context loading, permission
   work or player-intelligence journal reads. The command remains administrator-only; this removes local processing
   from Discord's initial response window. AutoTranslate now allows at most two seconds per provider and five seconds
@@ -397,6 +405,9 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 - Superseding QA for release `1.22.35` on 2026-10-07: `npm.cmd test` passes 295/295 including `tsc --noEmit`, and
   `git diff --check` is clean. Coverage proves absolute expiration, LRU eviction, fixed Steam/BattleMetrics/WarBandits
   cache limits and cleanup of completed OCR correction queues. No persistent player-intelligence data is evicted.
+- Superseding QA for release `1.22.36` on 2026-10-07: `npm.cmd test` passes 297/297 including `tsc --noEmit`, and
+  `git diff --check` is clean. Coverage proves hook TTL renewal/idempotent rebuild, exact daemon cooldown expiry,
+  requester-scoped selector expiration, 1,025-to-1,024 eviction and expiry-notice cleanup.
 - Performance check for `1.22.3`: the dedicated glyph benchmark recalls the target among 2,000 aliases with 104 stored
   glyph variants and eight graphemes in a 20.797 ms median. The existing 200-player pipeline measured before/after at
   41.702/39.357 ms initial load, 0.044/0.030 ms quiet-poll mean and 51.356/50.742 ms for ten transitions; no measured

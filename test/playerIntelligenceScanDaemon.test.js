@@ -335,6 +335,8 @@ Test('the scheduler coalesces cycles for the same server directory', async t => 
 });
 
 Test('a manual rescan bypasses the completed-sweep delay and enforces a cooldown', async t => {
+    ScanDaemon.resetRuntimeCachesForTests();
+    t.after(() => ScanDaemon.resetRuntimeCachesForTests());
     const value = harness(t);
     let calls = 0;
     const warBanditsProvider = {
@@ -355,6 +357,20 @@ Test('a manual rescan bypasses the completed-sweep delay and enforces a cooldown
     Assert.equal(cooldown.accepted, false);
     Assert.equal(cooldown.state, 'cooldown');
     Assert.equal(cooldown.retryAfterSeconds, 300);
+    Assert.deepEqual(ScanDaemon.getRuntimeCacheStatus(value.dependencies.now().getTime()), {
+        manualTriggers: 1,
+        manualTriggerLimit: 256,
+        warnings: 0,
+        warningLimit: 256
+    });
+
+    value.setNow('2026-10-03T12:05:59.000Z');
+    Assert.equal(ScanDaemon.requestRescan({ ...value, warBanditsProvider }).retryAfterSeconds, 1);
+    value.setNow('2026-10-03T12:06:00.000Z');
+    Assert.deepEqual(ScanDaemon.requestRescan({ ...value, warBanditsProvider }),
+        { accepted: true, state: 'started', retryAfterSeconds: 0 });
+    await ScanDaemon.waitForIdle(value.directory);
+    Assert.equal(calls, 3);
 });
 
 Test('a manual rescan queues one forced cycle behind an active cycle', async t => {

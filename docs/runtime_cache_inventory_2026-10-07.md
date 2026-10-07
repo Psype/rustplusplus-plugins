@@ -31,14 +31,19 @@ sérialisées.
 - Les Maps `inFlight`, verrous et revendications de décision retirent leurs entrées en `finally`. Leur admission et
   leur équité relèvent des lots 6, 9 ou 10, pas d'un cache TTL.
 
-## Petit état dérivé restant pour le sous-lot 5b
+## Petits états dérivés bornés en release 1.22.36
 
-- `playerIntelligence/runtime.js` garde un fingerprint par répertoire actif.
-- `scanDaemon.js` garde les timestamps de rescan manuel et d'anti-spam d'avertissement.
-- `playerTracker` garde les sélecteurs utilisateur abandonnés jusqu'à leur prochaine consultation.
+| Métier | Contenu dérivé | TTL | Plafond | Sémantique conservée |
+| --- | --- | ---: | ---: | --- |
+| Hook player-intelligence | fiabilité, wipe et deux SHA-256 de contenu | 24 h depuis le dernier poll calme | 128 | une expiration force un replay idempotent |
+| Scan daemon | cooldown d'un rescan manuel | 5 min | 256 | même seconde de reprise, expiration à la frontière |
+| Scan daemon | anti-spam d'avertissement | 1 h | 256 | le travail échoue toujours fermé, seul le log est supprimé |
+| Player tracker | choix complets d'un sélecteur | 5 min + 1 ms de frontière | 1 024 | choix valide exactement cinq minutes |
+| Player tracker | avis d'expiration sans candidats | 24 h après l'expiration | 1 024 | conserve `Selection expired` sans retenir le tableau lourd |
 
-Ces valeurs sont petites, mais seront plafonnées séparément afin de conserver les messages d'expiration et
-l'idempotence existants.
+Les empreintes de hook ne retiennent plus la concaténation de tous les joueurs : chaque vue triée est réduite à un
+SHA-256 de longueur fixe. Le TTL du hook est renouvelé sur le chemin calme afin de représenter l'inactivité ; le TTL
+interne du cache reste non glissant. Une sélection player-tracker consommée retire à la fois ses candidats et son avis.
 
 ## Structures reportées parce qu'elles ne sont pas des caches ordinaires
 

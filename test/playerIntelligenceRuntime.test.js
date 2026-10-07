@@ -143,6 +143,43 @@ Test('quiet BattleMetrics polls still clock the coalesced background player daem
     Assert.equal(scheduled[1].directory, Path.join(value.directory, 'guild', '42'));
 });
 
+Test('idle hook fingerprints are bounded, renewed and safely rebuilt after expiry', async t => {
+    Runtime.resetRuntimeCachesForTests();
+    t.after(() => Runtime.resetRuntimeCachesForTests());
+    const value = harness(t);
+    const store = value.store();
+    let reads = 0;
+    value.client.playerIntelligenceDependencies.store = {
+        directory: store.directory,
+        readAll: async () => {
+            reads += 1;
+            return store.readAll();
+        },
+        appendMany: events => store.appendMany(events)
+    };
+
+    await Runtime.onBattlemetricsUpdated(value.context({ firstTime: true }));
+    const initialCount = (await store.readAll()).length;
+    Assert.equal(reads, 1);
+    value.battlemetrics.newPlayers = [];
+
+    value.setNow('2026-10-02T09:00:00.000Z');
+    await Runtime.onBattlemetricsUpdated(value.context());
+    Assert.equal(reads, 1);
+    value.setNow('2026-10-03T08:00:00.000Z');
+    await Runtime.onBattlemetricsUpdated(value.context());
+    Assert.equal(reads, 1);
+
+    value.setNow('2026-10-04T09:00:00.000Z');
+    await Runtime.onBattlemetricsUpdated(value.context());
+    Assert.equal(reads, 2);
+    Assert.equal((await store.readAll()).length, initialCount);
+    Assert.deepEqual(Runtime.getRuntimeCacheStatus(new Date('2026-10-04T09:00:00.000Z').getTime()), {
+        hookStates: 1,
+        hookStateLimit: 128
+    });
+});
+
 Test('confirmed F7 and cinfo imports fuse by exact normalized name and stay hash-idempotent', async t => {
     const value = harness(t);
     const f7 = Object.freeze({

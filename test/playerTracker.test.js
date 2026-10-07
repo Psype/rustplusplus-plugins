@@ -169,6 +169,36 @@ Test('ambiguous partial names require an explicit numbered selection', async t =
     Assert.equal(harness.getInstance().trackers[7].players.length, 2);
 });
 
+Test('abandoned player selections and their lightweight expiry notices have fixed limits', async t => {
+    PlayerTracker.resetRuntimeCachesForTests();
+    t.after(() => PlayerTracker.resetRuntimeCachesForTests());
+    const harness = createHarness(t, {
+        1001: onlinePlayer('1001', 'Nirks'),
+        1002: onlinePlayer('1002', 'NirksTwo')
+    });
+    const players = [];
+    for (let index = 0; index < 1024; index += 1) {
+        const steamId = (76561198000000000n + BigInt(index)).toString();
+        const player = { broadcast: { teamMessage: { message: { steamId } } } };
+        players.push(player);
+        await PlayerTracker.handleCommand(command(harness, '!track nirk', 'inGame', player));
+    }
+    const invalid = await PlayerTracker.handleCommand(command(harness, '!track nirk 9', 'inGame', players[0]));
+    Assert.equal(invalid.response, 'Invalid selection; choose 1-2.');
+    const latestPlayer = { broadcast: { teamMessage: { message: { steamId: '76561198000001024' } } } };
+    const latest = await PlayerTracker.handleCommand(command(harness, '!track nirk', 'inGame', latestPlayer));
+    Assert.match(latest.response, /^Choose:/);
+    Assert.deepEqual(PlayerTracker.getRuntimeCacheStatus(FIXED_NOW.getTime()), {
+        pendingSelections: 1024,
+        pendingSelectionLimit: 1024,
+        expiredNotices: 1024,
+        expiredNoticeLimit: 1024
+    });
+    const evicted = await PlayerTracker.handleCommand(command(harness, '!track nirk 2', 'inGame', players[1]));
+    Assert.equal(evicted.response, 'Selection expired; run !track nirk again.');
+    Assert.deepEqual(harness.getInstance().trackers, {});
+});
+
 Test('current online partial match outranks stale exact-name BattleMetrics profiles', async t => {
     const harness = createHarness(t, {
         3001: onlinePlayer('3001', 'Jeffrey Kirkstein The 3rd')
@@ -196,6 +226,8 @@ Test('current online partial match outranks stale exact-name BattleMetrics profi
 });
 
 Test('numbered selections are scoped to the requester and expire after five minutes', async t => {
+    PlayerTracker.resetRuntimeCachesForTests();
+    t.after(() => PlayerTracker.resetRuntimeCachesForTests());
     const harness = createHarness(t, {
         1001: onlinePlayer('1001', 'Nirks'),
         1002: onlinePlayer('1002', 'NirksTwo')
@@ -207,6 +239,12 @@ Test('numbered selections are scoped to the requester and expire after five minu
     const secondPlayer = { broadcast: { teamMessage: { message: { steamId: '76561198000000002' } } } };
 
     await PlayerTracker.handleCommand(command(harness, '!track nirk', 'inGame', firstPlayer));
+    Assert.deepEqual(PlayerTracker.getRuntimeCacheStatus(now.getTime()), {
+        pendingSelections: 1,
+        pendingSelectionLimit: 1024,
+        expiredNotices: 1,
+        expiredNoticeLimit: 1024
+    });
     const foreignSelection = await PlayerTracker.handleCommand(
         command(harness, '!track nirk 2', 'inGame', secondPlayer));
     Assert.match(foreignSelection.response, /nothing was saved/);
@@ -216,6 +254,14 @@ Test('numbered selections are scoped to the requester and expire after five minu
     const expired = await PlayerTracker.handleCommand(command(harness, '!track nirk 2', 'inGame', firstPlayer));
     Assert.equal(expired.response, 'Selection expired; run !track nirk again.');
     Assert.deepEqual(harness.getInstance().trackers, {});
+    Assert.deepEqual(PlayerTracker.getRuntimeCacheStatus(now.getTime()), {
+        pendingSelections: 0,
+        pendingSelectionLimit: 1024,
+        expiredNotices: 1,
+        expiredNoticeLimit: 1024
+    });
+    now = new Date(FIXED_NOW.getTime() + (24 * 60 * 60 * 1000) + (5 * 60 * 1000) + 2);
+    Assert.equal(PlayerTracker.getRuntimeCacheStatus(now.getTime()).expiredNotices, 0);
 });
 
 Test('a numeric nickname remains a normal query without a pending selection', async t => {
