@@ -16,7 +16,7 @@ const SCOPE = Object.freeze({
     guildId: 'guild', serverKey: 'battlemetrics:42', wipeId: 'wipe:2026-09-29T14:00:00.000Z'
 });
 
-function identity(subject, sourceEventId, caseFidelity = true, source = 'test') {
+function identity(subject, sourceEventId, caseFidelity = true, source = 'manual-command') {
     return Core.createEvent({
         schemaVersion: Core.SCHEMA_VERSION,
         kind: 'identity_observed',

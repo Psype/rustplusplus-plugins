@@ -4,6 +4,7 @@ const Path = require('node:path');
 
 const BoundedTtlCache = require('../../util/boundedTtlCache.js');
 const Scrape = require('../../util/scrape.js');
+const BattlemetricsProvider = require('../battlemetrics');
 const Core = require('./index.js');
 const F7IdentityValidation = require('./f7IdentityValidation.js');
 const IdentityAdministration = require('./identityAdministration.js');
@@ -193,6 +194,9 @@ function playerScanOptions(context, scope, store, dependencies) {
     if (!Object.hasOwn(scanDependencies, 'steamProfileIdentity')) {
         scanDependencies.steamProfileIdentity = (/** @type {string} */ steamId) =>
             Scrape.scrapeSteamProfileIdentity(context.client, steamId);
+    }
+    if (!Object.hasOwn(scanDependencies, 'battlemetricsProvider')) {
+        scanDependencies.battlemetricsProvider = BattlemetricsProvider;
     }
     return Object.freeze({
         context,
@@ -938,10 +942,12 @@ async function handleCommand(context) {
             if (!scope.wipeId) return handled('Player scan unavailable: current wipe is unknown.');
             const request = requestPlayerScan(context, scope, store, getDependencies(context));
             if (request.state === 'started') {
-                return handled('Player scan started in background; progress continues on BattleMetrics polling ticks.');
+                return handled('Player scan and pending identity reconciliation started in background; progress ' +
+                    'continues on BattleMetrics polling ticks.');
             }
             if (request.state === 'queued') {
-                return handled('Player scan queued behind the active background cycle.');
+                return handled('Player scan and pending identity reconciliation queued behind the active ' +
+                    'background cycle.');
             }
             if (request.state === 'cooldown') {
                 return handled(`Player scan cooldown: retry in ${request.retryAfterSeconds}s.`);

@@ -319,7 +319,8 @@ Test('Discord identity administration lists pending aliases and keeps OCR correc
             schemaVersion: Core.SCHEMA_VERSION,
             kind: 'identity_observed', observedAt, recordedAt: observedAt, scope, subject,
             payload: { caseFidelity: true },
-            provenance: { source: 'test', sourceEventId, collectorVersion: 'test-1' },
+            provenance: { source: subject.steamId ? 'manual-command' : 'discord-cinfo',
+                sourceEventId, collectorVersion: 'test-1' },
             confidence: 'verified', evidence: null
         });
         await value.store().appendMany([
@@ -401,7 +402,8 @@ Test('scanplayers acknowledges a bounded background rescan without awaiting it',
     const response = await Runtime.handleCommand(value.command('!scanplayers'));
 
     Assert.equal(response.response,
-        'Player scan started in background; progress continues on BattleMetrics polling ticks.');
+        'Player scan and pending identity reconciliation started in background; progress continues on ' +
+        'BattleMetrics polling ticks.');
     Assert.equal(requests.length, 1);
     Assert.equal(requests[0].scope.wipeId, 'wipe:2026-09-29T14:00:00.000Z');
     Assert.equal(requests[0].directory, Path.join(value.directory, 'guild', '42'));

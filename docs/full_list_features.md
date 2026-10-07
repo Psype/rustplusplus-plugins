@@ -89,7 +89,9 @@ review/correction output to Rust team chat.
 - **research** - `!research [item]` - Display the cost to research an item.
 - **send** - `!send [discord user] [message]` - Send a message through rustplusplus to a person on Discord.
 - **stack** - `!stack [item]` - Display stack size information for an item.
-- **scanplayers** - `!scanplayers` - Trigger or queue an immediate bounded background identity rescan for the active wipe.
+- **scanplayers** - `!scanplayers` - Trigger or queue the bounded current-wipe scan and a durable reconciliation of
+  pending aliases. Reconciliation starts only on this explicit command, then continues one identity per polling tick;
+  it is never started automatically by a wipe or weekly schedule.
 - **steamid** - `!steamid [SteamID64|BattleMetrics ID|partial name]` - Compatibility alias for the complete `!intel` server-wide profile.
 - **team** - `!team` - Get team information (names of all teammates).
 - **time** - `!time` - Get in-game time.

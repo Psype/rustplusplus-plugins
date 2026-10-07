@@ -8,9 +8,10 @@ const Path = require('node:path');
 const BoundedTtlCache = require('../../util/boundedTtlCache.js');
 const RuntimeTelemetry = require('../../util/runtimeTelemetry.js');
 const Core = require('./index.js');
+const PendingReconciler = require('./pendingReconciler.js');
 
-const STATE_SCHEMA_VERSION = 6;
-const COLLECTOR_VERSION = 'player-scan-daemon-6';
+const STATE_SCHEMA_VERSION = 7;
+const COLLECTOR_VERSION = 'player-scan-daemon-7';
 const STATE_FILE = 'scan-daemon.json';
 const MAX_LOCAL_REFRESHES_PER_CYCLE = 100;
 const RESCAN_DELAY_MS = 12 * 60 * 60 * 1000;
@@ -26,6 +27,8 @@ const FRESH_BURST_LIMIT = 2;
 const ONLINE_SOURCE = 'battlemetrics-online-wipe-daemon';
 const WARBANDITS_SOURCE = 'warbandits-current-wipe-daemon';
 const WARBANDITS_LOOKUP_SOURCE = 'warbandits-direct-lookup-daemon';
+const WARBANDITS_PENDING_SOURCE = 'warbandits-pending-reconciliation-daemon';
+const BATTLEMETRICS_IDENTIFIER_SOURCE = 'battlemetrics-identifier-daemon';
 const STEAM_CURRENT_SOURCE = 'steam-profile-current';
 const STEAM_ALIAS_SOURCE = 'steam-profile-alias-history';
 const inFlight = new Map();
@@ -105,6 +108,7 @@ function emptyState(options, now) {
         profiledSteamIds: [],
         steamProfileRetries: [],
         steamProfileFreshStreak: 0,
+        pendingReconciliation: PendingReconciler.emptyCheckpoint(),
         warBanditsRetryAt: null,
         warBanditsFailures: 0,
         updatedAt: now.toISOString()
@@ -117,7 +121,7 @@ function validateState(value, options) {
         throw new TypeError('state must be an object');
     }
     const state = /** @type {any} */ (value);
-    if (![1, 2, 3, 4, 5, STATE_SCHEMA_VERSION].includes(state.schemaVersion) ||
+    if (![1, 2, 3, 4, 5, 6, STATE_SCHEMA_VERSION].includes(state.schemaVersion) ||
         `${state.guildId}` !== `${options.context.guildId}` ||
         typeof state.serverKey !== 'string' || typeof state.wipeId !== 'string' ||
         !Number.isSafeInteger(state.nextWarBanditsPage) || state.nextWarBanditsPage < 1 ||
@@ -150,6 +154,8 @@ function validateState(value, options) {
         .map((/** @type {string} */ steamId) => ({ steamId, failures: 1, nextAttemptAt: state.updatedAt })) :
         state.steamProfileRetries;
     const steamProfileFreshStreak = state.schemaVersion < 6 ? 0 : state.steamProfileFreshStreak;
+    const pendingReconciliation = state.schemaVersion < 7 ? PendingReconciler.emptyCheckpoint() :
+        PendingReconciler.validateCheckpoint(state.pendingReconciliation);
     if (!Array.isArray(targetedLookupRetries) || targetedLookupRetries.length > MAX_TARGETED_RETRIES) {
         throw new TypeError('state targeted lookup retries are invalid');
     }
@@ -193,7 +199,7 @@ function validateState(value, options) {
     }
     const migrated = { ...state, schemaVersion: STATE_SCHEMA_VERSION, targetedLookupSteamIds,
         targetedLookupRetries, targetedFreshStreak, profiledSteamIds, steamProfileRetries,
-        steamProfileFreshStreak, warBanditsRetryAt, warBanditsFailures };
+        steamProfileFreshStreak, pendingReconciliation, warBanditsRetryAt, warBanditsFailures };
     delete migrated.profileAttemptedSteamIds;
     return migrated;
 }
@@ -220,6 +226,20 @@ function recordRetry(retries, steamId, current, limit, suggested = null) {
     retries.set(steamId, { steamId, failures, nextAttemptAt: retryAt(current, failures, suggested) });
 }
 
+/** @param {Map<string,any>} retries @param {string} id @param {string} idField @param {Date} current
+ * @param {unknown} [suggested] */
+function recordPendingRetry(retries, id, idField, current, suggested = null) {
+    const previous = retries.get(id);
+    if (!previous && retries.size >= PendingReconciler.MAX_RETRIES) {
+        const oldest = [...retries.values()].sort((left, right) =>
+            left.nextAttemptAt.localeCompare(right.nextAttemptAt) ||
+            `${left[idField]}`.localeCompare(`${right[idField]}`))[0];
+        if (oldest) retries.delete(`${oldest[idField]}`);
+    }
+    const failures = Math.min(1000, (previous ? previous.failures : 0) + 1);
+    retries.set(id, { [idField]: id, failures, nextAttemptAt: retryAt(current, failures, suggested) });
+}
+
 /** @param {any} options @param {Date} now */
 async function readState(options, now) {
     const file = statePath(options.directory);
@@ -234,8 +254,14 @@ async function readState(options, now) {
     try {
         const raw = JSON.parse(text);
         const parsed = validateState(raw, options);
-        if (parsed.serverKey !== options.scope.serverKey || parsed.wipeId !== options.scope.wipeId) {
+        if (parsed.serverKey !== options.scope.serverKey) {
             return emptyState(options, now);
+        }
+        if (parsed.wipeId !== options.scope.wipeId) {
+            const reset = emptyState(options, now);
+            reset.pendingReconciliation = parsed.pendingReconciliation;
+            Object.defineProperty(reset, 'needsMigrationWrite', { value: true, enumerable: false });
+            return reset;
         }
         Object.defineProperty(parsed, 'needsMigrationWrite', {
             value: raw.schemaVersion !== STATE_SCHEMA_VERSION,
@@ -437,6 +463,9 @@ async function runCycle(options) {
         state.targetedFreshStreak = 0;
         state.steamProfileRetries = [];
         state.steamProfileFreshStreak = 0;
+        if (!state.pendingReconciliation.active) {
+            state.pendingReconciliation = PendingReconciler.startCheckpoint(recordedAt);
+        }
         state.warBanditsRetryAt = null;
         state.warBanditsFailures = 0;
     }
@@ -451,6 +480,8 @@ async function runCycle(options) {
     const existing = await options.store.readAll();
     recoverSetsFromJournal(existing, options.scope, seen, refreshed);
     const projection = Core.rebuild(existing);
+    const provider = options.warBanditsProvider;
+    const battlemetricsProvider = dependencies.battlemetricsProvider;
     const reliable = options.scope.battlemetrics &&
         options.scope.battlemetrics.lastUpdateSuccessful === true &&
         options.scope.battlemetrics.streamerMode !== true;
@@ -466,7 +497,13 @@ async function runCycle(options) {
     let steamProfileFailures = 0;
     let targetedLookupFailures = 0;
     let warBanditsPageFailures = 0;
+    let pendingBattlemetricsAttempts = 0;
+    let pendingWarBanditsAttempts = 0;
+    let pendingIdentitiesLinked = 0;
+    let pendingReconciliationCompleted = false;
+    const newlyLinkedPairs = new Set();
     let retryChanged = forcedRescan;
+    let reconciliationChanged = forcedRescan;
     for (const steamId of targeted) {
         if (targetedRetries.delete(steamId)) retryChanged = true;
     }
@@ -493,6 +530,204 @@ async function runCycle(options) {
         }));
         latestPlaytimes.set(steamId, playtime);
         metricsObserved += 1;
+    }
+
+    const reconciliation = state.pendingReconciliation;
+    const checkedBattlemetricsIds = new Set(reconciliation.checkedBattlemetricsIds);
+    const battlemetricsRetries = new Map(reconciliation.battlemetricsRetries.map((/** @type {any} */ retry) =>
+        [`${retry.battlemetricsPlayerId}`, { ...retry, battlemetricsPlayerId: `${retry.battlemetricsPlayerId}` }]));
+    const checkedWarBanditsKeys = new Set(reconciliation.checkedWarBanditsKeys);
+    const pendingWarBanditsRetries = new Map(reconciliation.warBanditsRetries.map((/** @type {any} */ retry) =>
+        [`${retry.key}`, { ...retry, key: `${retry.key}` }]));
+    const reconciliationRows = reconciliation.active ? PendingReconciler.pendingRows(projection) : [];
+    const pendingBattlemetricsCandidates = reconciliation.active ?
+        PendingReconciler.battlemetricsCandidates(projection, reconciliationRows) : [];
+    const campaignBattlemetricsIds = new Set(pendingBattlemetricsCandidates
+        .map(candidate => candidate.battlemetricsPlayerId));
+    const battlemetricsEnabled = battlemetricsProvider && typeof battlemetricsProvider.resolveSteamId === 'function';
+    const warBanditsLookupEnabled = provider && (typeof provider.resolvePlayerRecent === 'function' ||
+        typeof provider.resolvePlayer === 'function');
+    const pendingBattlemetricsReady = reconciliation.battlemetricsRetryAt === null ||
+        Date.parse(reconciliation.battlemetricsRetryAt) <= current.getTime();
+    const pendingWarBanditsReady = reconciliation.warBanditsRetryAt === null ||
+        Date.parse(reconciliation.warBanditsRetryAt) <= current.getTime();
+    const warBanditsCandidates = () => PendingReconciler.warBanditsCandidates(
+        projection, checkedBattlemetricsIds, Boolean(battlemetricsEnabled), reconciliationRows);
+    const finishWarBanditsPerson = (/** @type {string} */ personId) => {
+        for (const candidate of warBanditsCandidates().filter(item => item.personId === personId)) {
+            checkedWarBanditsKeys.add(candidate.key);
+            pendingWarBanditsRetries.delete(candidate.key);
+        }
+    };
+    let pendingCampaignAttempted = false;
+
+    if (reconciliation.active && battlemetricsEnabled && pendingBattlemetricsReady) {
+        const selection = PendingReconciler.selectWork(
+            pendingBattlemetricsCandidates, checkedBattlemetricsIds,
+            battlemetricsRetries, 'battlemetricsPlayerId', current, reconciliation.battlemetricsFreshStreak);
+        const candidate = selection.candidate;
+        if (candidate) {
+            reconciliation.battlemetricsFreshStreak = selection.nextFreshStreak;
+            pendingBattlemetricsAttempts = 1;
+            pendingCampaignAttempted = true;
+            reconciliationChanged = true;
+            let result = null;
+            try {
+                result = await battlemetricsProvider.resolveSteamId(candidate.battlemetricsPlayerId, dependencies);
+            }
+            catch (error) {
+                logWarningOnce(options.context, `battlemetrics-identifier:${candidate.battlemetricsPlayerId}`,
+                    `BattleMetrics identifier lookup paused safely: ${error instanceof Error ? error.message : error}.`);
+            }
+            const returnedSteamId = result && result.steamId;
+            if (result && result.available === true && returnedSteamId === null) {
+                reconciliation.battlemetricsFailures = 0;
+                reconciliation.battlemetricsRetryAt = null;
+                checkedBattlemetricsIds.add(candidate.battlemetricsPlayerId);
+                battlemetricsRetries.delete(candidate.battlemetricsPlayerId);
+                reconciliation.noMatch += 1;
+            }
+            else if (result && result.available === true && /^7656119\d{10}$/u.test(`${returnedSteamId || ''}`)) {
+                reconciliation.battlemetricsFailures = 0;
+                reconciliation.battlemetricsRetryAt = null;
+                const steamId = `${returnedSteamId}`;
+                const consolidated = Core.consolidateProjection(projection, {
+                    steamId, battlemetricsPlayerId: candidate.battlemetricsPlayerId,
+                    name: null, caseFidelity: true, allowExactName: false
+                });
+                checkedBattlemetricsIds.add(candidate.battlemetricsPlayerId);
+                battlemetricsRetries.delete(candidate.battlemetricsPlayerId);
+                finishWarBanditsPerson(candidate.personId);
+                if (consolidated.status === 'conflict') {
+                    reconciliation.conflicts += 1;
+                }
+                else {
+                    events.push(identityEvent(options.scope, {
+                        steamId, battlemetricsPlayerId: candidate.battlemetricsPlayerId, name: null
+                    }, {
+                        guildId: options.context.guildId,
+                        observedAt: recordedAt,
+                        recordedAt,
+                        source: BATTLEMETRICS_IDENTIFIER_SOURCE,
+                        sourceEventId: `battlemetrics-identifier:${candidate.battlemetricsPlayerId}:${steamId}`,
+                        confidence: 'verified'
+                    }));
+                    reconciliation.linked += 1;
+                    pendingIdentitiesLinked += 1;
+                    newlyLinkedPairs.add(`${steamId}\u0000${candidate.battlemetricsPlayerId}`);
+                }
+            }
+            else if (result && result.available === false && result.reason === 'not found') {
+                reconciliation.battlemetricsFailures = 0;
+                reconciliation.battlemetricsRetryAt = null;
+                checkedBattlemetricsIds.add(candidate.battlemetricsPlayerId);
+                battlemetricsRetries.delete(candidate.battlemetricsPlayerId);
+                reconciliation.noMatch += 1;
+            }
+            else {
+                recordPendingRetry(battlemetricsRetries, candidate.battlemetricsPlayerId,
+                    'battlemetricsPlayerId', current, result && result.retryAt);
+                reconciliation.battlemetricsFailures = Math.min(1000,
+                    reconciliation.battlemetricsFailures + 1);
+                reconciliation.battlemetricsRetryAt = retryAt(current,
+                    reconciliation.battlemetricsFailures, result && result.retryAt);
+            }
+        }
+    }
+
+    if (reconciliation.active && warBanditsLookupEnabled && pendingWarBanditsReady && !pendingCampaignAttempted) {
+        const candidates = warBanditsCandidates();
+        const selection = PendingReconciler.selectWork(candidates, checkedWarBanditsKeys,
+            pendingWarBanditsRetries, 'key', current, reconciliation.warBanditsFreshStreak);
+        const candidate = selection.candidate;
+        if (candidate) {
+            reconciliation.warBanditsFreshStreak = selection.nextFreshStreak;
+            pendingWarBanditsAttempts = 1;
+            reconciliationChanged = true;
+            let result = null;
+            try {
+                result = typeof provider.resolvePlayerRecent === 'function' ?
+                    await provider.resolvePlayerRecent(options.context, options.scope, candidate.query) :
+                    await provider.resolvePlayer(options.context, options.scope, candidate.query);
+            }
+            catch (error) {
+                logWarningOnce(options.context, `warbandits-pending:${candidate.key}`,
+                    `WarBandits pending reconciliation paused safely: ${error instanceof Error ?
+                        error.message : error}.`);
+            }
+            const player = result && result.available === true && result.ambiguous !== true ? result.player : null;
+            if (PendingReconciler.exactWarBanditsMatch(player, candidate.query)) {
+                reconciliation.warBanditsFailures = 0;
+                reconciliation.warBanditsRetryAt = null;
+                const steamId = `${player.steamId}`;
+                const consolidated = Core.consolidateProjection(projection, {
+                    steamId, battlemetricsPlayerId: candidate.battlemetricsPlayerId,
+                    name: candidate.query, caseFidelity: true,
+                    allowExactName: candidate.battlemetricsPlayerId === null
+                });
+                checkedWarBanditsKeys.add(candidate.key);
+                pendingWarBanditsRetries.delete(candidate.key);
+                if (candidate.battlemetricsPlayerId) {
+                    checkedBattlemetricsIds.add(candidate.battlemetricsPlayerId);
+                    battlemetricsRetries.delete(candidate.battlemetricsPlayerId);
+                }
+                if (consolidated.status === 'conflict') {
+                    finishWarBanditsPerson(candidate.personId);
+                    reconciliation.conflicts += 1;
+                }
+                else {
+                    finishWarBanditsPerson(candidate.personId);
+                    if (candidate.battlemetricsPlayerId) {
+                        events.push(identityEvent(options.scope, {
+                            steamId, battlemetricsPlayerId: candidate.battlemetricsPlayerId, name: null
+                        }, {
+                            guildId: options.context.guildId,
+                            observedAt: canonicalIso(result.observedAt) || recordedAt,
+                            recordedAt,
+                            source: WARBANDITS_PENDING_SOURCE,
+                            sourceEventId: `warbandits-pending-pair:${candidate.key}:${steamId}`,
+                            confidence: 'probable'
+                        }));
+                    }
+                    const names = new Set([candidate.query, player.name,
+                        ...(Array.isArray(player.aliases) ? player.aliases : [])]
+                        .map(sanitize).filter(name => name && Array.from(name).length <= 128));
+                    for (const name of names) {
+                        events.push(identityEvent(options.scope, {
+                            steamId, battlemetricsPlayerId: null, name
+                        }, {
+                            guildId: options.context.guildId,
+                            observedAt: canonicalIso(result.observedAt) || recordedAt,
+                            recordedAt,
+                            source: WARBANDITS_PENDING_SOURCE,
+                            sourceEventId: `warbandits-pending:${candidate.key}:${steamId}:${shortToken(name)}`,
+                            confidence: 'verified'
+                        }));
+                    }
+                    reconciliation.linked += 1;
+                    pendingIdentitiesLinked += 1;
+                    if (candidate.battlemetricsPlayerId) {
+                        newlyLinkedPairs.add(`${steamId}\u0000${candidate.battlemetricsPlayerId}`);
+                    }
+                    observePlaytime(player, WARBANDITS_PENDING_SOURCE,
+                        canonicalIso(result.observedAt) || recordedAt);
+                }
+            }
+            else if (result && result.available === true) {
+                reconciliation.warBanditsFailures = 0;
+                reconciliation.warBanditsRetryAt = null;
+                checkedWarBanditsKeys.add(candidate.key);
+                pendingWarBanditsRetries.delete(candidate.key);
+                reconciliation.noMatch += 1;
+            }
+            else {
+                recordPendingRetry(pendingWarBanditsRetries, candidate.key, 'key', current,
+                    result && (result.retryAt || result.cooldownUntil));
+                reconciliation.warBanditsFailures = Math.min(1000, reconciliation.warBanditsFailures + 1);
+                reconciliation.warBanditsRetryAt = retryAt(current, reconciliation.warBanditsFailures,
+                    result && (result.retryAt || result.cooldownUntil));
+            }
+        }
     }
 
     const steamProfileIdentity = dependencies.steamProfileIdentity;
@@ -603,7 +838,6 @@ async function runCycle(options) {
         newlyRefreshed.add(match.steamId);
     }
 
-    const provider = options.warBanditsProvider;
     if (provider && (typeof provider.resolvePlayerRecent === 'function' ||
         typeof provider.resolvePlayer === 'function')) {
         const candidates = targetedLookupCandidates(existing, projection, options.scope, targeted);
@@ -663,7 +897,7 @@ async function runCycle(options) {
                             recordedAt,
                             source: WARBANDITS_LOOKUP_SOURCE,
                             sourceEventId: `warbandits-lookup:${token}:${steamId}`,
-                            confidence: consolidated.identity.battlemetricsPlayerId ? 'probable' : 'verified'
+                            confidence: 'verified'
                         }));
                         if (consolidated.identity.battlemetricsPlayerId) newlyRefreshed.add(steamId);
                     }
@@ -714,7 +948,8 @@ async function runCycle(options) {
                 const name = sanitize(row && row.name);
                 if (!/^7656119\d{10}$/u.test(steamId) || !name) continue;
                 const observedAt = canonicalIso(scan.observedAt) || recordedAt;
-                if (!seen.has(steamId) && !newlySeen.has(steamId)) {
+                const firstObservation = !seen.has(steamId) && !newlySeen.has(steamId);
+                if (firstObservation || reconciliation.active) {
                     const live = onlineNames.get(normalize(name)) || [];
                     const liveBattlemetricsPlayerId = Array.from(normalize(name)).length >= 3 && live.length === 1 ?
                         live[0].battlemetricsPlayerId : null;
@@ -727,26 +962,63 @@ async function runCycle(options) {
                             caseFidelity: true, allowExactName: false
                         });
                     }
-                    events.push(identityEvent(options.scope, consolidated.identity, {
-                        guildId: options.context.guildId,
-                        observedAt,
-                        recordedAt,
-                        source: WARBANDITS_SOURCE,
-                        sourceEventId: `warbandits:${token}:${steamId}`,
-                        confidence: consolidated.identity.battlemetricsPlayerId ? 'probable' : 'verified'
-                    }));
-                    newlySeen.add(steamId);
-                    if (consolidated.identity.battlemetricsPlayerId) newlyRefreshed.add(steamId);
+                    const battlemetricsPlayerId = consolidated.identity.battlemetricsPlayerId;
+                    const pairKey = battlemetricsPlayerId ? `${steamId}\u0000${battlemetricsPlayerId}` : null;
+                    const pairKnown = battlemetricsPlayerId && projection.identities.findByIdentifier(steamId)
+                        .some((/** @type {any} */ person) =>
+                            person.battlemetricsPlayerIds.includes(battlemetricsPlayerId));
+                    if (firstObservation || (reconciliation.active && pairKey &&
+                        !pairKnown && !newlyLinkedPairs.has(pairKey))) {
+                        events.push(identityEvent(options.scope, consolidated.identity, {
+                            guildId: options.context.guildId,
+                            observedAt,
+                            recordedAt,
+                            source: WARBANDITS_SOURCE,
+                            sourceEventId: `warbandits:${token}:${steamId}:${battlemetricsPlayerId || 'none'}`,
+                            confidence: 'verified'
+                        }));
+                        if (firstObservation) newlySeen.add(steamId);
+                        if (battlemetricsPlayerId) {
+                            newlyRefreshed.add(steamId);
+                            newlyLinkedPairs.add(/** @type {string} */ (pairKey));
+                        }
+                        if (battlemetricsPlayerId && campaignBattlemetricsIds.has(battlemetricsPlayerId)) {
+                            checkedBattlemetricsIds.add(battlemetricsPlayerId);
+                            battlemetricsRetries.delete(battlemetricsPlayerId);
+                            const candidate = pendingBattlemetricsCandidates.find(item =>
+                                item.battlemetricsPlayerId === battlemetricsPlayerId);
+                            if (candidate) finishWarBanditsPerson(candidate.personId);
+                            reconciliation.linked += 1;
+                            pendingIdentitiesLinked += 1;
+                            reconciliationChanged = true;
+                        }
+                    }
                 }
                 observePlaytime(row, WARBANDITS_SOURCE, observedAt);
             }
         }
     }
 
+    if (reconciliation.active) {
+        const battlemetricsOutstanding = Boolean(battlemetricsEnabled) &&
+            pendingBattlemetricsCandidates.some(candidate =>
+                !checkedBattlemetricsIds.has(candidate.battlemetricsPlayerId));
+        const warBanditsOutstanding = Boolean(warBanditsLookupEnabled) &&
+            warBanditsCandidates()
+                .some(candidate => !checkedWarBanditsKeys.has(candidate.key));
+        if (pendingIdentitiesLinked === 0 && !battlemetricsOutstanding && !warBanditsOutstanding) {
+            reconciliation.active = false;
+            reconciliation.completedAt = recordedAt;
+            pendingReconciliationCompleted = true;
+            reconciliationChanged = true;
+        }
+    }
+
     if (events.length > 0) await options.store.appendMany(events);
     newlySeen.forEach(value => seen.add(value));
     newlyRefreshed.forEach(value => refreshed.add(value));
-    let changed = forcedRescan || state.needsMigrationWrite === true || retryChanged || events.length > 0 ||
+    let changed = forcedRescan || state.needsMigrationWrite === true || retryChanged || reconciliationChanged ||
+        events.length > 0 ||
         seen.size !== state.seenWarBanditsSteamIds.length ||
         targeted.size !== state.targetedLookupSteamIds.length ||
         refreshed.size !== state.refreshedSteamIds.length || profiled.size !== state.profiledSteamIds.length ||
@@ -771,6 +1043,13 @@ async function runCycle(options) {
     state.profiledSteamIds = [...profiled].sort();
     state.steamProfileRetries = [...steamProfileRetries.values()].sort((left, right) =>
         left.steamId.localeCompare(right.steamId));
+    reconciliation.checkedBattlemetricsIds = [...checkedBattlemetricsIds].sort((left, right) =>
+        left.localeCompare(right, 'en', { numeric: true }));
+    reconciliation.battlemetricsRetries = [...battlemetricsRetries.values()].sort((left, right) =>
+        left.battlemetricsPlayerId.localeCompare(right.battlemetricsPlayerId, 'en', { numeric: true }));
+    reconciliation.checkedWarBanditsKeys = [...checkedWarBanditsKeys].sort();
+    reconciliation.warBanditsRetries = [...pendingWarBanditsRetries.values()].sort((left, right) =>
+        left.key.localeCompare(right.key));
     state.updatedAt = recordedAt;
     if (changed || !Fs.existsSync(statePath(options.directory))) {
         await writeStateAtomic(statePath(options.directory), validateState(state, options));
@@ -787,6 +1066,11 @@ async function runCycle(options) {
         steamProfileAttempts,
         steamProfileFailures,
         steamProfilesRefreshed,
+        pendingBattlemetricsAttempts,
+        pendingWarBanditsAttempts,
+        pendingIdentitiesLinked,
+        pendingReconciliationActive: reconciliation.active,
+        pendingReconciliationCompleted,
         nextWarBanditsPage: state.nextWarBanditsPage,
         warBanditsResumeAt: state.warBanditsResumeAt,
         warBanditsRetryAt: state.warBanditsRetryAt

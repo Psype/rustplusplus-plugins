@@ -12,7 +12,7 @@ const STEAM_B = '76561198036538266';
 const STEAM_C = '76561198154738095';
 const STEAM_D = '76561199179453915';
 
-function identityEvent(subject, sourceEventId, source = 'test') {
+function identityEvent(subject, sourceEventId, source = 'manual-command') {
     return Core.createEvent({
         schemaVersion: Core.SCHEMA_VERSION,
         kind: 'identity_observed',
@@ -154,7 +154,7 @@ Test('text-imported SteamIDs receive one prioritized recent-scope WarBandits loo
     Assert.equal(second.targetedLookups, 0);
     Assert.equal(directLookups, 1);
     const state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
-    Assert.equal(state.schemaVersion, 6);
+    Assert.equal(state.schemaVersion, 7);
     Assert.deepEqual(state.targetedLookupSteamIds, [STEAM_D]);
 });
 
@@ -199,7 +199,7 @@ Test('a schema-1 daemon checkpoint upgrades without losing its collected SteamID
     await ScanDaemon.runCycle({ ...value, warBanditsProvider: unavailable, forceWarBanditsRescan: true });
 
     const state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
-    Assert.equal(state.schemaVersion, 6);
+    Assert.equal(state.schemaVersion, 7);
     Assert.deepEqual(state.seenWarBanditsSteamIds, [STEAM_A]);
     Assert.deepEqual(state.refreshedSteamIds, [STEAM_B]);
     Assert.deepEqual(state.targetedLookupSteamIds, []);
@@ -235,7 +235,7 @@ Test('a schema-4 checkpoint keeps non-trivial cursors and collected sets during 
     await ScanDaemon.runCycle({ ...value, warBanditsProvider: unavailable });
 
     const state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
-    Assert.equal(state.schemaVersion, 6);
+    Assert.equal(state.schemaVersion, 7);
     Assert.equal(state.nextWarBanditsPage, 4);
     Assert.equal(state.warBanditsSweeps, 2);
     Assert.deepEqual(state.seenWarBanditsSteamIds, [STEAM_A]);
@@ -281,7 +281,7 @@ Test('a schema-5 checkpoint preserves WarBandits retries while migrating incompl
     const result = await ScanDaemon.runCycle({ ...value });
     Assert.equal(result.steamProfileAttempts, 0);
     const state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
-    Assert.equal(state.schemaVersion, 6);
+    Assert.equal(state.schemaVersion, 7);
     Assert.equal('profileAttemptedSteamIds' in state, false);
     Assert.equal(state.nextWarBanditsPage, 4);
     Assert.deepEqual(state.seenWarBanditsSteamIds, [STEAM_C]);
@@ -589,6 +589,161 @@ Test('the background scan stores Steam current and past names as verified aliase
     const second = await ScanDaemon.runCycle({ ...value });
     Assert.equal(second.steamProfilesRefreshed, 0);
     Assert.equal(calls, 1);
+});
+
+Test('pending reconciliation is manual-only and BattleMetrics links do not verify OCR names', async t => {
+    const value = harness(t);
+    await value.store.append(identityEvent({
+        steamId: null, battlemetricsPlayerId: '777', exactName: 'FUNT1K'
+    }, 'pending-funtik', 'discord-cinfo'));
+    const calls = [];
+    value.dependencies.battlemetricsProvider = {
+        resolveSteamId: async battlemetricsPlayerId => {
+            calls.push(battlemetricsPlayerId);
+            return { available: true, reason: null, steamId: STEAM_D };
+        }
+    };
+
+    const ordinary = await ScanDaemon.runCycle({ ...value });
+    Assert.equal(ordinary.pendingBattlemetricsAttempts, 0);
+    Assert.deepEqual(calls, []);
+    let state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
+    Assert.equal(state.pendingReconciliation.active, false);
+
+    value.setNow('2026-10-03T12:01:00.000Z');
+    const started = await ScanDaemon.runCycle({ ...value, forceWarBanditsRescan: true });
+    Assert.equal(started.pendingBattlemetricsAttempts, 1);
+    Assert.equal(started.pendingIdentitiesLinked, 1);
+    Assert.equal(started.pendingReconciliationActive, true);
+    Assert.deepEqual(calls, ['777']);
+    let projection = Core.rebuild(await value.store.readAll());
+    const linked = projection.identities.findByIdentifier('777')[0];
+    Assert.equal(linked.steamId, STEAM_D);
+    Assert.equal(linked.names.find(alias => alias.name === 'FUNT1K').verified, false);
+    Assert.equal(projection.presence.providers.length, 0);
+
+    value.setNow('2026-10-03T12:02:00.000Z');
+    const completed = await ScanDaemon.runCycle({ ...value });
+    Assert.equal(completed.pendingBattlemetricsAttempts, 0);
+    Assert.equal(completed.pendingReconciliationCompleted, true);
+    Assert.equal(completed.pendingReconciliationActive, false);
+    state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
+    Assert.deepEqual(state.pendingReconciliation.checkedBattlemetricsIds, ['777']);
+    projection = Core.rebuild(await value.store.readAll());
+    Assert.equal(projection.identities.findByIdentifier(STEAM_D).length, 1);
+});
+
+Test('manual pending reconciliation falls back to an exact recent WarBandits alias', async t => {
+    const value = harness(t);
+    await value.store.appendMany([
+        identityEvent({ steamId: null, battlemetricsPlayerId: '888', exactName: 'FUNTIK' },
+            'pending-funtik', 'discord-cinfo'),
+        identityEvent({ steamId: null, battlemetricsPlayerId: '888', exactName: 'BAD OCR' },
+            'pending-bad-ocr', 'discord-cinfo')
+    ]);
+    let battlemetricsCalls = 0;
+    const warBanditsCalls = [];
+    value.dependencies.battlemetricsProvider = {
+        resolveSteamId: async () => {
+            battlemetricsCalls += 1;
+            return { available: true, reason: null, steamId: null };
+        }
+    };
+    const warBanditsProvider = {
+        resolvePlayerRecent: async (...args) => {
+            Assert.equal(args.length, 3);
+            const query = args[2];
+            warBanditsCalls.push(query);
+            if (query === 'BAD OCR') return {
+                available: true,
+                ambiguous: false,
+                observedAt: '2026-10-03T12:01:00.000Z',
+                player: { steamId: STEAM_A, name: 'SOMEONE ELSE', aliases: [] }
+            };
+            Assert.equal(query, 'FUNTIK');
+            return {
+                available: true,
+                ambiguous: false,
+                observedAt: '2026-10-03T12:01:00.000Z',
+                player: { steamId: STEAM_D, name: 'FUNTIK NEW', aliases: ['FUNTIK', 'FUNTIK OLD'], playtime: 42 }
+            };
+        }
+    };
+
+    const battlemetrics = await ScanDaemon.runCycle({
+        ...value, warBanditsProvider, forceWarBanditsRescan: true
+    });
+    Assert.equal(battlemetrics.pendingBattlemetricsAttempts, 1);
+    Assert.equal(battlemetrics.pendingWarBanditsAttempts, 0);
+    Assert.equal(battlemetricsCalls, 1);
+    Assert.deepEqual(warBanditsCalls, []);
+
+    value.setNow('2026-10-03T12:01:00.000Z');
+    const rejectedAlias = await ScanDaemon.runCycle({ ...value, warBanditsProvider });
+    Assert.equal(rejectedAlias.pendingWarBanditsAttempts, 1);
+    Assert.equal(rejectedAlias.pendingIdentitiesLinked, 0);
+    Assert.deepEqual(warBanditsCalls, ['BAD OCR']);
+
+    value.setNow('2026-10-03T12:02:00.000Z');
+    const fallback = await ScanDaemon.runCycle({ ...value, warBanditsProvider });
+    Assert.equal(fallback.pendingBattlemetricsAttempts, 0);
+    Assert.equal(fallback.pendingWarBanditsAttempts, 1);
+    Assert.equal(fallback.pendingIdentitiesLinked, 1);
+    Assert.deepEqual(warBanditsCalls, ['BAD OCR', 'FUNTIK']);
+    const projection = Core.rebuild(await value.store.readAll());
+    const person = projection.identities.findByIdentifier('888')[0];
+    Assert.equal(person.steamId, STEAM_D);
+    Assert.deepEqual(person.names.filter(alias => alias.verified).map(alias => alias.name).sort(),
+        ['FUNTIK', 'FUNTIK NEW', 'FUNTIK OLD']);
+    Assert.equal(person.names.find(alias => alias.name === 'BAD OCR').verified, false);
+    Assert.equal(projection.presence.providers.length, 0);
+});
+
+Test('pending provider failures use a global cooldown and survive a wipe change', async t => {
+    const value = harness(t);
+    await value.store.appendMany([
+        identityEvent({ steamId: null, battlemetricsPlayerId: '777', exactName: 'One' },
+            'pending-one', 'discord-cinfo'),
+        identityEvent({ steamId: null, battlemetricsPlayerId: '778', exactName: 'Two' },
+            'pending-two', 'discord-cinfo')
+    ]);
+    const battlemetricsCalls = [];
+    let warBanditsCalls = 0;
+    value.dependencies.battlemetricsProvider = {
+        resolveSteamId: async battlemetricsPlayerId => {
+            battlemetricsCalls.push(battlemetricsPlayerId);
+            return { available: false, reason: 'token invalid', steamId: null, retryAt: null };
+        }
+    };
+    const warBanditsProvider = {
+        resolvePlayerRecent: async () => {
+            warBanditsCalls += 1;
+            return { available: true, ambiguous: false, player: null };
+        }
+    };
+
+    await ScanDaemon.runCycle({ ...value, warBanditsProvider, forceWarBanditsRescan: true });
+    Assert.deepEqual(battlemetricsCalls, ['777']);
+    Assert.equal(warBanditsCalls, 0);
+    let state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
+    Assert.equal(state.pendingReconciliation.battlemetricsRetryAt, '2026-10-03T12:01:00.000Z');
+
+    value.scope = { ...value.scope, wipeId: 'wipe:2026-10-06T14:00:00.000Z',
+        wipeStart: '2026-10-06T14:00:00.000Z' };
+    value.setNow('2026-10-03T12:00:30.000Z');
+    const paused = await ScanDaemon.runCycle({ ...value, warBanditsProvider });
+    Assert.equal(paused.pendingBattlemetricsAttempts, 0);
+    Assert.equal(paused.pendingWarBanditsAttempts, 0);
+    Assert.deepEqual(battlemetricsCalls, ['777']);
+    Assert.equal(warBanditsCalls, 0);
+    state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
+    Assert.equal(state.wipeId, 'wipe:2026-10-06T14:00:00.000Z');
+    Assert.equal(state.pendingReconciliation.active, true);
+
+    value.setNow('2026-10-03T12:01:00.000Z');
+    await ScanDaemon.runCycle({ ...value, warBanditsProvider });
+    Assert.deepEqual(battlemetricsCalls, ['777', '778']);
+    Assert.equal(warBanditsCalls, 0);
 });
 
 Test('Steam alias lookup failure does not cancel the independent WarBandits page', async t => {

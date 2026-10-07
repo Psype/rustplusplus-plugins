@@ -23,7 +23,7 @@ function event(kind, overrides = {}) {
         subject: overrides.subject || { steamId: STEAM_A, battlemetricsPlayerId: null, exactName: 'Alice' },
         payload: overrides.payload || { caseFidelity: true },
         provenance: overrides.provenance || {
-            source: 'test', sourceEventId: `${kind}-${sourceSequence}`, collectorVersion: 'test-1'
+            source: 'manual-command', sourceEventId: `${kind}-${sourceSequence}`, collectorVersion: 'test-1'
         },
         confidence: overrides.confidence || 'verified',
         evidence: Object.hasOwn(overrides, 'evidence') ? overrides.evidence : null
@@ -84,6 +84,23 @@ Test('contracts reject unsupported input and return deeply immutable events', ()
             }]
         }
     }), /complete clan_snapshot/u);
+});
+
+Test('OCR names with a SteamID stay unverified until a trusted name source confirms them', () => {
+    const projection = PlayerIntelligence.rebuild([
+        identity({
+            subject: { steamId: STEAM_A, battlemetricsPlayerId: '101', exactName: 'AL1CE OCR' },
+            provenance: { source: 'discord-cinfo', sourceEventId: 'ocr-name', collectorVersion: 'test-1' }
+        }),
+        identity({
+            observedAt: '2026-09-30T12:01:00.000Z',
+            subject: { steamId: STEAM_A, battlemetricsPlayerId: null, exactName: 'Alice API' },
+            provenance: { source: 'warbandits', sourceEventId: 'api-name', collectorVersion: 'test-1' }
+        })
+    ]);
+    const names = projection.identities.getPerson(`steam:${STEAM_A}`).names;
+    Assert.equal(names.find(alias => alias.name === 'AL1CE OCR').verified, false);
+    Assert.equal(names.find(alias => alias.name === 'Alice API').verified, true);
 });
 
 Test('JSONL history serializes concurrent appends, deduplicates and detects corruption', async t => {

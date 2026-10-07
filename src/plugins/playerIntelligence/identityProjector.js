@@ -5,6 +5,22 @@ const Crypto = require('node:crypto');
 
 const { deepFreeze } = require('./contracts.js');
 
+const VERIFIED_NAME_SOURCES = new Set([
+    'battlemetrics',
+    'battlemetrics-online-wipe-daemon',
+    'discord-f7',
+    'discord-steamid-list',
+    'manual-command',
+    'player-tracker',
+    'steam-profile-current',
+    'steam-profile-alias-history',
+    'teammate-language-database',
+    'warbandits',
+    'warbandits-current-wipe-daemon',
+    'warbandits-direct-lookup-daemon',
+    'warbandits-pending-reconciliation-daemon'
+]);
+
 /** @param {string} name */
 function nameKey(name) {
     return name.normalize('NFKC').toLocaleLowerCase('en');
@@ -172,7 +188,8 @@ function projectIdentities(events) {
                 verified: false, lastVerifiedAt: null
             };
             const verified = resolution.personId.startsWith('steam:') &&
-                (event.subject.steamId !== null || event.subject.battlemetricsPlayerId !== null);
+                event.subject.steamId !== null && event.confidence === 'verified' &&
+                VERIFIED_NAME_SOURCES.has(event.provenance.source);
             previous.firstObservedAt = previous.firstObservedAt < event.observedAt ?
                 previous.firstObservedAt : event.observedAt;
             previous.lastObservedAt = previous.lastObservedAt > event.observedAt ?

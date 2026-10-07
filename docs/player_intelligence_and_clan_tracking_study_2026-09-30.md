@@ -753,6 +753,14 @@ arrivants. Ces observations enrichissent l'identité uniquement : elles ne crée
 Depuis `1.22.21`, `!scanplayers` contourne explicitement l'attente de douze heures, démarre une page bornée en
 arrière-plan ou met un seul passage forcé en file derrière le cycle actif. Les pages suivantes restent cadencées par
 le poll existant et un cooldown manuel de cinq minutes empêche les relances accidentelles.
+Depuis `1.22.39`, la même commande démarre aussi une campagne durable de résorption des identités `pending`. Cette
+campagne n'est lancée ni au changement de wipe ni selon un calendrier : l'opérateur choisit le moment où les pseudos
+semblent suffisamment stabilisés. Elle essaie d'abord chaque BattleMetrics ID connu pour obtenir son SteamID64, puis
+utilise la chaîne WarBandits wipe courant → précédent → all-time uniquement après une absence terminale de cet
+identifiant. Chaque alias local unique est essayé séparément et le repli exige une égalité Unicode exacte avec le
+pseudo courant ou un alias renvoyé par l'API ; les résultats flous, tronqués, multiples
+ou conflictuels restent manuels. Un seul candidat avance par tick, les pannes déclenchent un cooldown fournisseur
+persistant, et la campagne reprend après redémarrage ou changement de wipe sans créer de preuve de présence.
 Depuis `1.22.23`, les SteamID collés dans le canal d’import sont prioritaires : un identifiant reçoit par tick une
 requête WarBandits `all-time` exacte, tandis que le parcours global du wipe continue par pages de 100. Le nom et le
 playtime cumulatif sont journalisés ; `!intel` affiche ce dernier comme borne basse (`WB hours:7500+`). Cette métrique
@@ -778,7 +786,8 @@ alimentent la projection centrale : aucune recollecte d'une paire SteamID/Battle
 - `!who <...>` : vue bornée des alias exacts connus ;
 - `!record <SteamID64> <BattleMetrics ID> <pseudo exact>` : observation manuelle idempotente dans le journal serveur,
   avec validation des identifiants et refus d'un BattleMetrics ID déjà lié à un autre SteamID ;
-- `!scanplayers` : déclenchement asynchrone et borné du daemon d'identités pour le wipe actif ;
+- `!scanplayers` : déclenchement asynchrone du scan borné du wipe actif et de la campagne manuelle/durable de
+  réconciliation des identités pending ;
 - `!affinity <...>` : uniquement les deux lignes compactes d'affinité ;
 - `!activity <...> [1mo|all]` : durée connue en ligne, `1mo` par défaut, plages `unknown` exclues ;
 - `!clan <tag>`, `!clanhistory <tag>` et `!clantop [1-10]` : observations confirmées locales ;
@@ -849,7 +858,7 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale la plus récente après reprise durable Steam/WarBandits : `npm.cmd test` passe 304/304 le 7 octobre 2026,
+QA locale la plus récente après réconciliation pending manuelle : `npm.cmd test` passe 313/313 le 7 octobre 2026,
 dont le typage strict `tsc --noEmit`. Une
 couverture déterministe reproduit la mauvaise attribution `』Marley』`/`Swizzy`, vérifie le découpage relatif aux
 virgules, la fusion `n444shj, spirit_monger19`, le rejet des comptes/doublons manuels et l'absence d'apprentissage avant
@@ -907,6 +916,13 @@ conservés. Une réponse Steam partielle peut ajouter son persona courant et ses
 incomplète tant que `aliasesComplete=false`; les retries identiques ne réémettent pas les alias déjà connus. Dans les
 files Steam et WarBandits ciblée, deux nouveaux IDs au maximum peuvent passer avant un retry dû. Cette équité est
 persistée, et aucun checkpoint ou profil fournisseur ne crée une présence.
+
+La release 1.22.39 passe le checkpoint au schema 7 avec une campagne pending inactive par défaut et déclenchée
+uniquement par `!scanplayers`. Elle conserve sa progression à travers redémarrage et changement de wipe, traite un
+candidat par tick, impose un cooldown global en plus des retries individuels et privilégie la résolution directe du
+BattleMetrics ID. WarBandits n'est utilisé en repli qu'après une absence terminale et doit confirmer exactement le
+pseudo courant ou historique. Lier les IDs regroupe les observations locales, mais seul un nom explicitement confirmé
+par Steam ou une API est ajouté à l'historique vérifié.
 
 Scénario reproductible `npm run benchmark:player-intelligence` : roster initial de 200 joueurs, 60 polls silencieux,
 puis 10 déconnexions. Le premier profilage lisait/reprojetait le journal à chaque poll silencieux : `25,397 ms/poll`.

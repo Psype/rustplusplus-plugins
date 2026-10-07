@@ -828,7 +828,7 @@ Read verified aliases only | `!who ch1` | May return `Ch1co Current, Ch1co`; an 
 Read confirmed clan affinity | `!affinity tree` | Shows `Known tags` and `Played with` counts from distinct confirmed `/cinfo` captures.
 Read conservative presence | `!activity tree` or `!activity tree all` | Uses the rolling 30 days by default, or all retained known-online segments.
 Read a clan snapshot | `!clan ABC` | Shows the latest stored confirmed snapshot; it does not claim the roster is still current.
-Refresh WarBandits collection | `!scanplayers` | Queues one bounded current-wipe scan without claiming presence.
+Refresh and reconcile identities | `!scanplayers` | Queues the current-wipe scan plus a durable pending-alias campaign, without claiming presence.
 
 For example, `!intel tree` can return a compact profile headed by `Cockornut Tree`. `!who tree` returns only that
 identity's verified Steam/API aliases. Both are read-only closest-match commands: they do not create a merge merely
@@ -853,17 +853,25 @@ latest stored observation, not a claim that the roster is still current.
 It preserves spaces and Unicode in the name, validates the SteamID64 range and numeric BattleMetrics ID, and refuses
 to attach a BattleMetrics ID already linked to another SteamID. It no longer mutates the teammate-language CSV;
 that file remains private implementation data for translation language preferences only.
-<br>`!scanplayers` immediately acknowledges and starts one bounded WarBandits current-wipe page in the background, or
-queues one forced pass behind an already-running cycle. Further pages advance on the existing 60-second BattleMetrics
-ticks, so Discord/Rust+ command handling never waits for the scan. It bypasses the normal twelve-hour completed-sweep
+<br>`!scanplayers` immediately acknowledges and starts one bounded WarBandits current-wipe page plus a pending-alias
+reconciliation campaign in the background, or queues them behind an already-running cycle. The reconciliation is
+manual-only: neither a wipe nor a weekly timer starts it. Once requested, its restart-safe checkpoint advances at
+most one pending identity per existing 60-second BattleMetrics tick until the candidates are exhausted; a wipe change
+does not silently restart or discard that operator-requested campaign. Discord/Rust+ command handling never waits for
+the work. The command bypasses the normal twelve-hour completed-sweep
 delay, has a five-minute manual cooldown, reuses its restart-safe cursor and known-ID sets, and resets the once-per-wipe
 priority lookup set for pasted SteamIDs. With 100 pasted IDs, exact lookups therefore take at most roughly
 100 successful ticks rather than requiring a traversal of the full all-time leaderboard. Each lookup first checks
 `wipe=0`, then the newest completed wipe returned by the server's `/wipes` catalogue, and only then `all-time` if both
-scopes are empty. When a unique response name exactly matches one and only one local BattleMetrics identity without a
-conflicting SteamID, the journal records the combined Steam+BM identity and all aliases on that BM leave `pending`
-together. Every such observation passes through the same local consolidator used by imports, BattleMetrics and manual
-records. An ambiguous response remains manual. Steam profile history is collected separately one ID per tick and does
+scopes are empty. Pending identities first try their known BattleMetrics player ID directly. Only a terminal missing
+BattleMetrics identifier may fall back to WarBandits in the strict order current wipe, newest completed wipe, then
+all-time. Each locally unique alias is tried separately, and the response must exactly match the current or a returned
+historical API alias; fuzzy, truncated, colliding or ambiguous results remain manual. A global
+provider cooldown prevents one outage or invalid token from being retried against thousands of different identities.
+When a unique exact response has no conflicting SteamID, the journal records the combined Steam+BM identity and all
+aliases on that BM leave `pending` together. An OCR-only spelling does not become verified merely because its BM ID was
+linked; only an explicitly trusted Steam/API/manual source enters verified alias history. Every observation passes through the same local
+consolidator used by imports, BattleMetrics and manual records. Steam profile history is collected separately one ID per tick and does
 not use all-time WarBandits guesses. `!scanplayers` can reset the current wipe's completed priority set so
 IDs imported before this behavior are reconsidered. Provider cooldowns extend
 that delay safely. The command does not manufacture online/offline presence.

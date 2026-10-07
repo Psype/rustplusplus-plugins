@@ -177,7 +177,27 @@ minutes après deux échecs. Une réponse `aliasesComplete=false` enregistre les
 retryable jusqu'à une réponse complète. La migration schema 5 conserve les retries/cursors WarBandits et transforme
 les anciennes tentatives non terminées. Les deux files servent au maximum deux nouveaux IDs avant un retry dû.
 
-### Lot 6c — Bornes temporelles des fournisseurs
+### Lot 6c — Réconciliation pending déclenchée à la demande — release 1.22.39
+
+Statut : implémenté et validé localement ; déploiement à vérifier.
+
+1. Démarrer la campagne uniquement avec `!scanplayers`, jamais automatiquement au wipe ou chaque semaine.
+2. Traiter un candidat par tick : BattleMetrics ID direct en premier, puis chaque alias local unique via WarBandits
+   courant → précédent → all-time seulement après une absence terminale du SteamID côté BattleMetrics.
+3. Exiger un alias WarBandits exact, laisser les résultats flous/ambigus/conflictuels à l'administration manuelle et
+   ne jamais promouvoir un alias OCR parce que son BattleMetrics ID vient d'être lié.
+4. Persister curseurs, retries, compteurs et cooldowns fournisseur dans le checkpoint schema 7, y compris à travers
+   redémarrage et changement de wipe.
+
+Critères : aucune requête de réconciliation avant la commande explicite, aucun martèlement fournisseur, progression
+bornée et aucun événement de présence synthétique.
+
+Résultat local : les tests couvrent l'inactivité par défaut, la liaison BattleMetrics→Steam, le repli WarBandits exact,
+le maintien des erreurs OCR hors des alias vérifiés même si l'événement contient déjà un SteamID, le cooldown global
+et la reprise de campagne après changement de wipe. Une nouvelle commande pendant une campagne active conserve sa
+progression au lieu de la recommencer.
+
+### Lot 6d — Bornes temporelles des fournisseurs
 
 Statut : planifié comme sous-lot séparé.
 
@@ -257,7 +277,7 @@ Critères : démarrage reproductible, mémoire stable sur plusieurs wipes et rol
 
 Après `git pull` et redémarrage :
 
-1. vérifier `RUSTPLUS v1.22.38 OPERATIONAL` ;
+1. vérifier `RUSTPLUS v1.22.39 OPERATIONAL` ;
 2. noter RSS, `heapUsed` et temps de réponse avant l’import ;
 3. rejouer le lot de 11 SteamID, puis un lot de 100 ID si disponible ;
 4. exiger un aperçu rapide, les noms locaux déjà vérifiés et aucun dialogue Replace/Keep pour le lot identique ;
@@ -271,6 +291,8 @@ Après `git pull` et redémarrage :
    avec RSS/heap systemd avant, pendant et après un import ; la réponse doit rester éphémère et sans donnée joueur.
 10. laisser échouer un profil Steam, vérifier qu'il reprend automatiquement après son backoff, puis injecter de
     nouveaux IDs en continu et confirmer qu'un retry dû passe après au plus deux nouveaux IDs dans chaque file.
+11. à un moment choisi où les pseudos sont stables, lancer `!scanplayers` une fois et vérifier que la campagne pending
+    continue seule, fait baisser `/intel pending`, reprend après redémarrage et ne démarre pas au changement de wipe.
 
 Les lots 1 à 3 suppriment le chemin chaud précisément observé, le lot 4 rend les prochaines décisions mesurables et
 le lot 5 borne les caches/états dérivés identifiés et le lot 6 reprend le travail fournisseur sans famine. Aucun ne
