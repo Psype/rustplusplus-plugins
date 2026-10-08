@@ -224,6 +224,101 @@ function exactWarBanditsMatch(player, query) {
     return aliases.some(alias => normalize(alias) === expected);
 }
 
+/** @param {any} projection @param {any} checkpoint
+ * @param {{battlemetricsEnabled?:boolean,warBanditsEnabled?:boolean,now?:Date}} [options]
+ * @param {readonly any[]} [preparedRows] */
+function reconciliationStatus(projection, checkpoint, options = {}, preparedRows) {
+    const state = validateCheckpoint(checkpoint);
+    const rows = preparedRows || pendingRows(projection);
+    const current = options.now instanceof Date ? options.now : new Date();
+    if (Number.isNaN(current.getTime())) throw new TypeError('pending reconciliation status clock is invalid');
+    const battlemetricsEnabled = options.battlemetricsEnabled === true;
+    const warBanditsEnabled = options.warBanditsEnabled === true;
+    const checkedBattlemetricsIds = new Set(state.checkedBattlemetricsIds);
+    const checkedWarBanditsKeys = new Set(state.checkedWarBanditsKeys);
+    const battlemetricsRetries = new Map(state.battlemetricsRetries.map((/** @type {any} */ retry) =>
+        [`${retry.battlemetricsPlayerId}`, retry]));
+    const warBanditsRetries = new Map(state.warBanditsRetries.map((/** @type {any} */ retry) =>
+        [`${retry.key}`, retry]));
+    const warBanditsByPerson = new Map();
+    for (const candidate of warBanditsCandidates(
+        projection, checkedBattlemetricsIds, battlemetricsEnabled, rows)) {
+        const candidates = warBanditsByPerson.get(candidate.personId) || [];
+        candidates.push(candidate);
+        warBanditsByPerson.set(candidate.personId, candidates);
+    }
+    const providerRetry = (/** @type {string|null} */ value) =>
+        value !== null && Date.parse(value) > current.getTime() ? value : null;
+    const battlemetricsProviderRetryAt = providerRetry(state.battlemetricsRetryAt);
+    const warBanditsProviderRetryAt = providerRetry(state.warBanditsRetryAt);
+
+    const annotated = rows.map(row => {
+        const battlemetricsId = row.battlemetricsPlayerIds.length === 1 ? row.battlemetricsPlayerIds[0] : null;
+        const battlemetricsChecked = Boolean(battlemetricsId && checkedBattlemetricsIds.has(battlemetricsId));
+        const battlemetricsRetry = battlemetricsId ? battlemetricsRetries.get(battlemetricsId) : null;
+        const warBandits = warBanditsByPerson.get(row.personId) || [];
+        const uncheckedWarBandits = warBandits.filter((/** @type {any} */ candidate) =>
+            !checkedWarBanditsKeys.has(candidate.key));
+        const warBanditsRetry = uncheckedWarBandits.map((/** @type {any} */ candidate) =>
+            warBanditsRetries.get(candidate.key)).filter(Boolean)
+            .sort((/** @type {any} */ left, /** @type {any} */ right) =>
+                left.nextAttemptAt.localeCompare(right.nextAttemptAt))[0] || null;
+        const warBanditsAttempted = warBandits.some((/** @type {any} */ candidate) =>
+            checkedWarBanditsKeys.has(candidate.key));
+        const attempted = battlemetricsChecked || warBanditsAttempted;
+        const automatable = Boolean((battlemetricsId && battlemetricsEnabled) ||
+            (warBanditsEnabled && warBandits.length > 0));
+        let reconciliationState = 'manual';
+        let retryAt = null;
+
+        if (row.battlemetricsPlayerIds.length > 1) reconciliationState = 'manual';
+        else if (!state.active) {
+            reconciliationState = attempted ? 'attempted-unresolved' : automatable ? 'waiting' : 'manual';
+        }
+        else if (battlemetricsId && battlemetricsEnabled && !battlemetricsChecked) {
+            if (battlemetricsProviderRetryAt) {
+                reconciliationState = 'paused-battlemetrics';
+                retryAt = battlemetricsProviderRetryAt;
+            }
+            else if (battlemetricsRetry) {
+                reconciliationState = 'retry-battlemetrics';
+                retryAt = battlemetricsRetry.nextAttemptAt;
+            }
+            else reconciliationState = 'queued-battlemetrics';
+        }
+        else if (warBanditsEnabled && uncheckedWarBandits.length > 0) {
+            if (warBanditsProviderRetryAt) {
+                reconciliationState = 'paused-warbandits';
+                retryAt = warBanditsProviderRetryAt;
+            }
+            else if (warBanditsRetry && uncheckedWarBandits.every((/** @type {any} */ candidate) =>
+                warBanditsRetries.has(candidate.key))) {
+                reconciliationState = 'retry-warbandits';
+                retryAt = warBanditsRetry.nextAttemptAt;
+            }
+            else reconciliationState = 'queued-warbandits';
+        }
+        else if (attempted) reconciliationState = 'attempted-unresolved';
+
+        return Object.freeze({
+            ...row,
+            reconciliationState,
+            retryAt,
+            campaignActive: state.active,
+            campaignStartedAt: state.startedAt
+        });
+    });
+    return Object.freeze({
+        active: state.active,
+        startedAt: state.startedAt,
+        completedAt: state.completedAt,
+        linked: state.linked,
+        noMatch: state.noMatch,
+        conflicts: state.conflicts,
+        rows: Object.freeze(annotated)
+    });
+}
+
 module.exports = Object.freeze({
     FRESH_BURST_LIMIT,
     MAX_RETRIES,
@@ -231,6 +326,7 @@ module.exports = Object.freeze({
     emptyCheckpoint,
     exactWarBanditsMatch,
     pendingRows,
+    reconciliationStatus,
     selectWork,
     startCheckpoint,
     validateCheckpoint,

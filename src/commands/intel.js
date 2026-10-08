@@ -48,6 +48,41 @@ function paginated(values, requestedPage, render, title, empty) {
     return `${title} - ${values.length} - page ${page}/${pages}\n${rows.join('\n')}`;
 }
 
+/** @param {any} value */
+function reconciliationLabel(value) {
+    const retry = value.retryAt ? ` ${value.retryAt.slice(0, 16).replace('T', ' ')}Z` : '';
+    /** @type {Record<string,string>} */
+    const labels = {
+        'queued-battlemetrics': 'queued BM',
+        'queued-warbandits': 'queued WB',
+        'retry-battlemetrics': `retry BM${retry}`,
+        'retry-warbandits': `retry WB${retry}`,
+        'paused-battlemetrics': `paused BM${retry}`,
+        'paused-warbandits': `paused WB${retry}`,
+        'attempted-unresolved': 'attempted: unresolved',
+        waiting: 'waiting for !scanplayers',
+        manual: 'manual review',
+        unavailable: 'status unavailable'
+    };
+    return labels[value.reconciliationState] || 'status unavailable';
+}
+
+/** @param {readonly any[]} values */
+function reconciliationSummary(values) {
+    const counts = { queued: 0, retry: 0, attempted: 0, waiting: 0, manual: 0 };
+    for (const value of values) {
+        const state = `${value.reconciliationState || ''}`;
+        if (state.startsWith('queued-')) counts.queued += 1;
+        else if (state.startsWith('retry-') || state.startsWith('paused-')) counts.retry += 1;
+        else if (state === 'attempted-unresolved') counts.attempted += 1;
+        else if (state === 'waiting') counts.waiting += 1;
+        else counts.manual += 1;
+    }
+    const active = values.some(value => value.campaignActive === true);
+    return `pass ${active ? 'active' : 'inactive'}; queued ${counts.queued}, retry ${counts.retry}, ` +
+        `attempted ${counts.attempted}, waiting ${counts.waiting}, manual ${counts.manual}`;
+}
+
 /** @param {unknown} reason */
 function failure(reason) {
     const key = `${reason || 'unknown'}`;
@@ -209,8 +244,8 @@ module.exports = Object.freeze({
                     otherAliases.length > shownAliases.length ? `, +${otherAliases.length - shownAliases.length}` : ''}`;
                 return `- ${JSON.stringify(truncate(value.name, 80))}${aliasText} - ${value.snapshotCount} capture(s) - ${
                     value.battlemetricsPlayerIds.length > 0 ? `BM:${value.battlemetricsPlayerIds.join(',')}` :
-                        'name only'} - last ${value.lastObservedAt.slice(0, 10)}`;
-            }, `Pending identities without SteamID64 (${aliasCount} aliases)`,
+                        'name only'} - last ${value.lastObservedAt.slice(0, 10)} - [${reconciliationLabel(value)}]`;
+            }, `Pending identities without SteamID64 (${aliasCount} aliases; ${reconciliationSummary(values)})`,
             'No known identity is currently waiting for a SteamID64.'));
         }
         if (subcommand === 'links') {

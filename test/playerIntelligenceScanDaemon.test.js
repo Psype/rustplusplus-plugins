@@ -667,7 +667,7 @@ Test('pending reconciliation stops opening calls when its cycle budget is exhaus
     let monotonicNow = 0;
     value.dependencies.monotonicNow = () => {
         const result = monotonicNow;
-        monotonicNow += 7000;
+        monotonicNow += 16000;
         return result;
     };
     value.dependencies.battlemetricsProvider = {
@@ -681,6 +681,45 @@ Test('pending reconciliation stops opening calls when its cycle budget is exhaus
     Assert.equal(result.pendingBattlemetricsAttempts, 2);
     Assert.deepEqual(calls, ['700', '701']);
     Assert.equal(result.pendingReconciliationActive, true);
+});
+
+Test('pending reconciliation drains a bounded WarBandits batch per cycle', async t => {
+    const value = harness(t);
+    await value.store.appendMany(['AlphaOne', 'BravoTwo', 'CharlieThree', 'DeltaFour', 'EchoFive'].map(name =>
+        identityEvent({ steamId: null, battlemetricsPlayerId: null, exactName: name },
+            `pending-warbandits-${name}`, 'discord-cinfo')));
+    const calls = [];
+    const warBanditsProvider = {
+        resolvePlayerRecent: async (_context, _scope, query) => {
+            calls.push(query);
+            return { available: true, ambiguous: false, player: null };
+        }
+    };
+
+    const result = await ScanDaemon.runCycle({ ...value, warBanditsProvider, forceWarBanditsRescan: true });
+    Assert.equal(result.pendingWarBanditsAttempts, ScanDaemon.PENDING_WARBANDITS_BATCH_SIZE);
+    Assert.deepEqual(calls, ['AlphaOne', 'BravoTwo', 'CharlieThree', 'DeltaFour']);
+    Assert.equal(result.pendingReconciliationActive, true);
+});
+
+Test('each explicit scanplayers pass rearms unresolved identities', async t => {
+    const value = harness(t);
+    await value.store.appendMany(['700', '701', '702', '703', '704'].map(id => identityEvent({
+        steamId: null, battlemetricsPlayerId: id, exactName: `Rearm ${id}`
+    }, `pending-rearm-${id}`, 'discord-cinfo')));
+    const calls = [];
+    value.dependencies.battlemetricsProvider = {
+        resolveSteamId: async battlemetricsPlayerId => {
+            calls.push(battlemetricsPlayerId);
+            return { available: true, reason: null, steamId: null };
+        }
+    };
+
+    await ScanDaemon.runCycle({ ...value, forceWarBanditsRescan: true });
+    Assert.deepEqual(calls, ['700', '701', '702', '703']);
+    value.setNow('2026-10-03T12:01:00.000Z');
+    await ScanDaemon.runCycle({ ...value, forceWarBanditsRescan: true });
+    Assert.deepEqual(calls, ['700', '701', '702', '703', '700', '701', '702', '703']);
 });
 
 Test('pending reconciliation rejects stable-ID conflicts discovered inside one batch', async t => {
@@ -743,14 +782,9 @@ Test('manual pending reconciliation falls back to an exact recent WarBandits ali
         ...value, warBanditsProvider, forceWarBanditsRescan: true
     });
     Assert.equal(battlemetrics.pendingBattlemetricsAttempts, 1);
-    Assert.equal(battlemetrics.pendingWarBanditsAttempts, 1);
+    Assert.equal(battlemetrics.pendingWarBanditsAttempts, 2);
+    Assert.equal(battlemetrics.pendingIdentitiesLinked, 1);
     Assert.equal(battlemetricsCalls, 1);
-    Assert.deepEqual(warBanditsCalls, ['BAD OCR']);
-
-    value.setNow('2026-10-03T12:01:00.000Z');
-    const rejectedAlias = await ScanDaemon.runCycle({ ...value, warBanditsProvider });
-    Assert.equal(rejectedAlias.pendingWarBanditsAttempts, 1);
-    Assert.equal(rejectedAlias.pendingIdentitiesLinked, 1);
     Assert.deepEqual(warBanditsCalls, ['BAD OCR', 'FUNTIK']);
     const projection = Core.rebuild(await value.store.readAll());
     const person = projection.identities.findByIdentifier('888')[0];

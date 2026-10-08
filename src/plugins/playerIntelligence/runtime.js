@@ -741,7 +741,20 @@ async function identityAdministrationState(context) {
 /** @param {any} context */
 async function listPendingAliases(context) {
     const state = await identityAdministrationState(context);
-    return IdentityAdministration.pendingAliases(state.projection);
+    const dependencies = getDependencies(context);
+    const daemon = dependencies.playerScanDaemon || PlayerScanDaemon;
+    if (daemon && typeof daemon.getPendingReconciliationStatus === 'function') {
+        const status = await daemon.getPendingReconciliationStatus(
+            playerScanOptions(context, state.scope, state.store, dependencies), state.projection);
+        if (status && Array.isArray(status.rows)) return status.rows;
+    }
+    return IdentityAdministration.pendingAliases(state.projection).map(row => Object.freeze({
+        ...row,
+        reconciliationState: 'unavailable',
+        retryAt: null,
+        campaignActive: false,
+        campaignStartedAt: null
+    }));
 }
 
 /** @param {any} context */
@@ -942,12 +955,12 @@ async function handleCommand(context) {
             if (!scope.wipeId) return handled('Player scan unavailable: current wipe is unknown.');
             const request = requestPlayerScan(context, scope, store, getDependencies(context));
             if (request.state === 'started') {
-                return handled('Player scan and pending identity reconciliation started in background; progress ' +
-                    'continues on BattleMetrics polling ticks.');
+                return handled('Player scan and a new pending identity reconciliation pass started in background; ' +
+                    'progress continues on BattleMetrics polling ticks.');
             }
             if (request.state === 'queued') {
-                return handled('Player scan and pending identity reconciliation queued behind the active ' +
-                    'background cycle.');
+                return handled('Player scan and a new pending identity reconciliation pass queued behind the ' +
+                    'active background cycle.');
             }
             if (request.state === 'cooldown') {
                 return handled(`Player scan cooldown: retry in ${request.retryAfterSeconds}s.`);

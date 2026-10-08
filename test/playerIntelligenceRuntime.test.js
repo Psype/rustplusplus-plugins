@@ -402,7 +402,7 @@ Test('scanplayers acknowledges a bounded background rescan without awaiting it',
     const response = await Runtime.handleCommand(value.command('!scanplayers'));
 
     Assert.equal(response.response,
-        'Player scan and pending identity reconciliation started in background; progress continues on ' +
+        'Player scan and a new pending identity reconciliation pass started in background; progress continues on ' +
         'BattleMetrics polling ticks.');
     Assert.equal(requests.length, 1);
     Assert.equal(requests[0].scope.wipeId, 'wipe:2026-09-29T14:00:00.000Z');

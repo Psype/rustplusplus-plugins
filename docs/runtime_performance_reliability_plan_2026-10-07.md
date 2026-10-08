@@ -212,6 +212,22 @@ Résultat local : les tests couvrent la borne de quatre appels BattleMetrics, le
 WarBandits dans le même cycle, l'arrêt au premier échec fournisseur, le rejet d'un conflit Steam/BM apparu dans le
 même lot et le tri par captures confirmées ; les captures probables ou dupliquées ne comptent pas.
 
+### Lot 6c.2 — Visibilité et nouvelle passe manuelle — release 1.22.41
+
+Statut : implémenté et validé localement ; déploiement à vérifier.
+
+1. Distinguer dans `/intel pending` les identités en file BattleMetrics/WarBandits, en retry ou pause fournisseur,
+   déjà tentées sans résolution, en attente d'une commande et à examiner manuellement.
+2. Faire de chaque `!scanplayers` explicite une nouvelle passe sur les identités encore sans SteamID64, y compris les
+   échecs terminaux de la passe précédente, sans supprimer aucune observation ni liaison.
+3. Porter le lot WarBandits à quatre candidats exacts par tick et le budget d'admission à 45 secondes, tout en gardant
+   l'espacement série de cinq secondes et les cooldowns fournisseur existants.
+4. Conserver la priorité métier par captures de clan confirmées et les règles de correspondance exactes.
+
+Le total pending peut encore augmenter pendant que la découverte du wipe ajoute plus d'identités que la passe n'en
+résout. La progression se juge donc avec les états `queued`, `retry`, `attempted-unresolved` et `waiting`, pas avec le
+seul total brut. Une ligne prioritaire qui reste en tête doit désormais indiquer explicitement pourquoi.
+
 ### Lot 6d — Bornes temporelles des fournisseurs
 
 Statut : planifié comme sous-lot séparé.
@@ -292,7 +308,7 @@ Critères : démarrage reproductible, mémoire stable sur plusieurs wipes et rol
 
 Après `git pull` et redémarrage :
 
-1. vérifier `RUSTPLUS v1.22.40 OPERATIONAL` ;
+1. vérifier `RUSTPLUS v1.22.41 OPERATIONAL` ;
 2. noter RSS, `heapUsed` et temps de réponse avant l’import ;
 3. rejouer le lot de 11 SteamID, puis un lot de 100 ID si disponible ;
 4. exiger un aperçu rapide, les noms locaux déjà vérifiés et aucun dialogue Replace/Keep pour le lot identique ;
@@ -307,7 +323,10 @@ Après `git pull` et redémarrage :
 10. laisser échouer un profil Steam, vérifier qu'il reprend automatiquement après son backoff, puis injecter de
     nouveaux IDs en continu et confirmer qu'un retry dû passe après au plus deux nouveaux IDs dans chaque file.
 11. à un moment choisi où les pseudos sont stables, lancer `!scanplayers` une fois et vérifier que la campagne pending
-    continue seule, fait baisser `/intel pending`, reprend après redémarrage et ne démarre pas au changement de wipe.
+    continue seule, reprend après redémarrage et ne démarre pas au changement de wipe. Contrôler la baisse des états
+    `queued`/`retry` et la hausse explicable de `attempted-unresolved`; le total brut peut monter si la découverte ajoute
+    simultanément davantage de joueurs. Relancer ensuite `!scanplayers` et vérifier qu'une nouvelle passe réessaie les
+    identités encore non résolues.
 
 Les lots 1 à 3 suppriment le chemin chaud précisément observé, le lot 4 rend les prochaines décisions mesurables et
 le lot 5 borne les caches/états dérivés identifiés et le lot 6 reprend le travail fournisseur sans famine. Aucun ne

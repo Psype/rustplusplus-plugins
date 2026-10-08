@@ -858,7 +858,7 @@ teinte et saturation et ignore le fond brun ; il ne dépend d'aucune position é
 
 ### Mesures de performance (poste de développement, 1er octobre 2026)
 
-QA locale la plus récente après traitement pending par lots prioritaires : `npm.cmd test` passe 317/317 le 7 octobre 2026,
+QA locale la plus récente après visibilité et réarmement des passes pending : `npm.cmd test` passe 319/319 le 8 octobre 2026,
 dont le typage strict `tsc --noEmit`. Une
 couverture déterministe reproduit la mauvaise attribution `』Marley』`/`Swizzy`, vérifie le découpage relatif aux
 virgules, la fusion `n444shj, spirit_monger19`, le rejet des comptes/doublons manuels et l'absence d'apprentissage avant
@@ -929,6 +929,14 @@ WarBandits exact par tick, avec un budget d'admission de 20 secondes et arrêt d
 Le tri métier utilise d'abord le nombre de captures de clan distinctes confirmées/non dupliquées, puis la récence.
 Cette priorité accélère les profils déjà utiles sans transformer une vue de clan, F7 ou OCR en preuve de liaison.
 
+La release 1.22.41 rend la campagne observable dans `/intel pending` : chaque identité porte un état dérivé du
+checkpoint (`queued`, `retry`, fournisseur en pause, `attempted-unresolved`, en attente d'une nouvelle passe ou revue
+manuelle). Chaque commande explicite `!scanplayers` réarme les identités qui restent sans SteamID64, même si une passe
+précédente les avait épuisées, sans effacer leur historique. La voie WarBandits traite jusqu'à quatre candidats exacts
+par tick sous un budget d'admission de 45 secondes ; ses appels restent sérialisés avec cinq secondes d'espacement et
+les mêmes cooldowns. Le total pending peut donc croître pendant la découverte, mais sa composition expose désormais la
+progression réelle et la raison pour laquelle une ligne prioritaire reste visible.
+
 Scénario reproductible `npm run benchmark:player-intelligence` : roster initial de 200 joueurs, 60 polls silencieux,
 puis 10 déconnexions. Le premier profilage lisait/reprojetait le journal à chaque poll silencieux : `25,397 ms/poll`.
 Après ajout d'une garde de poll inchangé fondée sur la fiabilité fournisseur, le wipe, les deltas et les liens tracker,
@@ -984,7 +992,8 @@ de forme ni la pénalité d'aspect. Le premier chargement valide toujours intég
 
 La commande slash administrateur `/intel` fournit une interface privée et éphémère au-dessus des événements
 `identity_linked`/`identity_link_revoked`. `/intel pending` pagine une ligne par identité dont la projection n'a encore
-aucun SteamID64 vérifié. Les pseudos qui partagent déjà un BattleMetrics ID sont regroupés : `FUNTIK`, `gus` et
+aucun SteamID64 vérifié et affiche son état de réconciliation : file BattleMetrics/WarBandits, retry ou pause
+fournisseur, tentative terminée sans résolution, attente de `!scanplayers` ou revue manuelle. Les pseudos qui partagent déjà un BattleMetrics ID sont regroupés : `FUNTIK`, `gus` et
 `+=import&**` sur `BM:1192585926` comptent comme une identité et trois alias, pas trois personnes. `/intel link`
 associe un pseudo exact à un SteamID64 ; `/intel merge` utilise comme cible un
 SteamID64, un BattleMetrics ID ou un alias local exact déjà vérifié ; `/intel links` audite les règles actives et

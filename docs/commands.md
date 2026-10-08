@@ -203,7 +203,7 @@ fuzzy matching, so an administrator cannot accidentally merge a similarly named 
 
 Goal | Example | Expected effect
 ---- | ------- | ---------------
-Review unresolved identities | `/intel pending page:1` | Lists one row per projected identity which still has no verified SteamID64, grouping aliases that already share a BattleMetrics ID.
+Review unresolved identities | `/intel pending page:1` | Lists one row per projected identity which still has no verified SteamID64, grouping aliases that already share a BattleMetrics ID and showing whether each row is queued, retrying, paused, already attempted, waiting for a new pass, or manual-only.
 Correct against a known local player | `/intel merge alias:ChiCo target:Ch1co` | Reprojects `ChiCo` observations onto the verified `Ch1co` identity.
 Correct with a known SteamID64 | `/intel link alias:ChiCo steamid:76561198154738095` | Uses that Steam identity after reading its current public persona or a previously verified local alias.
 Review real past names | `/intel history target:Ch1co page:1` | Shows dated Steam/API-verified names only, marking Steam names as current or past.
@@ -855,9 +855,11 @@ to attach a BattleMetrics ID already linked to another SteamID. It no longer mut
 that file remains private implementation data for translation language preferences only.
 <br>`!scanplayers` immediately acknowledges and starts one bounded WarBandits current-wipe page plus a pending-alias
 reconciliation campaign in the background, or queues them behind an already-running cycle. The reconciliation is
-manual-only: neither a wipe nor a weekly timer starts it. Once requested, its restart-safe checkpoint advances a
-bounded batch of up to four direct BattleMetrics resolutions and one exact WarBandits fallback per existing 60-second
-BattleMetrics tick until the candidates are exhausted. The batch stops opening new requests after 20 seconds and
+manual-only: neither a wipe nor a weekly timer starts it. Each explicit command starts a fresh pass over identities
+which still lack SteamID64; it does not delete observations or redo identities already resolved. The restart-safe
+checkpoint advances a bounded batch of up to four direct BattleMetrics resolutions and four exact WarBandits fallbacks
+per existing 60-second BattleMetrics tick until the candidates are exhausted. The batch stops opening new requests
+after 45 seconds and
 stops a provider immediately on its first failure; a wipe change
 does not silently restart or discard that operator-requested campaign. Discord/Rust+ command handling never waits for
 the work. The command bypasses the normal twelve-hour completed-sweep
@@ -870,6 +872,9 @@ BattleMetrics identifier may fall back to WarBandits in the strict order current
 all-time. Each locally unique alias is tried separately, and the response must exactly match the current or a returned
 historical API alias; fuzzy, truncated, colliding or ambiguous results remain manual. A global
 provider cooldown prevents one outage or invalid token from being retried against thousands of different identities.
+`/intel pending` reports fixed counts plus a per-row state: queued BM/WB, retry or provider pause with time,
+attempted-but-unresolved, waiting for the next `!scanplayers`, or manual review. Discovery can temporarily increase the
+unresolved total even while processing succeeds; attempted rows remain visible because no identity proof was invented.
 Within each lane, identities seen in the most distinct confirmed, non-duplicate clan captures are processed first,
 then the most recently observed identities. Unconfirmed or duplicate captures do not increase priority, and priority
 never weakens the exact-match requirement.

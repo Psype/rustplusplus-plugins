@@ -116,9 +116,10 @@ Test('Discord intel link uses the current Steam persona and replies only ephemer
         deferReply: async options => { Assert.deepEqual(options, { ephemeral: true }); }
     });
     Assert.match(replies[2].content,
-        /Pending identities without SteamID64 \(2 aliases\) - 1 - page 1\/1/u);
+        /Pending identities without SteamID64 \(2 aliases; pass inactive; queued 0, retry 0, attempted 0, waiting 1, manual 0\) - 1 - page 1\/1/u);
     Assert.match(replies[2].content, /"FUNTIK" - aliases: "\+=import&\*\*"/u);
     Assert.match(replies[2].content, /BM:1192585926/u);
+    Assert.match(replies[2].content, /\[waiting for !scanplayers\]/u);
 
     Assert.deepEqual(IntelCommand.getData().toJSON().options.map(option => option.name),
         ['pending', 'links', 'history', 'link', 'merge', 'unlink']);

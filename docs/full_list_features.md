@@ -45,7 +45,8 @@ review/correction output to Rust team chat.
 ### Discord-only player identity examples
 
 - `/intel pending page:1` lists one row per unresolved identity. Aliases sharing a BattleMetrics ID are grouped; for
-  example `FUNTIK`, `gus`, and `+=import&**` on `BM:1192585926` count as one identity and three aliases.
+  example `FUNTIK`, `gus`, and `+=import&**` on `BM:1192585926` count as one identity and three aliases. Each row states
+  whether it is queued for BM/WB, retrying/paused, attempted but unresolved, waiting for `!scanplayers`, or manual-only.
 - `/intel merge alias:ChiCo target:Ch1co` performs an exact, reversible correction against an existing verified target.
 - `/intel link alias:ChiCo steamid:76561198154738095` performs the same correction when the SteamID64 is known directly.
 - `/intel history target:Ch1co page:1` lists only dated Steam/API-verified names. Steam Community names are labelled
@@ -90,10 +91,10 @@ review/correction output to Rust team chat.
 - **send** - `!send [discord user] [message]` - Send a message through rustplusplus to a person on Discord.
 - **stack** - `!stack [item]` - Display stack size information for an item.
 - **scanplayers** - `!scanplayers` - Trigger or queue the bounded current-wipe scan and a durable reconciliation of
-  pending aliases. Reconciliation starts only on this explicit command, then continues in bounded batches of up to
-  four BattleMetrics IDs plus one exact WarBandits fallback per polling tick. Confirmed, non-duplicate clan sightings
-  determine priority before recency; they never relax identity matching. It is never started automatically by a wipe
-  or weekly schedule.
+  pending aliases. Every explicit invocation starts a fresh pass over still-unresolved rows, then continues in bounded
+  batches of up to four BattleMetrics IDs plus four exact WarBandits fallbacks per polling tick and a 45-second
+  admission budget. Confirmed, non-duplicate clan sightings determine priority before recency; they never relax
+  identity matching. It is never started automatically by a wipe or weekly schedule.
 - **steamid** - `!steamid [SteamID64|BattleMetrics ID|partial name]` - Compatibility alias for the complete `!intel` server-wide profile.
 - **team** - `!team` - Get team information (names of all teammates).
 - **time** - `!time` - Get in-game time.

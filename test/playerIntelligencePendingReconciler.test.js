@@ -70,6 +70,32 @@ Test('confirmed non-duplicate clan sightings prioritize pending identities', () 
         .map(candidate => candidate.battlemetricsPlayerId), ['200', '100']);
     Assert.deepEqual(PendingReconciler.warBanditsCandidates(projection, new Set(['100', '200']), true, rows)
         .map(candidate => candidate.query), ['Confirmed twice', 'No clan evidence']);
+
+    const checkpoint = PendingReconciler.startCheckpoint(observed);
+    checkpoint.checkedBattlemetricsIds = ['200'];
+    checkpoint.checkedWarBanditsKeys = PendingReconciler.warBanditsCandidates(
+        projection, new Set(['200']), true, rows)
+        .filter(candidate => candidate.personId === 'bm:200').map(candidate => candidate.key);
+    let status = PendingReconciler.reconciliationStatus(projection, checkpoint, {
+        battlemetricsEnabled: true,
+        warBanditsEnabled: true,
+        now: new Date(observed)
+    }, rows);
+    Assert.deepEqual(status.rows.map(row => [row.personId, row.reconciliationState]), [
+        ['bm:200', 'attempted-unresolved'],
+        ['bm:100', 'queued-battlemetrics']
+    ]);
+    checkpoint.active = false;
+    checkpoint.completedAt = observed;
+    status = PendingReconciler.reconciliationStatus(projection, checkpoint, {
+        battlemetricsEnabled: true,
+        warBanditsEnabled: true,
+        now: new Date(observed)
+    }, rows);
+    Assert.deepEqual(status.rows.map(row => [row.personId, row.reconciliationState]), [
+        ['bm:200', 'attempted-unresolved'],
+        ['bm:100', 'waiting']
+    ]);
 });
 
 Test('WarBandits fallback rejects a display name owned as an alias by another pending identity', () => {

@@ -12,7 +12,7 @@ const Core = require('./index.js');
 const PendingReconciler = require('./pendingReconciler.js');
 
 const STATE_SCHEMA_VERSION = 7;
-const COLLECTOR_VERSION = 'player-scan-daemon-8';
+const COLLECTOR_VERSION = 'player-scan-daemon-9';
 const STATE_FILE = 'scan-daemon.json';
 const MAX_LOCAL_REFRESHES_PER_CYCLE = 100;
 const RESCAN_DELAY_MS = 12 * 60 * 60 * 1000;
@@ -26,8 +26,8 @@ const MAX_TARGETED_RETRIES = 10000;
 const MAX_STEAM_PROFILE_RETRIES = 10000;
 const FRESH_BURST_LIMIT = 2;
 const PENDING_BATTLEMETRICS_BATCH_SIZE = 4;
-const PENDING_WARBANDITS_BATCH_SIZE = 1;
-const PENDING_RECONCILIATION_BUDGET_MS = 20 * 1000;
+const PENDING_WARBANDITS_BATCH_SIZE = 4;
+const PENDING_RECONCILIATION_BUDGET_MS = 45 * 1000;
 const ONLINE_SOURCE = 'battlemetrics-online-wipe-daemon';
 const WARBANDITS_SOURCE = 'warbandits-current-wipe-daemon';
 const WARBANDITS_LOOKUP_SOURCE = 'warbandits-direct-lookup-daemon';
@@ -467,9 +467,7 @@ async function runCycle(options) {
         state.targetedFreshStreak = 0;
         state.steamProfileRetries = [];
         state.steamProfileFreshStreak = 0;
-        if (!state.pendingReconciliation.active) {
-            state.pendingReconciliation = PendingReconciler.startCheckpoint(recordedAt);
-        }
+        state.pendingReconciliation = PendingReconciler.startCheckpoint(recordedAt);
         state.warBanditsRetryAt = null;
         state.warBanditsFailures = 0;
     }
@@ -1191,6 +1189,25 @@ async function waitForIdle(directory) {
     while (inFlight.has(key)) await inFlight.get(key);
 }
 
+/** @param {Parameters<typeof runCycle>[0]} options @param {any} projection */
+async function getPendingReconciliationStatus(options, projection) {
+    if (!options || typeof options.directory !== 'string' || !options.scope || !options.scope.wipeId || !projection) {
+        return null;
+    }
+    const dependencies = options.dependencies || {};
+    const current = nowDate(dependencies);
+    const state = await readState(options, current);
+    const battlemetricsProvider = dependencies.battlemetricsProvider;
+    const provider = options.warBanditsProvider;
+    return PendingReconciler.reconciliationStatus(projection, state.pendingReconciliation, {
+        battlemetricsEnabled: Boolean(battlemetricsProvider &&
+            typeof battlemetricsProvider.resolveSteamId === 'function'),
+        warBanditsEnabled: Boolean(provider && (typeof provider.resolvePlayerRecent === 'function' ||
+            typeof provider.resolvePlayer === 'function')),
+        now: current
+    });
+}
+
 function getRuntimeStatus() {
     return Object.freeze({ active: inFlight.size, forcedRerunsQueued: forcedReruns.size });
 }
@@ -1220,6 +1237,7 @@ module.exports = Object.freeze({
     WARBANDITS_LOOKUP_SOURCE,
     getRuntimeCacheStatus,
     getRuntimeStatus,
+    getPendingReconciliationStatus,
     requestRescan,
     resetRuntimeCachesForTests,
     runCycle,
