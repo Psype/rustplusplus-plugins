@@ -14,6 +14,11 @@ Never commit the populated `.env`. A `TokenInvalid` startup log means the local 
 registered slash commands can remain visible in Discord but will display `The application did not respond` until a
 valid bot process is connected. Restart the deployed process after changing its environment.
 
+`npm start` launches the production entrypoint with native Node (`node .` through `index.js`). Do not replace it with
+`ts-node .`: keeping the TypeScript compiler and its `allowJs` program alive retained about 1 GiB of heap in the
+measured runtime. TypeScript remains a validation step through `npm run test:types` and the complete `npm test`; it is
+not the production loader. Existing systemd units that invoke `npm start` require no command change.
+
 Bounded runtime telemetry is enabled by default. `RPP_RUNTIME_TELEMETRY_INTERVAL_MS` selects a 10,000–300,000 ms
 aggregation window (60,000 ms by default); invalid values safely use the default. Set `RPP_RUNTIME_TELEMETRY=false`
 to disable its timer and `/runtime` data. The telemetry writes two fixed-cardinality aggregate log lines per completed

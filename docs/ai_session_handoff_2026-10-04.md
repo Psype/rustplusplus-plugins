@@ -24,6 +24,9 @@ selon un calendrier. La priorité reste fondée sur les captures de clan confirm
 La release 1.22.42 supprime les sorties fatales Discord, sérialise les polls Rust+/BattleMetrics, borne les files et
 isole traduction/Tesseract dans des processus supervisés. Le cœur reste l'unique writer player-intelligence ; les
 services Steam/BattleMetrics/WarBandits et voix dégradent vers pending/unknown ou une sortie absente.
+La release 1.22.43 corrige l'OOM reproductible du cœur : `npm start` lance maintenant Node directement, sans conserver
+le compilateur `ts-node`, et les candidats du consolidateur restent linéaires même lorsqu'une identité projetée porte
+de nombreux alias et BattleMetrics IDs.
 Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; `a308c0a` ajoute la
 1.22.27. La release suivante 1.22.28 groupe les alias pending par identité BattleMetrics et ajoute le fallback
 WarBandits courant -> intervalle historique pertinent -> all-time. La release 1.22.29 centralise toute consolidation
@@ -59,7 +62,7 @@ uniquement dans l’ancre et garde une date illisible éditable avec Confirm dé
 réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
 d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La suivante borne les délais de réponse
 Discord/traduction et la dernière fiabilise la sémantique des identités connues et des wipes WarBandits. La dernière
-validation complète de la release 1.22.42 a passé 325/325 tests et tsc --noEmit ; le déploiement et la
+validation complète de la release 1.22.43 a passé 328/328 tests et tsc --noEmit ; le déploiement et la
 nouvelle capture Discord restent à valider réellement.
 
 Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
@@ -78,8 +81,8 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 - Dépôt : `rustplusplus-plugins`.
 - Branche au moment de la passation : `master`.
-- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur `3e078f0`, release `1.22.41`, avant la release courante.
-- Version canonique du worktree : `1.22.42` dans `package.json` et `package-lock.json`.
+- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur `09dc37a`, release `1.22.42`, avant la release courante.
+- Version canonique du worktree : `1.22.43` dans `package.json` et `package-lock.json`.
 - Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
   métrique d’heures WarBandits.
 - Le commit utilisateur `d327e7d` regroupe les releases `1.22.24` à `1.22.26`, notamment dans :
@@ -195,7 +198,21 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
 
-## Dernière correction : release 1.22.42
+## Dernière correction : release 1.22.43
+
+Les journaux de production du 11 octobre montrent quatre OOM identiques du processus principal, environ 376 à
+378 secondes après chaque démarrage, au voisinage de la limite V8 de 2 042 MiB. Deux amplificateurs se cumulaient :
+le runtime `ts-node` retenait localement environ 1 067 MiB de heap dès le chargement, contre 47,7 MiB avec Node natif,
+et `projectionCandidates` matérialisait le produit cartésien alias × BattleMetrics IDs.
+
+`npm start` exécute désormais `node .` via `index.js`; `index.ts` reste un pont CommonJS compatible avec les modules
+existants. Pour une projection pathologique de 2 500 alias et 2 500 IDs, le consolidateur émet 7 500 candidats au
+lieu de 6 250 000, tout en conservant chaque identifiant stable et deux associations distinctes par alias afin que
+l'ambiguïté reste fermée. Des tests différentiels comparent ce comportement à l'ancien produit cartésien sur les
+cas non pathologiques. Cette validation locale ne prouve pas encore la stabilité RSS du serveur : le déploiement doit
+franchir largement l'ancienne frontière de 378 secondes.
+
+### Correction précédente : release 1.22.42
 
 Le lot de fiabilisation du 11 octobre est décrit dans `docs/runtime_resilience_2026-10-11.md`. Il couvre les deux
 `process.exit(1)` du runtime Discord, les rejets EventEmitter/timers, le non-chevauchement Rust+/BattleMetrics, les
@@ -463,9 +480,9 @@ inventer ni commiter silencieusement.
 
 ## Validation déjà effectuée
 
-Le 11 octobre 2026, après la release 1.22.42 :
+Le 11 octobre 2026, après la release 1.22.43 :
 
-- `npm.cmd test` : `325/325` tests unitaires réussis ;
+- `npm.cmd test` : `328/328` tests unitaires réussis ;
 - `tsc --noEmit -p .` : réussi dans la même commande ;
 - `git diff --check` : aucune erreur ;
 - `npm.cmd run test:autotranslate:live` : réussi en 8,9 s pour six scénarios cumulés ; Bing a atteint sa borne de deux
@@ -564,8 +581,10 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
 
 ## Vérifications de production encore ouvertes
 
-1. Déployer/redémarrer `1.22.42`, vérifier le message `RUSTPLUS v1.22.42 OPERATIONAL`, puis rejouer le lot de 11
-   SteamID. Mesurer temps de réponse, RSS et heap avant/après ; exiger les noms locaux connus et aucun Replace/Keep.
+1. Déployer/redémarrer `1.22.43`, vérifier le message `RUSTPLUS v1.22.43 OPERATIONAL`, puis laisser le cœur tourner au
+   moins 15 minutes afin de franchir largement l'ancienne frontière OOM de 376–378 secondes. Mesurer RSS et heap avant
+   puis après un `!scanplayers`; aucun redémarrage ne doit survenir. Rejouer ensuite le lot de 11 SteamID, mesurer son
+   temps de réponse et exiger les noms locaux connus sans Replace/Keep.
    Après une fenêtre, contrôler `/runtime`, `RUNTIME`, `RUNTIME_WORK` et les éventuels `RUNTIME_SLOW`, sans donnée joueur.
 2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent
    des boîtes déterministes et ne remplacent pas ce contrôle.

@@ -284,7 +284,12 @@ Critères : nombre maximal de jobs et de pixels connu, nettoyage testé, sémant
 
 ### Lot 11 — Journal et projecteurs
 
-Statut : planifié.
+Statut : partiellement réalisé en `1.22.43`.
+
+Le produit cartésien alias × BattleMetrics IDs de `projectionCandidates` a été remplacé par une représentation
+linéaire `B + 2A`. Le benchmark de régression pathologique passe de 6 250 000 à 7 500 candidats pour 2 500 alias et
+2 500 IDs, avec tests différentiels garantissant la même consolidation métier. Le cycle de vie du snapshot partagé
+reste à mesurer et optimiser séparément.
 
 1. Mesurer le coût de `readAll` et des reconstructions par commande.
 2. Réutiliser une projection immuable tant que le journal n’a pas changé.
@@ -295,14 +300,19 @@ Critères : journal JSONL toujours source de vérité, replay complet détermini
 
 ### Lot 12 — Runtime de production
 
-Statut : planifié après stabilisation applicative.
+Statut : partiellement réalisé en `1.22.43`, validation serveur encore requise.
 
-1. Compiler TypeScript avant déploiement et lancer Node sur les fichiers produits plutôt que `ts-node` en continu.
+1. Lancer Node directement via `index.js` plutôt que conserver `ts-node` en continu — réalisé ; la validation
+   TypeScript reste exécutée avant release.
 2. Ajouter un plafond mémoire systemd raisonnable seulement après avoir supprimé la cause de croissance.
 3. Configurer redémarrage, délai d’arrêt et collecte de diagnostics sans boucle de crash.
 4. Documenter les commandes de vérification RSS/heap/event-loop et la procédure de rollback par release Git.
 
 Critères : démarrage reproductible, mémoire stable sur plusieurs wipes et rollback sans toucher aux données persistantes.
+
+Une sonde locale de chargement mesure environ 47,7 MiB de heap avec Node natif contre 1 067 MiB avec `ts-node`.
+La production doit encore confirmer la stabilité au-delà de l'ancienne OOM reproductible à 376–378 secondes avant
+tout ajout de `MemoryMax`.
 
 ## Vérifications de production des lots 1 à 5
 

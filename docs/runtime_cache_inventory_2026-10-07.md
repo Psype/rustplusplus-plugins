@@ -62,3 +62,7 @@ stores existants partagent cet objet pour garantir l'exclusion mutuelle ; un LRU
 autoriser des appends concurrents. Les projections et consolidateurs sont dérivés mais restent vivants tant que le
 snapshot courant l'est. Le lot 11 mesurera séparément leur poids et introduira un cycle de vie sûr sans changer le
 journal JSONL, qui reste la source de vérité.
+
+La release `1.22.43` a déjà supprimé une rétention transitoire majeure : `projectionCandidates` ne matérialise plus le
+produit cartésien alias × BattleMetrics IDs et reste linéaire en entrée. Cela ne change pas la durée de vie du snapshot
+partagé, qui demeure le prochain sujet distinct de ce lot.

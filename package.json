@@ -1,10 +1,10 @@
 {
     "name": "rustplusplus",
-    "version": "1.22.42",
+    "version": "1.22.43",
     "description": "A NodeJS Discord Bot that uses the rustplus.js library to utilize the power of the Rust+ Companion App with additional Quality-of-Life features.",
-    "main": "index.ts",
+    "main": "index.js",
     "scripts": {
-        "start": "ts-node .",
+        "start": "node .",
         "preinstall": "npx npm-force-resolutions",
         "test": "npm run test:unit && npm run test:types",
         "test:unit": "node --test test/*.test.js",

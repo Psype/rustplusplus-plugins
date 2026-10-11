@@ -1,6 +1,6 @@
 # Fiabilisation runtime et isolation des services — 11 octobre 2026
 
-Cette note décrit la release `1.22.42`. Elle ne prétend pas rendre un programme « bug-proof » au sens absolu : elle
+Cette note décrit les releases `1.22.42` et `1.22.43`. Elle ne prétend pas rendre un programme « bug-proof » au sens absolu : elle
 réduit les causes connues de reboot, borne les charges reconstructibles et limite le rayon d'impact des fournisseurs
 externes et des traitements lourds.
 
@@ -53,6 +53,25 @@ Les workers ne lisent ni n'écrivent le journal `data/player-intelligence`. Ils 
 le seul propriétaire du commit append-only. Le daemon de consolidation ne doit pas être déplacé avant d'avoir séparé
 un plan read-only de son commit par le writer unique.
 
+## Hotfix mémoire 1.22.43
+
+Le journal de production a révélé quatre OOM déterministes du processus principal environ 376 à 378 secondes après
+chaque démarrage, au voisinage de la limite V8 de 2 042 MiB. Il ne s'agissait pas d'un crash des workers ni d'une
+simple panne fournisseur.
+
+Deux coûts se cumulaient :
+
+- `ts-node .` conservait le compilateur et son programme `allowJs` pendant toute la vie du bot. Une sonde locale du
+  chargement des modules mesurait environ 1 067 MiB de heap avec `ts-node`, contre 47,7 MiB avec Node natif ;
+- `projectionCandidates` matérialisait alias × BattleMetrics IDs avant de reconstruire les index. Avec 2 500 alias et
+  2 500 IDs, cela représentait 6 250 000 lignes temporaires.
+
+La release lance donc `node .` via `index.js`, sans modifier la commande opérateur `npm start`. Le pont `index.ts`
+reste disponible aux modules CommonJS existants. Le consolidateur produit maintenant au plus `B + 2A` lignes lorsqu'il
+existe plusieurs BattleMetrics IDs : chaque ID stable reste représenté et deux associations distinctes par alias
+préservent le refus automatique des ambiguïtés. Le cas 2 500 × 2 500 tombe ainsi à 7 500 lignes. Des tests différentiels
+vérifient le résultat métier contre l'ancien produit cartésien sur les projections ordinaires.
+
 ## Services externes et mode dégradé
 
 | Défaillance | Comportement attendu |
@@ -78,8 +97,10 @@ réels, ni Tesseract Linux, ni systemd, ni la mémoire en production.
 
 Après `git pull` et redémarrage sur Linux :
 
-1. vérifier `RUSTPLUS v1.22.42 OPERATIONAL` et l'absence de boucle de restart ;
-2. observer `systemctl status rustplusplus`, `journalctl -u rustplusplus` et `/runtime` pendant au moins un cycle BM ;
+1. vérifier `RUSTPLUS v1.22.43 OPERATIONAL` et l'absence de boucle de restart pendant au moins 15 minutes, donc
+   largement au-delà de l'ancienne frontière OOM de 376–378 secondes ;
+2. observer `systemctl status rustplusplus`, `journalctl -u rustplusplus` et `/runtime` pendant plusieurs cycles BM,
+   puis comparer RSS et heap avant/après un `!scanplayers` ;
 3. provoquer une traduction puis un import OCR et vérifier que les workers apparaissent sans hausse durable du heap
    principal ;
 4. tester une commande locale quand Steam/BattleMetrics sont indisponibles et vérifier `unknown/pending`, jamais un

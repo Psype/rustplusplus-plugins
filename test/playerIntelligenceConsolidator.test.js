@@ -276,6 +276,114 @@ Test('projection consolidation prepares display names only once for repeated obs
     Assert.equal(displayNameCalls, 2);
 });
 
+Test('projection candidate preparation stays linear for an accidentally over-merged identity', () => {
+    const cardinality = 2500;
+    const battlemetricsPlayerIds = Object.freeze(Array.from({ length: cardinality },
+        (_unused, index) => `${1000000 + index}`));
+    const names = Object.freeze(Array.from({ length: cardinality }, (_unused, index) => Object.freeze({
+        name: `Alias ${index}`, caseFidelity: true, verified: true, steamStatus: null
+    })));
+    const projection = Object.freeze({
+        identities: Object.freeze({
+            persons: Object.freeze([Object.freeze({
+                personId: `steam:${STEAM_A}`,
+                steamId: STEAM_A,
+                battlemetricsPlayerIds,
+                names
+            })]),
+            displayName: () => 'Alias 2499'
+        })
+    });
+
+    const candidates = Core.projectionCandidates(projection);
+    Assert.equal(candidates.length, cardinality * 3);
+    Assert.ok(candidates.length < cardinality * cardinality);
+
+    const byBattlemetrics = Core.consolidateProjection(projection, {
+        battlemetricsPlayerId: battlemetricsPlayerIds[123]
+    });
+    Assert.equal(byBattlemetrics.status, 'conflict');
+    Assert.equal(byBattlemetrics.identity.steamId, null);
+    Assert.equal(byBattlemetrics.identity.name, 'Alias 2499');
+
+    const byName = Core.consolidateProjection(projection, { name: 'Alias 123' });
+    Assert.equal(byName.status, 'ambiguous');
+    Assert.equal(byName.identity.steamId, null);
+    Assert.equal(byName.identity.battlemetricsPlayerId, null);
+});
+
+Test('linear projection candidates preserve Cartesian consolidation semantics', () => {
+    /** @param {any} projection */
+    function cartesianCandidates(projection) {
+        const values = [];
+        for (const person of projection.identities.persons) {
+            const preferredName = projection.identities.displayName(person.personId);
+            const battlemetricsIds = person.battlemetricsPlayerIds.length > 0 ?
+                person.battlemetricsPlayerIds : [null];
+            const names = person.names.length > 0 ? person.names : [null];
+            for (const battlemetricsPlayerId of battlemetricsIds) {
+                for (const alias of names) values.push({
+                    personId: person.personId,
+                    steamId: person.steamId,
+                    battlemetricsPlayerId,
+                    name: alias && alias.name,
+                    preferredName,
+                    caseFidelity: alias ? alias.caseFidelity : true,
+                    nameTrusted: alias ?
+                        (alias.verified && alias.steamStatus !== 'past') || person.steamId === null : false
+                });
+            }
+        }
+        return values;
+    }
+
+    for (let identifierCount = 0; identifierCount <= 3; identifierCount += 1) {
+        const ids = Object.freeze(Array.from({ length: identifierCount },
+            (_unused, index) => `${100 + index}`));
+        const persons = Object.freeze([Object.freeze({
+            personId: `steam:${STEAM_A}`,
+            steamId: STEAM_A,
+            battlemetricsPlayerIds: ids,
+            names: Object.freeze([
+                Object.freeze({ name: 'Current', caseFidelity: true, verified: true, steamStatus: 'current' }),
+                Object.freeze({ name: 'Past', caseFidelity: true, verified: true, steamStatus: 'past' }),
+                Object.freeze({ name: 'OCR', caseFidelity: true, verified: false, steamStatus: null }),
+                Object.freeze({ name: 'Shared', caseFidelity: true, verified: true, steamStatus: null })
+            ])
+        }), Object.freeze({
+            personId: `steam:${STEAM_B}`,
+            steamId: STEAM_B,
+            battlemetricsPlayerIds: Object.freeze(['900']),
+            names: Object.freeze([Object.freeze({
+                name: 'Shared', caseFidelity: true, verified: true, steamStatus: 'current'
+            })])
+        })]);
+        const projection = Object.freeze({
+            identities: Object.freeze({
+                persons,
+                displayName: personId => personId === `steam:${STEAM_A}` ? 'Current' : 'Shared'
+            })
+        });
+        const cartesian = Core.prepareIdentityConsolidator(cartesianCandidates(projection));
+        const linear = Core.prepareIdentityConsolidator(Core.projectionCandidates(projection));
+        const observations = [
+            { steamId: STEAM_A },
+            { name: 'Current' },
+            { name: 'Past' },
+            { name: 'OCR' },
+            { name: 'Shared' },
+            { steamId: STEAM_A, name: 'Current' },
+            { battlemetricsPlayerId: ids[0] || '999' },
+            { battlemetricsPlayerId: ids[identifierCount - 1] || '999', name: 'Current' },
+            { steamId: STEAM_B, battlemetricsPlayerId: ids[0] || '999', name: 'Shared' }
+        ];
+        for (const observation of observations) {
+            Assert.deepEqual(linear(observation), cartesian(observation),
+                `semantic mismatch with ${identifierCount} BattleMetrics IDs for ${JSON.stringify(observation)}`);
+        }
+    }
+});
+
 Test('projection consolidation never caches a mutable projection snapshot', () => {
     let displayNameCalls = 0;
     const person = {

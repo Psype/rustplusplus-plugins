@@ -323,14 +323,15 @@ function projectionCandidates(projection) {
     if (!projection || !projection.identities || !Array.isArray(projection.identities.persons)) {
         throw new TypeError('Player-intelligence projection is required.');
     }
+    /** @type {any[]} */
     const candidates = [];
     for (const person of projection.identities.persons) {
         const preferredName = projection.identities.displayName(person.personId);
         const battlemetricsIds = person.battlemetricsPlayerIds.length > 0 ?
             person.battlemetricsPlayerIds : [null];
         const names = person.names.length > 0 ? person.names : [null];
-        for (const knownBattlemetricsId of battlemetricsIds) {
-            for (const alias of names) candidates.push({
+        /** @param {string|null} knownBattlemetricsId @param {any} alias */
+        const push = (knownBattlemetricsId, alias) => candidates.push({
                 personId: person.personId,
                 steamId: person.steamId,
                 battlemetricsPlayerId: knownBattlemetricsId,
@@ -340,6 +341,22 @@ function projectionCandidates(projection) {
                 nameTrusted: alias ?
                     (alias.verified && alias.steamStatus !== 'past') || person.steamId === null : false
             });
+
+        if (battlemetricsIds.length <= 1) {
+            for (const alias of names) push(battlemetricsIds[0], alias);
+            continue;
+        }
+
+        /*
+         * Identifier edges and exact-name ambiguity do not require the full aliases x BattleMetrics
+         * Cartesian product. Keep every stable edge, then two different IDs per alias: two are enough
+         * for the consolidator to retain its fail-closed ambiguous result. This changes O(A*B) retained
+         * rows into O(A+B) for an accidentally over-merged identity.
+         */
+        for (const knownBattlemetricsId of battlemetricsIds) push(knownBattlemetricsId, null);
+        for (const alias of names) {
+            push(battlemetricsIds[0], alias);
+            push(battlemetricsIds[1], alias);
         }
     }
     return Object.freeze(candidates);

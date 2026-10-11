@@ -48,14 +48,18 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   and timer boundaries were added, Rust+/BattleMetrics loops became non-overlapping, queues and raw logs were bounded,
   configuration writes became atomic, and translation plus production Tesseract now run in supervised child
   processes. BattleMetrics/voice are bounded optional enrichments, and FCM server pairing persists before BM lookup.
-  `1.22.42` is the current release. Only `master` plus the useful
+  Release `1.22.43` fixes the deterministic production OOM seen about 376 seconds after each `1.22.42` start. The
+  production entry point is native `node .`, not `ts-node`, so the TypeScript compiler is no longer retained in the
+  bot process. Identity consolidation now represents an over-merged person's alias/BattleMetrics evidence in
+  `O(aliases + IDs)` rows instead of their Cartesian product while preserving fail-closed conflicts and ambiguities.
+  `1.22.43` is the current release. Only `master` plus the useful
   `origin/master`/`upstream/master` remote-tracking references remained. Do not reset, overwrite, reimplement or
   discard these changes. Re-audit `git status --short` and `git diff` if the observed state differs.
-- Canonical package version is `1.22.42`. The complete local validation on 2026-10-11 passed `325/325` unit tests and
+- Canonical package version is `1.22.43`. The complete local validation on 2026-10-11 passed `328/328` unit tests and
   `tsc --noEmit`; `git diff --check` was clean. Architecture and production checks are documented in
   `docs/runtime_resilience_2026-10-11.md`. This is local deterministic evidence only. Deployment/restart and a
-  new Discord import of the reported KIRK screenshot, the SteamID latency/memory improvement and `/runtime` production
-  metrics remain unconfirmed, so do not claim production success.
+  stable production run beyond the former 376-second crash boundary, a new Discord import of the reported KIRK
+  screenshot and `/runtime` production metrics remain unconfirmed, so do not claim production success.
 - Primary unresolved production fact: raid and **Pair with Server** notifications were observed on the Rust+ phone but not on the bot. The 2026-09-23/24 journal showed accepted MCS logins and quick reconnects but no inbound notification. Phone receipt proves Facepunch delivery to the phone only; MCS login proves Google accepted the bot's GCM identity only. Facepunch delivery to the bot's virtual device still requires a live capture. Canonical transport audit: `docs/fcm_transport_audit_2026-09-23.md`.
 - Implemented receiver path: `src/util/reliableFcmReceiver.js` owns accepted-login readiness, stream position, heartbeat/ack, inactivity detection, ports 5228/443 and capped reconnect; `fcmAlarmRouter.js` routes Host/Lite `alarm`; `src/plugins/raidAlarm/` performs immediate authoritative Rust-chat delivery and five-second duplicate suppression. Current Facepunch/Liam/RustPlusApi evidence still uses GCM/FCM/MCS and `appData.channelId=alarm`; no schema migration was found.
 - `!alarmstatus` reports MCS, generic push proof, matching server-pair age, alarm age, Host/account match, output/mute, raw logging and up to five alarms. An operational Rust+ connection with a saved `playerToken` reports `pair active` and **does not** arm a re-pair watcher. Only an unpaired/non-operational server arms one guild-scoped 120-second watcher; repeating the command does not add another timer. Entity-pair or another server/account cannot satisfy it. `!raidtest` validates outbound Rust chat only.
