@@ -31,7 +31,7 @@ that boundary and must not import individual feature plugins.
   online/offline transitions.
 - `customCommands`: owns commands added by this fork, including `deepsea`, `hv`, `hvw`, `hvt`, `language`, `record`,
   `who`, `logs`, `commands`/`help`, and `autotranslate`. Its command catalogue reads the canonical
-  `## In-Game and Discord Commands` section of `docs/full_list_features.md` at runtime; QA compares that catalogue
+  `## In-Game and Discord Commands` section of `docs/reference/features.md` at runtime; QA compares that catalogue
   against every static native/plugin command syntax.
 
 ## Player-intelligence identity boundary

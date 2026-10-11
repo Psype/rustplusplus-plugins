@@ -524,7 +524,7 @@ module.exports = {
                 module.exports.getButton({
                     style: Discord.ButtonStyle.Link,
                     label: 'DOCUMENTATION',
-                    url: 'https://github.com/alexemanuelol/rustplusplus/blob/master/docs/documentation.md'
+                    url: 'https://github.com/Psype/rustplusplus-plugins/blob/master/docs/README.md'
                 }),
                 module.exports.getButton({
                     style: Discord.ButtonStyle.Link,

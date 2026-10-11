@@ -1,7 +1,7 @@
 # Credentials Documentation (Web Version)
 
 > **Legacy reference only.** The canonical supported flow is now
-> [`docs/credentials.md`](credentials.md) using local `rustplus.js fcm-register`. A browser extension or redirect URL
+> [`docs/setup/credentials.md`](credentials.md) using local `rustplus.js fcm-register`. A browser extension or redirect URL
 > that returns only a Rust+ `AuthToken` is insufficient for this bot: it must also provision GCM/FCM/Expo and expose
 > the matching `fcm_credentials.gcm.androidId` and `securityToken`. Never paste a third-party bot registration token
 > into this project or publish a URL containing `token=`.
@@ -22,29 +22,29 @@
 
 > [rustPlusPlus-Credentials Firefox Extension](https://addons.mozilla.org/en-US/firefox/addon/rustplusplus-credential-app)
 
-   ![rustplusplus Click Install Extension Image](images/bot_setup/click_install_extension.png)
+   ![rustplusplus Click Install Extension Image](../images/bot_setup/click_install_extension.png)
 
-   ![rustplusplus After Click Install Extension Image](images/bot_setup/after_click_install_extension.png)
+   ![rustplusplus After Click Install Extension Image](../images/bot_setup/after_click_install_extension.png)
 
 3. **Click the Log In button to proceed with the Steam login.**
 
-   ![Steam Account login Image](images/bot_setup/steam_login_web.png)
+   ![Steam Account login Image](../images/bot_setup/steam_login_web.png)
 
 4. **After logging in, you will be redirected to the display page where the slash command will be shown `/credentials add ....`**
 
-   ![rustplusplus Display Page](images/bot_setup/rustplusplus_display_page.png)
+   ![rustplusplus Display Page](../images/bot_setup/rustplusplus_display_page.png)
 
 5. **Click `Copy` to copy the Slash Command.**
 
-   ![Credentials copy Image](images/bot_setup/click_copy_to_clipboard.png)
+   ![Credentials copy Image](../images/bot_setup/click_copy_to_clipboard.png)
 
 6. **Paste the Slash Command in your Discord Server Text Channel. The specific Text Channel does not matter, as long as the bot has access to it.**
 
-   ![FCM Credentials discord Image](images/bot_setup/credentials_discord.png)
+   ![FCM Credentials discord Image](../images/bot_setup/credentials_discord.png)
 
 7. **This process is the same for the owner of the bot as well as any teammate that wants to register their credentials (mainly to extend the usage of the leader command). Once a teammate has registered their credentials, they need to go inside the game and pair with the server. Teammates paired with the server can be seen in the information channel, indicated by the P icon beside their name, as shown below:**
 
-   ![Teammates Paired with Server](images/bot_setup/teammates_paired.png)
+   ![Teammates Paired with Server](../images/bot_setup/teammates_paired.png)
 
 ## Why are Credentials Necessary?
 

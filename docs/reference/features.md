@@ -128,10 +128,10 @@ review/correction output to Rust team chat.
 ## Smart Devices
 > Pair Smart Devices such as `Smart Switches`, `Smart Alarms`, `Storage Monitors` and control them from Discord or In-Game teamchat.
 
-- See [Smart Switches](smart_devices.md#smart-switches).
-- See [Smart Switch Groups](smart_devices.md#smart-switch-groups).
-- See [Smart Alarms](smart_devices.md#smart-alarms).
-- See [Storage Monitors](smart_devices.md#storage-monitors).
+- See [Smart Switches](smart-devices.md#smart-switches).
+- See [Smart Switch Groups](smart-devices.md#smart-switch-groups).
+- See [Smart Alarms](smart-devices.md#smart-alarms).
+- See [Storage Monitors](smart-devices.md#storage-monitors).
 
 
 ## Rust Server Information
@@ -152,7 +152,7 @@ market, or hidden-vendor state. Their commands are disabled and omitted from the
 cannot present stale history as current information. Discord also hides the corresponding slash command, live-event
 panel, notification cards, vending-item option, and Cargo/Oil Rig timers. Historical handlers and saved preferences
 remain isolated for a future authoritative signal. See
-[the payload audit](rustplus_payload_audit_2026-09-10.md) for captured evidence.
+[the payload audit](../transport/payload-audit.md) for captured evidence.
 
 ## Teammate Information
 > Get information about teammates such as Online/Offline/AFK/Alive/Dead/Location/Paired/Leader.

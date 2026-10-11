@@ -164,7 +164,7 @@ Test('canonical documentation covers every static in-game command', () => {
 
     Assert.deepEqual([...CommandCatalog.getCommandNames()].sort(), [...runtimeNames].sort());
 
-    const detailed = Fs.readFileSync(Path.join(__dirname, '..', 'docs', 'commands.md'), 'utf8');
+    const detailed = Fs.readFileSync(Path.join(__dirname, '..', 'docs', 'reference', 'commands.md'), 'utf8');
     const table = detailed.slice(
         detailed.indexOf('# In-Game and Discord Commands'),
         detailed.indexOf('## **autotranslate**'));
@@ -180,11 +180,11 @@ Test('both command documents cover every Discord slash command module', () => {
         .filter(name => PluginManager.isSlashCommandEnabled(name))
         .sort();
     const canonical = Fs.readFileSync(
-        Path.join(__dirname, '..', 'docs', 'full_list_features.md'), 'utf8');
+        Path.join(__dirname, '..', 'docs', 'reference', 'features.md'), 'utf8');
     const canonicalSlashSection = canonical.slice(0, canonical.indexOf('## In-Game and Discord Commands'));
     const canonicalNames = [...canonicalSlashSection.matchAll(/^- \*\*\/([^*]+)\*\*/gm)]
         .map(match => match[1]).sort();
-    const detailed = Fs.readFileSync(Path.join(__dirname, '..', 'docs', 'commands.md'), 'utf8');
+    const detailed = Fs.readFileSync(Path.join(__dirname, '..', 'docs', 'reference', 'commands.md'), 'utf8');
     const detailedSlashSection = detailed.slice(0, detailed.indexOf('# In-Game and Discord Commands'));
     const detailedNames = [...detailedSlashSection.matchAll(/^\[\*\*\/([^*]+)\*\*\]/gm)]
         .map(match => match[1]).sort();

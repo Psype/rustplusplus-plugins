@@ -221,7 +221,7 @@ validation Linux des workers, fournisseurs, RSS ni latence réelle.
 
 Après `git pull` et redémarrage sur Linux :
 
-1. sauvegarder `data/player-intelligence`, vérifier `RUSTPLUS v1.22.45 OPERATIONAL` et l'absence de boucle de restart
+1. sauvegarder `data/player-intelligence`, vérifier `RUSTPLUS v1.22.46 OPERATIONAL` et l'absence de boucle de restart
    pendant plusieurs cycles ;
 2. observer `systemctl status rustplusplus`, `journalctl -u rustplusplus` et `/runtime` avant/après `!scanplayers` :
    exiger au moins un worker `completed`, suivre stage/RSS/heap/backoff/dernier code et vérifier que le parent ne répète

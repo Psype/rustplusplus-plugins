@@ -1,5 +1,9 @@
 # Passation de session IA — 4 octobre 2026
 
+> Archive figée à la release 1.22.46. Ce document conserve la chronologie jusqu'à 1.22.45 et peut contenir d'anciens
+> chemins. Pour travailler, lire d'abord [`../../MEMORY.md`](../../MEMORY.md) puis
+> [`../ai/current-state.md`](../ai/current-state.md).
+
 Ce document est le point d’entrée compact d’une nouvelle session IA. Il ne remplace pas `MEMORY.md`, qui reste la
 mémoire détaillée et l’autorité en cas de doute. L’objectif est de reprendre le dépôt sans réinitialiser, dupliquer ou
 contredire le travail déjà effectué.

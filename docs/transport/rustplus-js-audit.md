@@ -61,7 +61,7 @@ This dependency is not the inbound push-notification transport:
 
 Working team chat, deaths and connections already show that the core WebSocket decoder is operating. Updating
 `rustplus.js` cannot repair an FCM listener that receives no current alarm envelope. The separate transport diagnosis
-is documented in [`fcm_transport_audit_2026-09-23.md`](fcm_transport_audit_2026-09-23.md).
+is documented in [`fcm.md`](fcm.md).
 
 ## Safe update path
 

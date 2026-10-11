@@ -870,7 +870,7 @@ journal player-intelligence. Une pile capturée pendant un import texte montrait
 puis la reconsolidation de chaque observation contre toute la projection. La release 1.22.31 remplace ce chemin précis
 par une résolution limitée aux SteamID collés et couverte par un lot de 100 ID. Une migration MySQL ne traite pas cette
 cause mesurée. La feuille de route incrémentale et ses critères de production sont dans
-`docs/runtime_performance_reliability_plan_2026-10-07.md`.
+`docs/operations/performance-plan.md`.
 
 La release 1.22.32 prépare ensuite une fois les index SteamID, BattleMetrics et nom exact fiable pour toutes les
 consolidations d’une projection immuable. Le benchmark `npm run benchmark:consolidator` sur 2 500 personnes et 7 500
@@ -893,7 +893,7 @@ Cette observation doit guider les lots suivants et ne constitue pas encore une p
 La release 1.22.35 applique ensuite un TTL absolu et un plafond LRU aux données reconstructibles Steam,
 BattleMetrics, WarBandits et aux documents de correction OCR. Les tails de sérialisation OCR réglées sont retirées
 conditionnellement, sans ouvrir deux écritures concurrentes. Les preuves JSONL, sidecars persistants et projections
-canoniques restent hors de ce mécanisme. L'inventaire `docs/runtime_cache_inventory_2026-10-07.md` documente chaque
+canoniques restent hors de ce mécanisme. L'inventaire `docs/operations/cache-inventory.md` documente chaque
 TTL/plafond et reporte les previews/Tesseract et le cycle de vie du journal aux lots spécialisés.
 
 La release 1.22.36 complète ce passage sur les petits états. Les listes d'identités conservées par hook deviennent

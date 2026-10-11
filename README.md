@@ -29,20 +29,20 @@ A NodeJS Discord Bot that uses the [rustplus.js](https://github.com/liamcottle/r
 
 ## **Features**
 
-* Receive notifications for [In-Game Events](docs/discord_text_channels.md#events-channel) (Patrol Helicopter, Cargo Ship, Chinook 47, Oil Rigs triggered).
-* Control [Smart Switches](docs/smart_devices.md#smart-switches) or Groups of Smart Switches via Discord or In-Game Team Chat.
-* Setup [Smart Alarms](docs/smart_devices.md#smart-alarms) to notify in Discord or In-Game Team Chat whenever they are triggered.
-* Use [Storage Monitors](docs/smart_devices.md#storage-monitors) to keep track of Tool Cupboard Upkeep or Large Wooden Box/Vending Machine content.
-* Head over to the [Information Text Channel](docs/images/information_channel.png) to see all sorts of information about the server, ongoing events and team member status.
-* Communicate with teammates from [Discord to In-Game](docs/discord_text_channels.md#teamchat-channel) and vice versa.
-* Keep track of other teams on the server with the [Battlemetrics Player Tracker](docs/discord_text_channels.md#trackers-channel).
-* Alot of [QoL Commands](docs/commands.md) that can be used In-Game or from Discord.
-* View the [Full list of features](docs/full_list_features.md).
+* Receive notifications for [In-Game Events](docs/reference/discord-channels.md#events-channel) (Patrol Helicopter, Cargo Ship, Chinook 47, Oil Rigs triggered).
+* Control [Smart Switches](docs/reference/smart-devices.md#smart-switches) or Groups of Smart Switches via Discord or In-Game Team Chat.
+* Setup [Smart Alarms](docs/reference/smart-devices.md#smart-alarms) to notify in Discord or In-Game Team Chat whenever they are triggered.
+* Use [Storage Monitors](docs/reference/smart-devices.md#storage-monitors) to keep track of Tool Cupboard Upkeep or Large Wooden Box/Vending Machine content.
+* Head over to the [Information Text Channel](docs/images/channels/information_channel.png) to see all sorts of information about the server, ongoing events and team member status.
+* Communicate with teammates from [Discord to In-Game](docs/reference/discord-channels.md#teamchat-channel) and vice versa.
+* Keep track of other teams on the server with the [Battlemetrics Player Tracker](docs/reference/discord-channels.md#trackers-channel).
+* Many [QoL commands](docs/reference/commands.md) that can be used in-game or from Discord.
+* View the [Full list of features](docs/reference/features.md).
 
 
 ## **Documentation**
 
-> Documentation can be found [here](https://github.com/alexemanuelol/rustplusplus/blob/master/docs/documentation.md). The documentation explains the features as well as `how to setup the bot`, so make sure to take a look at it 😉
+> Documentation can be found [here](docs/README.md). The documentation explains the features as well as `how to setup the bot`, so make sure to take a look at it 😉
 
 ## **Credentials**
 

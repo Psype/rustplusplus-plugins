@@ -2,18 +2,18 @@
 
 ## Discord Text Channels
 
-* [**Information**](discord_text_channels.md#information-channel)
-* [**Servers**](discord_text_channels.md#servers-channel)
-* [**Settings**](discord_text_channels.md#settings-channel)
-* [**Commands**](discord_text_channels.md#commands-channel)
-* [**Events**](discord_text_channels.md#events-channel)
-* [**Teamchat**](discord_text_channels.md#teamchat-channel)
-* [**Switches**](discord_text_channels.md#switches-channel)
-* [**Switchgroups**](discord_text_channels.md#switch-groups-channel)
-* [**Alarms**](discord_text_channels.md#alarms-channel)
-* [**Storagemonitors**](discord_text_channels.md#storagemonitors-channel)
-* [**Activity**](discord_text_channels.md#activity-channel)
-* [**Trackers**](discord_text_channels.md#trackers-channel)
+* [**Information**](discord-channels.md#information-channel)
+* [**Servers**](discord-channels.md#servers-channel)
+* [**Settings**](discord-channels.md#settings-channel)
+* [**Commands**](discord-channels.md#commands-channel)
+* [**Events**](discord-channels.md#events-channel)
+* [**Teamchat**](discord-channels.md#teamchat-channel)
+* [**Switches**](discord-channels.md#switches-channel)
+* [**Switchgroups**](discord-channels.md#switch-groups-channel)
+* [**Alarms**](discord-channels.md#alarms-channel)
+* [**Storagemonitors**](discord-channels.md#storagemonitors-channel)
+* [**Activity**](discord-channels.md#activity-channel)
+* [**Trackers**](discord-channels.md#trackers-channel)
 
 
 ## Information Channel
@@ -45,7 +45,7 @@
 
 **Team Member Information** shows the entire team. Whos online/offline/afk/alive/dead, location, leader and paired.
 
-![Discord Text Channel Information](images/channels/information_channel.png)
+![Discord Text Channel Information](../images/channels/information_channel.png)
 
 **Battlemetrics Online Players** shows all online players on the server.
 
@@ -59,7 +59,7 @@ The server embed displays a bunch of information. The title of the embed is the 
 
 There are a few buttons for each server. The `CONNECT` button lets you start a connection to the server. Once connected you can disconnect by clicking the `DISCONNECT` button. By clicking the `WEBSITE` button, you will be re-directed to the Rust Servers website. By clicking the `BATTLEMETRICS` button, you will be re-directed to the Battlemetrics page for the Rust Server. By clicking the `EDIT` button, you can change the `Battlemetrics Id` for the server. By clicking the `CUSTOM TIMERS` button, you can change Custom Timers for Cargoship egress time and time before a Locked Crate at Oil Rig is unlocked. By clicking the `CREATE TRACKER` button, you create a battlemetrics tracker that will appear in the `trackers` Text-Channel on Discord. By clicking the `CREATE GROUP` button, you create a Smart Switch Group that can be used to manage several Smart Switches at once. The Smart Switch Group will appear in the `switchgroups` Text-Channel on Discord. To remove the Server, just click the trashcan button.
 
-![Discord Text Channel Servers](images/channels/servers_channel.png)
+![Discord Text Channel Servers](../images/channels/servers_channel.png)
 
 
 ## Settings Channel
@@ -70,14 +70,14 @@ Event notification buttons show their state in both text and color: green means 
 
 Rust team-chat delivery is queued before optional Discord and voice deliveries. A failure in one output is logged and does not cancel the other enabled outputs.
 
-![Discord Text Channel Settings](images/channels/settings_channel.png)
+![Discord Text Channel Settings](../images/channels/settings_channel.png)
 
 
 ## Commands Channel
 
 > The Commands Channel allows you to run In-Game Commands straight from Discord.
 
-![Discord Text Channel Commands](images/channels/commands_channel.png)
+![Discord Text Channel Commands](../images/channels/commands_channel.png)
 
 
 ## Events Channel
@@ -95,40 +95,40 @@ Rust team-chat delivery is queued before optional Discord and voice deliveries. 
 - `Chinook 47 spawn`
 - `New Vending Machine detected`
 
-![Discord Text Channel Events](images/channels/events_channel.png)
+![Discord Text Channel Events](../images/channels/events_channel.png)
 
 
 ## Teamchat Channel
 
 > The Teamchat Channel makes it possible to communicate with your teammates In-Game. What you write in `teamchat` Channel appears In-Game and whatever you write In-Game appears in the `teamchat` Channel.
 
-![Discord Text Channel Teamchat](images/channels/teamchat_channel.png)
+![Discord Text Channel Teamchat](../images/channels/teamchat_channel.png)
 
 
 ## Switches Channel
 
-> The Switches Channel lists all the paired Smart Switches. See [Smart Devices](smart_devices.md#smart-switches).
+> The Switches Channel lists all the paired Smart Switches. See [Smart Devices](smart-devices.md#smart-switches).
 
 
 ## Switch Groups Channel
 
-> The Switch Groups Channel lists all groups of Smart Switches. See [Smart Devices](smart_devices.md#smart-switch-groups).
+> The Switch Groups Channel lists all groups of Smart Switches. See [Smart Devices](smart-devices.md#smart-switch-groups).
 
 
 ## Alarms Channel
 
-> The Alarms Channel lists all the paired Smart Alarms. See [Smart Devices](smart_devices.md#smart-alarms).
+> The Alarms Channel lists all the paired Smart Alarms. See [Smart Devices](smart-devices.md#smart-alarms).
 
 
 ## Storagemonitors Channel
 
-> The Storagemonitors Channel lists all the paired Storage Monitors. See [Smart Devices](smart_devices.md#storage-monitors).
+> The Storagemonitors Channel lists all the paired Storage Monitors. See [Smart Devices](smart-devices.md#storage-monitors).
 
 ## Activity Channel
 
 > The Activity Channel is used to display a bunch of different things such as team member joined/ left/ connected/ disconnected/ killed/ offline killed, Not found notifications from Smart Devices, Smart Alarm notifications, Decaying notifications, Tracker information, Server went down/up notifications, facepunch news, Battlemetrics notifications etc...
 
-![Discord Text Channel Activity](images/channels/activity_channel.png)
+![Discord Text Channel Activity](../images/channels/activity_channel.png)
 
 
 ## Trackers Channel
@@ -140,5 +140,5 @@ The Tracker embed displays a few things. The Title of the embed is the name of t
 
 By clicking the `ADD PLAYER` button, you can add a player to the tracker by providing the steamId or battlemetrics player id. By clicking the `REMOVE PLAYER` button, you can remove a player from the tracker by providing the steamId or battlemetrics player id. To make the tracker more accurate and make it easier to detect name changes, we recommend using steamID for the tracker. By clicking the `EDIT` button, you can change the `Name` of the tracker, the `Battlemetrics Id` of the tracker and the `Clan Tag` for all the players in the tracker. To remove the tracker, click the trashcan button. By clicking the `IN-GAME` button, you let the tracker notify in teamchat. By clicking the `@everyone` button, you decide if the @everyone tag should be used whenever a person connect/disconnect.
 
-![CREATE TRACKER](images/channels/tracker_create.png)
-![Discord Text Channel Trackers](images/channels/trackers_channel.png)
+![CREATE TRACKER](../images/channels/tracker_create.png)
+![Discord Text Channel Trackers](../images/channels/trackers_channel.png)

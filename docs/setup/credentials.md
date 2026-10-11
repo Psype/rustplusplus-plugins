@@ -61,11 +61,11 @@ After renewal, pair the active server once from Rust while the bot is running. A
 `Facepunch push delivery verified` and `notification received: channel="pairing"`. `MCS login accepted` alone only
 proves the Google transport credentials, not Facepunch delivery to that device.
 
-![Credentials discord Image](images/bot_setup/credentials_discord.png)
+![Credentials discord Image](../images/bot_setup/credentials_discord.png)
 
 * This process is the same for the owner of the bot as well as any teammate that wants to register credentials. Once a teammate has registered credentials, they can pair with the server in game.
 
-![Teammates Paired with Server](images/bot_setup/teammates_paired.png)
+![Teammates Paired with Server](../images/bot_setup/teammates_paired.png)
 
 ## Why is Credentials necessary?
 

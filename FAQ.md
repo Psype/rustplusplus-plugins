@@ -33,7 +33,7 @@ This is intentional. While this might change in the future, the current solution
 
 ![DisallowedIntents](docs/images/faq/disallowedintents.png)
 
-If you're getting this error it's because you missed a step in the setup guide (Step 9). Kick the bot from your discord server and go [here](https://github.com/alexemanuelol/rustplusplus/blob/master/docs/discord_bot_setup.md) and follow the guide from step 9.
+If you're getting this error it's because you missed a step in the setup guide (Step 9). Kick the bot from your discord server and go [here](docs/setup/discord-bot.md) and follow the guide from step 9.
 
 
 <a name="token-invalid"></a>

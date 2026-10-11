@@ -1,11 +1,11 @@
 /*
-    Runtime command catalog parsed from docs/full_list_features.md.
+    Runtime command catalog parsed from docs/reference/features.md.
 */
 
 const Fs = require('fs');
 const Path = require('path');
 
-const COMMAND_DOC_PATH = Path.join(__dirname, '..', '..', 'docs', 'full_list_features.md');
+const COMMAND_DOC_PATH = Path.join(__dirname, '..', '..', 'docs', 'reference', 'features.md');
 
 function getCommands() {
     const section = getInGameCommandsSection();

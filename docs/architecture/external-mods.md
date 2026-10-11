@@ -82,7 +82,7 @@ logs an explicit delivered/skipped/failed outcome. The extract contains no conte
 proves historical receipt only, not the current payload or current delivery to the bot's registered FCM device.
 
 The current payload/transport investigation is recorded separately in
-[`fcm_transport_audit_2026-09-23.md`](fcm_transport_audit_2026-09-23.md).
+[`transport/fcm.md`](../transport/fcm.md).
 
 Server verification procedure:
 

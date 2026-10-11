@@ -390,7 +390,7 @@ uniquement vers une version compatible, sans jamais supprimer `data/player-intel
 
 Après `git pull` et redémarrage :
 
-1. sauvegarder `data/player-intelligence`, puis vérifier `RUSTPLUS v1.22.45 OPERATIONAL` ;
+1. sauvegarder `data/player-intelligence`, puis vérifier `RUSTPLUS v1.22.46 OPERATIONAL` ;
 2. noter RSS, `heapUsed` et temps de réponse avant l’import ;
 3. rejouer le lot de 11 SteamID, puis un lot de 100 ID si disponible ;
 4. exiger un aperçu rapide, les noms locaux déjà vérifiés et aucun dialogue Replace/Keep pour le lot identique ;

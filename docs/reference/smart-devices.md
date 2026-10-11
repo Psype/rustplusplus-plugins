@@ -1,6 +1,6 @@
 # Smart Devices
 
-> Smart Devices is an umbrella term for three different devices, `Smart Switches`, `Smart Alarms` and `Storage Monitors`. To pair a Smart Device with rustplusplus, make sure you've [setup the Credentials](credentials.md). When the Credentials are setup, you just need a `wire tool` and start pairing like you would with the [Rust+ Companion App](https://rust.facepunch.com/companion). Once you've paired your Smart Devices, they should appear in their respective Discord Text-Channel (`switches`, `alarms` or `storagemonitors`).
+> Smart Devices is an umbrella term for three different devices, `Smart Switches`, `Smart Alarms` and `Storage Monitors`. To pair a Smart Device with rustplusplus, make sure you've [setup the Credentials](../setup/credentials.md). When the Credentials are setup, you just need a `wire tool` and start pairing like you would with the [Rust+ Companion App](https://rust.facepunch.com/companion). Once you've paired your Smart Devices, they should appear in their respective Discord Text-Channel (`switches`, `alarms` or `storagemonitors`).
 <br>
 
 It is possible to change the display image for all the different Smart Devices by running the corresponding Slash Command. The Slash Commands to change Smart Device images is `/switch`, `/alarm` and `/storagemonitor`.
@@ -9,7 +9,7 @@ It is possible to change the display image for all the different Smart Devices b
 ## Smart Switches
 > Paired Smart Switches can be located in the `switches` Text-Channel on Discord. Only Smart Switches from the currently/last connected Rust server will be shown in the channel.
 
-![Image of a Smart Switch](images/smart_devices/smart_switch.png)
+![Image of a Smart Switch](../images/smart_devices/smart_switch.png)
 
 The image above is what a paired Smart Switch looks like in Discord. In this case the Smart Switch is called `Switch` and is located at E16. All Smart Devices have an Entity Id which is used to identify it. The Custom Command for this switch is `!sw` which can be used from the in-game teamchat.
 <br><br>
@@ -40,7 +40,7 @@ Smart Switches can also be controlled from within the game through teamchat via 
 ### Smart Switch Groups
 > Smart Switch Groups is a feature that allows you to control multiple Smart Switches at once. The image below is what a Smart Switch Group looks like in Discord.
 
-![Image of a Smart Switch Group](images/smart_devices/smart_switch_group.png)
+![Image of a Smart Switch Group](../images/smart_devices/smart_switch_group.png)
 
 To create a Smart Switch Group, click the `CREATE GROUP` button located under appropriate server in the `servers` Text-Channel on Discord. This will create the Smart Switch Group embed above located in the `switchgroups` Text-Channel on Discord. The Group above is called `Turrets` and have the entity id `518`. The Custom Command for this group is `!t` and the Group have three Smart Switches connected to it.
 <br><br>
@@ -59,7 +59,7 @@ Smart Switch Groups can also be controlled from within the game through teamchat
 ## Smart Alarms
 > Paired Smart Alarms can be located in the `alarms` Text-Channel on Discord. All Smart Alarms from all servers will be shown in the channel.
 
-![Image of a Smart Alarm](images/smart_devices/smart_alarm.png)
+![Image of a Smart Alarm](../images/smart_devices/smart_alarm.png)
 
 The image above is what a paired Smart Alarm looks like in Discord. In this case the Smart Alarm is called `Alarm` and is located at E16. All Smart Devices have an Entity Id which is used to identify it. From the `Last Trigger` you can see when the Smart Alarm was last triggered. Under `Message` you can see the Message is that will be broadcast when the Smart Alarm gets triggered. The Custom Command for this alarm is `!alarm` which can be used from the in-game teamchat. The Custom Command will tell you when it was last triggered.
 <br><br>
@@ -89,8 +89,8 @@ a Discord failure cannot cancel it. The bot's global in-game mute still takes pr
 ## Storage Monitors
 > Paired Storage Monitors can be located in the `storagemonitors` Text-Channel on Discord. Only Storage Monitors from the currently/last connected Rust server will be shown in the channel.
 
-![Image of a Storage Monitor](images/smart_devices/storage_monitor_tool_cupboard.png)
-![Image of a Storage Monitor](images/smart_devices/storage_monitor_container.png)
+![Image of a Storage Monitor](../images/smart_devices/storage_monitor_tool_cupboard.png)
+![Image of a Storage Monitor](../images/smart_devices/storage_monitor_container.png)
 
 The images above is what paired Storage Monitors looks like in Discord. There are three types of Storage Monitors depending on where you place them. The first one is of type `Tool Cupboard` and works almost like the second and third type `Large Wood Box` and `Vending Machine` but with the difference that it shows upkeep. In both cases the `Name` of the Storage Monitors is `Storage Monitor` and can be located at E16. All Smart Devices have an Entity Id which is used to identify it. It also shows how many slots the Storage Monitor has and how many of them are occupied. Lastly the Storage Monitor shows the content inside it, the items and quantity.
 <br><br>
@@ -104,4 +104,4 @@ By clicking on the `EDIT` button, you can edit the `Name` of the Storage Monitor
 ## Unreachable Smart Devices
 > When a Smart Devices gets removed, the hoster loses building privilege to the Smart Device or rustplusplus just don't get a response from pinging it, the device is unreachable. In the image below you can see the Smart Switch `Switch` can no longer be reached. In this case its because of a force wipe, The Smart Switch does no longer exist. If the Smart Device is unreachable because the hoster lost building privilege, gaining building privilege again will make the device reachable again. But if the Smart Device was removed from where it was placed you might as well remove it from Discord, once a Smart Device gets removed the Entity Id is invalid. Even if you place the same Smart Device, the Entity Id will be different.
 
-![Image of an unreachable Smart Device](images/smart_devices/unreachable_device.png)
+![Image of an unreachable Smart Device](../images/smart_devices/unreachable_device.png)
