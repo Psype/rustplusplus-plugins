@@ -31,6 +31,15 @@ La release 1.22.44 supprime le replay quadratique des membres `/cinfo` historiqu
 et déplace le plan du scan dans un child one-shot. Le parent reste le seul writer : checkpoint et scope gardent une
 CAS exacte, les appends indépendants sont rebasés, tandis que les corrections ou read-sets Steam/BM/nom réellement
 modifiés rendent le plan stale. Les serveurs restent sérialisés dans une FIFO bornée/coalescée.
+L'extrait de production 1.22.44 ne montre aucun crash/restart/OOM et un RSS globalement stable autour de 0,9-1,0 Gio,
+mais le worker n'a validé aucun plan : 7 puis 18 échecs, environ 114,8 s chacun. Le hook parent a continué une
+projection complète toutes les ~103,5 s, pour 18,38 s en moyenne et environ 21,8 s au maximum.
+La release 1.22.45 donne au worker une projection compacte, rend le hook BattleMetrics sans projection globale,
+valide dans le worker les paires locales Steam/BM du tracker et du CSV, borne chaque RPC fournisseur et ajoute
+backoff/diagnostics de progression. Seule une liste fournisseur complète peut conclure offline ; une vue incomplète,
+censurée ou en échec devient unknown tout en conservant ses présences positives valides. Le cache CSV parsé est borné
+à 16 fichiers/40 000 lignes/32 MiB et 10 min, avec 10 000 lignes/8 MiB maximum par fichier. Le coût d'append JSONL
+reste `O(N)` et est maintenant mesuré plutôt que présenté comme résolu.
 Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; `a308c0a` ajoute la
 1.22.27. La release suivante 1.22.28 groupe les alias pending par identité BattleMetrics et ajoute le fallback
 WarBandits courant -> intervalle historique pertinent -> all-time. La release 1.22.29 centralise toute consolidation
@@ -66,9 +75,10 @@ uniquement dans l’ancre et garde une date illisible éditable avec Confirm dé
 réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
 d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La suivante borne les délais de réponse
 Discord/traduction et la dernière fiabilise la sémantique des identités connues et des wipes WarBandits. La dernière
-validation complète de la release 1.22.44 a passé 363/363 tests et `tsc --noEmit`. Le déploiement 1.22.43 a confirmé
-le correctif OOM sur la fenêtre fournie mais pas celui des stalls ; le déploiement 1.22.44 et la nouvelle capture
-Discord restent à valider réellement.
+validation complète de la release 1.22.44 a passé 363/363 tests et `tsc --noEmit`. La release 1.22.45 a passé
+430/430 tests et le `tsc --noEmit -p .` suivant. Le déploiement 1.22.43 a confirmé le correctif OOM sur la
+fenêtre fournie ; l'extrait 1.22.44 a confirmé l'absence de crash sur sa fenêtre mais pas le fonctionnement du scan.
+Le déploiement 1.22.45 et la nouvelle capture Discord restent à valider réellement.
 
 Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
 la date de capture Discord est ignorée ; ce calendrier mardi/vendredi 14:00 GMT ne vaut que pour WarBandits EU 5x
@@ -86,8 +96,10 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 - Dépôt : `rustplusplus-plugins`.
 - Branche au moment de la passation : `master`.
-- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur `229810f`, release `1.22.43`, avant la release courante.
-- Version canonique du worktree : `1.22.44` dans `package.json` et `package-lock.json`.
+- Avant le worktree `1.22.45`, `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur `e1319ea`, release
+  `1.22.44`. Relire les références réelles après le commit/push de la nouvelle release.
+- Version canonique du worktree : `1.22.45` dans `package.json` et `package-lock.json` ; 430/430 tests et
+  `tsc --noEmit -p .` sont validés. Relire Git pour confirmer le commit/push final.
 - Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
   métrique d’heures WarBandits.
 - Le commit utilisateur `d327e7d` regroupe les releases `1.22.24` à `1.22.26`, notamment dans :
@@ -203,7 +215,60 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
 
-## Dernière correction : release 1.22.44
+## Dernière correction : release 1.22.45
+
+Le journal de production `1.22.44` fourni ne contient ni crash, ni restart, ni OOM sur sa fenêtre et son RSS reste
+globalement entre 0,9 et 1,0 Gio. L'isolation a protégé le cœur, mais aucun scan n'a abouti : le compteur worker passe
+de 7 à 18 échecs, chacun après environ 114,8 secondes. Le diagnostic exact était perdu parce que `stderr` était jeté
+et l'avertissement dédupliqué. En parallèle, le hook parent reconstruit encore la projection complète environ toutes
+les 103,5 secondes, pour 18,38 secondes en moyenne et un maximum proche de 21,8 secondes.
+
+Le worker utilise désormais `rebuildForScan`, qui conserve seulement identités, métriques et preuves de clan utiles
+à son plan. Sur 108 000 événements synthétiques, la médiane locale passe de 3 955 à 3 034 ms (-23 %) et la hausse de
+heap de 188,1 à 134,7 MiB (-28 %). Le hook BattleMetrics ne reconstruit plus la projection : il émet directement les
+alias stables et les observations de présence, puis remet les paires SteamID/BattleMetrics du tracker et du CSV au
+worker. Celui-ci les valide contre la projection compacte, refuse conflits/ambiguïtés et ne committe qu'un lot borné.
+Steam, BattleMetrics et WarBandits restent facultatifs : un échec fournisseur ne doit pas annuler ce travail local.
+
+Chaque RPC fournisseur du child est validé par méthode et arguments, borné en taille, capacité et délai (30 s par
+défaut, configurable de 1 à 45 s). Quatre appels au maximum sont simultanés par worker ; les invocations réellement
+encore pendantes sont plafonnées à huit globalement et quatre par provider, puis une réponse tardive est ignorée.
+Chaque réponse est d'abord projetée sur le contrat exact de sa méthode : aucun champ inconnu ou accesseur n'est lu,
+les alias Steam/WarBandits sont limités à 256 et les pages WarBandits à 100 lignes ; une réponse invalide ou trop
+grande échoue fermée sans transmettre le payload brut. Circuits et pending restent visibles dans `/runtime`. L'échec
+IPC final, le stage et une classification `stderr` strictement bornée apparaissent dans `/runtime`, sans chemin,
+pseudo, identifiant ni payload.
+Les scans automatiques en échec reculent de 5, 10, 20, 40 puis 60 minutes ; un lancement manuel reste prioritaire et
+un succès remet la série à zéro.
+
+La présence BattleMetrics ajoute `provider_availability_observed`. Un marker `available` signifie toujours que la
+liste est complète et peut mettre offline les absents sans émettre des milliers d'événements individuels. Une liste
+réussie mais incomplète conserve ses joueurs positivement vus online et place les anciens absents en unknown ; mode
+censuré ou appel échoué passent aussi en unknown et ne vérifient aucun nom masqué. La clé d'échantillon combine mode,
+timestamp fournisseur et empreinte de roster ; une recovery qui réutilise le même `updatedAt` emploie `recordedAt`.
+Le marker complet est appendu après les présences positives et un append de recovery interrompu ne le persiste jamais,
+afin qu'une panne ne fabrique aucun offline.
+
+Les lectures répétées de la base CSV teammate-language utilisent une vue immuable bornée à 16 fichiers, 40 000 lignes,
+32 MiB et dix minutes, avec 10 000 lignes/8 MiB maximum par fichier. Un dépassement avertit sans modifier le fichier
+et fait échouer fermé le lot local afin d'éviter toute validation sur une vue partielle. La vue est validée par
+dev/inode/taille/mtime/ctime avant et après lecture ; une modification externe ou locale l'invalide. Les alias
+historiques de ce CSV sont journalisés avec `wipeId:null`, car ils sont valables au niveau du
+serveur : un changement de wipe ne réinsère donc pas les quelque 5 100 lignes observées. L'append JSONL expose
+maintenant `pi_history_append`, mais `mergeInShardOrder` et la révision forte
+recopient/hachent encore le journal courant : ce coût reste `O(N)` et constitue un résiduel mesurable, pas un correctif
+achevé.
+
+Attention au rollback : le nouvel event kind reste dans le schema 1. Dès qu'un journal contient
+`provider_availability_observed`, une release antérieure à `1.22.45` le rejettera comme corrompu. Sauvegarder
+`data/player-intelligence` avant déploiement ; en cas de retour arrière, conserver ces données pour rétablir
+`1.22.45` ou une release compatible. Ne jamais les supprimer pour forcer le démarrage.
+
+La suite complète passe 430/430 tests et le `tsc --noEmit -p .` suivant réussit ; `git diff --check` est propre. Le
+déploiement doit encore prouver au moins un plan worker committé, l'absence des projections parent de 18-22 secondes
+et le comportement des modes de présence réels.
+
+### Correction précédente : release 1.22.44
 
 Le déploiement `1.22.43` fourni a démarré en environ sept secondes et franchi l'ancienne frontière OOM, avec un heap
 revenu vers 547–630 MiB et un RSS vers 760–870 MiB sur la fenêtre observée. Il a en revanche rendu visible un second
@@ -510,7 +575,15 @@ inventer ni commiter silencieusement.
 
 ## Validation déjà effectuée
 
-Le 11 octobre 2026, après la release 1.22.44 :
+Validation `1.22.45` du 11 octobre 2026 : `npm.cmd test` passe 430/430 tests, puis
+`tsc --noEmit -p .` réussit. `git diff --check` est propre.
+
+La couverture ajoutée vérifie notamment la parité de la projection scan compacte, les modes de disponibilité et la
+recovery interrompue, la portée server-wide des alias CSV, les paires locales conflictuelles, les délais/capacités et
+réponses tardives RPC, la projection stricte des réponses fournisseur, les diagnostics/backoffs, l'instrumentation
+d'append et l'invalidation du cache CSV.
+
+Baseline précédente, le 11 octobre 2026 après la release 1.22.44 :
 
 - `npm.cmd test` : `363/363` tests unitaires réussis ;
 - `tsc --noEmit -p .` : réussi dans la même commande ;
@@ -575,10 +648,14 @@ les fournisseurs externes, ni le processus de déploiement.
 - `src/plugins/playerIntelligence/runtime.js` et les projecteurs : reconstruction
   identité/clan/activité/présence/métriques.
 - `src/plugins/playerIntelligence/scanDaemon.js`, `isolatedScanDaemon.js` et `src/workers/playerScanWorker.js` : une
-  page WarBandits bornée par tick BattleMetrics, état reprenable, plan child read-only, CAS exacte du checkpoint/scope,
-  rebase sémantique gardé des appends concurrents et FIFO globale ; aucune seconde boucle de présence.
+  page WarBandits bornée par tick BattleMetrics, état reprenable, projection child compacte, RPC fournisseur
+  validés/bornés, plan read-only, CAS exacte du checkpoint/scope, rebase sémantique gardé des appends concurrents,
+  backoff automatique et FIFO globale ; aucune seconde boucle de présence.
 - `src/util/runtimeTelemetry.js` et `src/commands/runtime.js` : agrégats runtime bornés, logs sans contenu privé et
-  consultation administrateur éphémère du dernier snapshot terminé.
+  consultation administrateur éphémère du dernier snapshot terminé, dont stage/échec worker et coût d'append JSONL.
+- `src/plugins/teammateLanguageDatabase/index.js` : CSV canonique inchangé et cache de lignes immuables borné à
+  16 fichiers/40 000 lignes/32 MiB et dix minutes, avec 10 000 lignes/8 MiB maximum par fichier ; invalidation par
+  signature disque et avant/après toute écriture locale, sans troncature sur dépassement.
 - `!intel` est la vue complète ; `!steamid` est son alias exact ; `!who` expose les alias ; `!record` ajoute une liaison
   manuelle stricte ; `!scanplayers` force un passage borné en arrière-plan.
 
@@ -611,6 +688,11 @@ Ne jamais supprimer ou réinitialiser les fichiers ignorés nécessaires à la c
 - `scan-daemon.json` ;
 - les sidecars sous `data/warbandits/` et les trackers existants.
 
+Avant le premier démarrage `1.22.45`, faire une sauvegarde de `data/player-intelligence`. Dès que
+`provider_availability_observed` a été écrit, `1.22.44` et les versions antérieures ne connaissent pas ce kind et
+refusent le journal. Un rollback applicatif doit donc conserver les données puis revenir vers une version compatible ;
+il ne doit jamais supprimer, tronquer ou réinitialiser le journal.
+
 `rustplus.config.json`, `.env`, `credentials/` et les logs FCM peuvent contenir des secrets, SteamID, adresses serveur,
 tokens et messages. Ils ne doivent jamais être commités, publiés ou recopiés en entier dans une réponse. L’override
 local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non reproductible après réinstallation ; voir
@@ -618,11 +700,14 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
 
 ## Vérifications de production encore ouvertes
 
-1. Déployer/redémarrer `1.22.44`, vérifier le message `RUSTPLUS v1.22.44 OPERATIONAL`, puis laisser le cœur tourner au
-   moins 15 minutes. Mesurer RSS/heap avant et après `!scanplayers`, vérifier la présence du worker/FIFO dans `/runtime`
-   et l'absence des stalls principaux de 40–42 secondes vus sous `1.22.43`. Les `pi_rebuild_*` doivent permettre
-   d'attribuer tout nouveau délai sans donnée joueur. Rejouer ensuite le lot de 11 SteamID, mesurer son temps de réponse
-   et exiger les noms locaux connus sans Replace/Keep.
+1. Sauvegarder `data/player-intelligence`, déployer/redémarrer `1.22.45`, vérifier
+   `RUSTPLUS v1.22.45 OPERATIONAL`, puis laisser le cœur tourner sur plusieurs cycles. Mesurer RSS/heap avant et après
+   `!scanplayers`; `/runtime` doit montrer les stages, au moins un worker `completed`, zéro série infinie d'échecs et
+   des RPC/backoffs explicables. Exiger l'absence des projections parent de 18–22 secondes observées sous `1.22.44`,
+   corréler `pi_history_append` avec les commits et confirmer qu'un fournisseur bloqué expire sans bloquer le bot.
+   Rejouer ensuite le lot de 11 SteamID, mesurer son temps de réponse et exiger les noms locaux connus sans
+   Replace/Keep. Tester si possible une liste BattleMetrics complète puis incomplète/censurée/échouée : seul le cas
+   complet peut produire offline, les autres doivent rester unknown tout en conservant les online positifs valides.
 2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent
    des boîtes déterministes et ne remplacent pas ce contrôle.
 3. Réimporter l’image KIRK originale dans le canal d’intelligence et exiger `U Got Kirkified` plus un `Established`

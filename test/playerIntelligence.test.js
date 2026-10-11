@@ -390,6 +390,26 @@ Test('clan affinities count only distinct confirmed snapshots across wipes', () 
     Assert.equal(projection.snapshots[0].members[0].role, 'leader');
 });
 
+Test('the compact scan projection keeps reconciliation evidence without full read models', () => {
+    const observations = [
+        identity({ subject: { steamId: STEAM_A, battlemetricsPlayerId: null, exactName: 'Alice' } }),
+        clanSnapshot({ hash: 'a'.repeat(64), sourceEventId: 'scan-evidence' }),
+        clanSnapshot({ hash: 'a'.repeat(64), sourceEventId: 'scan-evidence-duplicate',
+            observedAt: '2026-09-30T12:01:00.000Z' })
+    ];
+    const projection = PlayerIntelligence.rebuildForScan(observations);
+
+    Assert.deepEqual(Object.keys(projection).sort(), ['clans', 'identities', 'metrics']);
+    Assert.equal(projection.clans.snapshots.length, 2);
+    Assert.equal(projection.clans.snapshots[0].confirmed, true);
+    Assert.equal(projection.clans.snapshots[0].members.some(member => member.personId === `steam:${STEAM_A}`), true);
+    Assert.equal(projection.clans.snapshots[1].duplicate, true);
+    Assert.equal(Object.hasOwn(projection.clans, 'getAffinity'), false);
+    Assert.equal(Object.hasOwn(projection, 'presence'), false);
+    Assert.equal(Object.hasOwn(projection, 'wipes'), false);
+    Assert.equal(Object.isFrozen(projection), true);
+});
+
 Test('partial clan snapshots resolve automatically from later stable aliases', () => {
     const alice = identity({
         observedAt: '2026-09-30T10:00:00.000Z',
@@ -460,6 +480,202 @@ Test('presence keeps outages unknown and closes sessions only on explicit offlin
     ]).presence;
     Assert.equal(unknownOnly.getStatus(subject, 'warbandits-main').state, 'unknown');
     Assert.equal(unknownOnly.providers[0].sessions.length, 0);
+});
+
+Test('provider availability observations require valid global outage evidence', () => {
+    const unavailable = event('provider_availability_observed', {
+        observedAt: '2026-09-30T11:05:00.000Z',
+        subject: { steamId: null, battlemetricsPlayerId: null, exactName: null },
+        payload: { state: 'unavailable', reason: 'provider timeout' },
+        provenance: {
+            source: 'battlemetrics', sourceEventId: 'battlemetrics-outage', collectorVersion: 'test-1'
+        }
+    });
+    const available = event('provider_availability_observed', {
+        observedAt: '2026-09-30T11:06:00.000Z',
+        subject: { steamId: null, battlemetricsPlayerId: null, exactName: null },
+        payload: { state: 'available', reason: null },
+        provenance: {
+            source: 'battlemetrics', sourceEventId: 'battlemetrics-recovered', collectorVersion: 'test-1'
+        }
+    });
+
+    Assert.deepEqual(unavailable.payload, { state: 'unavailable', reason: 'provider timeout' });
+    Assert.deepEqual(available.payload, { state: 'available', reason: null });
+    Assert.throws(() => event('provider_availability_observed', {
+        subject: { steamId: null, battlemetricsPlayerId: null, exactName: null },
+        payload: { state: 'unavailable', reason: null }
+    }), /requires a reason/u);
+    Assert.throws(() => event('provider_availability_observed', {
+        subject: { steamId: null, battlemetricsPlayerId: null, exactName: null },
+        payload: { state: 'degraded', reason: 'slow' }
+    }), /state is unsupported/u);
+    Assert.throws(() => event('provider_availability_observed', {
+        subject: { steamId: null, battlemetricsPlayerId: null, exactName: null },
+        payload: { state: 'available', reason: null, unexpected: true }
+    }), /unsupported or missing fields/u);
+    Assert.throws(() => event('provider_availability_observed', {
+        subject: { steamId: STEAM_A, battlemetricsPlayerId: null, exactName: null },
+        payload: { state: 'available', reason: null }
+    }), /global null subject/u);
+});
+
+Test('a provider-wide outage makes every known provider state uncertain until explicit recovery evidence', () => {
+    const alice = { steamId: STEAM_A, battlemetricsPlayerId: '101', exactName: 'Alice' };
+    const bob = { steamId: STEAM_B, battlemetricsPlayerId: '202', exactName: 'Bob' };
+    const presence = (subject, state, observedAt, providerSessionId = null) => event('presence_observed', {
+        observedAt,
+        subject,
+        payload: { state, providerSessionId, reason: null },
+        provenance: {
+            source: 'battlemetrics',
+            sourceEventId: `presence-${subject.steamId}-${state}-${observedAt}`,
+            collectorVersion: 'test-1'
+        }
+    });
+    const availability = (state, observedAt, reason) => event('provider_availability_observed', {
+        observedAt,
+        subject: { steamId: null, battlemetricsPlayerId: null, exactName: null },
+        payload: { state, reason },
+        provenance: {
+            source: 'battlemetrics', sourceEventId: `availability-${state}-${observedAt}`,
+            collectorVersion: 'test-1'
+        }
+    });
+    const baseline = [
+        identity({ subject: alice }),
+        identity({ subject: bob }),
+        presence(alice, 'online', '2026-09-30T12:00:00.000Z', 'alice-session'),
+        presence(bob, 'offline', '2026-09-30T12:00:00.000Z'),
+        availability('unavailable', '2026-09-30T12:05:00.000Z', 'provider timeout'),
+        availability('available', '2026-09-30T12:08:00.000Z', null),
+        presence(alice, 'online', '2026-09-30T12:08:00.000Z', 'alice-session')
+    ];
+
+    const projected = PlayerIntelligence.rebuild(baseline).presence;
+    const aliceProvider = projected.providers.find(provider =>
+        provider.personId === `steam:${STEAM_A}` && provider.source === 'battlemetrics');
+    const bobProvider = projected.providers.find(provider =>
+        provider.personId === `steam:${STEAM_B}` && provider.source === 'battlemetrics');
+    Assert.deepEqual(aliceProvider.transitions.map(transition => transition.state),
+        ['online', 'unknown', 'online']);
+    Assert.equal(aliceProvider.sessions.length, 1);
+    Assert.equal(aliceProvider.sessions[0].uncertainFrom, '2026-09-30T12:05:00.000Z');
+    Assert.equal(aliceProvider.sessions[0].endedAt, null);
+    Assert.equal(projected.getStatus(alice, 'warbandits-main').state, 'online');
+    Assert.deepEqual(bobProvider.transitions.map(transition => transition.state), ['offline', 'unknown', 'offline']);
+    Assert.equal(projected.getStatus(bob, 'warbandits-main').state, 'offline');
+
+    const recovered = PlayerIntelligence.rebuild([
+        ...baseline,
+        presence(bob, 'offline', '2026-09-30T12:11:00.000Z')
+    ]).presence;
+    Assert.equal(recovered.getStatus(bob, 'warbandits-main').state, 'offline');
+});
+
+Test('a provider outage makes a changed online session end imprecisely', () => {
+    const subject = { steamId: STEAM_A, battlemetricsPlayerId: '101', exactName: 'Alice' };
+    const presence = (observedAt, providerSessionId) => event('presence_observed', {
+        observedAt,
+        subject,
+        payload: { state: 'online', providerSessionId, reason: null },
+        provenance: {
+            source: 'battlemetrics', sourceEventId: `session-${providerSessionId}`,
+            collectorVersion: 'test-1'
+        }
+    });
+    const outage = event('provider_availability_observed', {
+        observedAt: '2026-09-30T12:05:00.000Z',
+        subject: { steamId: null, battlemetricsPlayerId: null, exactName: null },
+        payload: { state: 'unavailable', reason: 'provider timeout' },
+        provenance: {
+            source: 'battlemetrics', sourceEventId: 'session-outage', collectorVersion: 'test-1'
+        }
+    });
+    const projected = PlayerIntelligence.rebuild([
+        identity({ subject }),
+        presence('2026-09-30T12:00:00.000Z', 'session-a'),
+        outage,
+        presence('2026-09-30T12:10:00.000Z', 'session-b')
+    ]).presence.providers[0];
+
+    Assert.deepEqual(projected.sessions.map(session => session.providerSessionId), ['session-a', 'session-b']);
+    Assert.equal(projected.sessions[0].endedAt, '2026-09-30T12:10:00.000Z');
+    Assert.equal(projected.sessions[0].uncertainFrom, '2026-09-30T12:05:00.000Z');
+    Assert.equal(projected.sessions[0].preciseEnd, false);
+    Assert.equal(projected.sessions[1].endedAt, null);
+});
+
+Test('same-time availability follows poll recording order while exact-sample positives stay online', () => {
+    const alice = { steamId: STEAM_A, battlemetricsPlayerId: '101', exactName: 'Alice' };
+    const bob = { steamId: STEAM_B, battlemetricsPlayerId: '202', exactName: 'Bob' };
+    const observedAt = '2026-09-30T13:00:00.000Z';
+    const presence = (subject, state, recordedAt, label, providerSessionId = null) =>
+        event('presence_observed', {
+            observedAt,
+            recordedAt,
+            subject,
+            payload: { state, providerSessionId, reason: state === 'unknown' ? 'partial roster' : null },
+            provenance: {
+                source: 'battlemetrics', sourceEventId: `same-time-presence-${label}`, collectorVersion: 'test-1'
+            }
+        });
+    const availability = (state, recordedAt, label) => event('provider_availability_observed', {
+        observedAt,
+        recordedAt,
+        subject: { steamId: null, battlemetricsPlayerId: null, exactName: null },
+        payload: { state, reason: state === 'unavailable' ? 'partial roster' : null },
+        provenance: {
+            source: 'battlemetrics', sourceEventId: `same-time-availability-${label}`, collectorVersion: 'test-1'
+        }
+    });
+    const initial = [
+        identity({ subject: alice, observedAt: '2026-09-30T12:00:00.000Z' }),
+        identity({ subject: bob, observedAt: '2026-09-30T12:00:00.000Z' }),
+        event('presence_observed', {
+            observedAt: '2026-09-30T12:00:00.000Z',
+            subject: alice,
+            payload: { state: 'online', providerSessionId: 'alice-session', reason: null },
+            provenance: {
+                source: 'battlemetrics', sourceEventId: 'same-time-alice-initial', collectorVersion: 'test-1'
+            }
+        }),
+        event('presence_observed', {
+            observedAt: '2026-09-30T12:00:00.000Z',
+            subject: bob,
+            payload: { state: 'online', providerSessionId: 'bob-session', reason: null },
+            provenance: {
+                source: 'battlemetrics', sourceEventId: 'same-time-bob-initial', collectorVersion: 'test-1'
+            }
+        })
+    ];
+    const projected = PlayerIntelligence.rebuild([
+        ...initial,
+        availability('unavailable', '2026-09-30T13:00:01.000Z', 'partial'),
+        presence(alice, 'online', '2026-09-30T13:00:01.000Z', 'alice-partial', 'alice-session'),
+        presence(bob, 'unknown', '2026-09-30T13:00:01.000Z', 'bob-partial'),
+        availability('available', '2026-09-30T13:00:02.000Z', 'complete'),
+        presence(alice, 'online', '2026-09-30T13:00:02.000Z', 'alice-complete', 'alice-session')
+    ]).presence;
+    const aliceProvider = projected.providers.find(provider => provider.personId === `steam:${STEAM_A}`);
+    const bobProvider = projected.providers.find(provider => provider.personId === `steam:${STEAM_B}`);
+    Assert.deepEqual(aliceProvider.transitions.map(transition => transition.state), ['online']);
+    Assert.equal(aliceProvider.sessions.length, 1);
+    Assert.equal(aliceProvider.sessions[0].uncertainFrom, null);
+    Assert.equal(aliceProvider.sessions[0].endedAt, null);
+    Assert.deepEqual(bobProvider.transitions.map(transition => transition.state),
+        ['online', 'unknown', 'offline']);
+    Assert.equal(bobProvider.sessions[0].uncertainFrom, observedAt);
+    Assert.equal(bobProvider.sessions[0].endedAt, observedAt);
+    Assert.equal(bobProvider.sessions[0].preciseEnd, false);
+
+    const laterOutage = PlayerIntelligence.rebuild([
+        ...initial,
+        availability('available', '2026-09-30T13:00:01.000Z', 'older-complete'),
+        availability('unavailable', '2026-09-30T13:00:02.000Z', 'newer-outage')
+    ]).presence;
+    Assert.equal(laterOutage.getStatus(alice, 'warbandits-main').state, 'unknown');
+    Assert.equal(laterOutage.getStatus(bob, 'warbandits-main').state, 'unknown');
 });
 
 Test('wipe snapshots and every projection are reconstructible from persisted events', async t => {

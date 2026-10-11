@@ -15,6 +15,7 @@ const EVENT_KINDS = Object.freeze([
     'events_superseded',
     'player_metric_observed',
     'presence_observed',
+    'provider_availability_observed',
     'wipe_snapshot'
 ]);
 const PRESENCE_STATES = Object.freeze(['online', 'offline', 'unknown']);
@@ -312,6 +313,20 @@ function validatePresence(value) {
     }
 }
 
+/** @param {unknown} value */
+function validateProviderAvailability(value) {
+    assertExactKeys(/** @type {object} */ (value), ['state', 'reason'],
+        'provider_availability_observed payload');
+    const payload = /** @type {{state: unknown, reason: unknown}} */ (value);
+    if (!['available', 'unavailable'].includes(/** @type {string} */ (payload.state))) {
+        throw new TypeError('provider availability state is unsupported.');
+    }
+    optionalString(payload.reason, 'provider availability reason', 256);
+    if (payload.state === 'unavailable' && payload.reason === null) {
+        throw new TypeError('unavailable provider observation requires a reason.');
+    }
+}
+
 /** @param {unknown} value @param {unknown} scope */
 function validateWipeSnapshot(value, scope) {
     assertExactKeys(/** @type {object} */ (value), ['startsAt', 'endsAt'], 'wipe_snapshot payload');
@@ -336,6 +351,7 @@ function validatePayload(kind, payload, scope) {
     if (kind === 'events_superseded') return validateEventsSuperseded(payload);
     if (kind === 'player_metric_observed') return validatePlayerMetricObserved(payload);
     if (kind === 'presence_observed') return validatePresence(payload);
+    if (kind === 'provider_availability_observed') return validateProviderAvailability(payload);
     if (kind === 'wipe_snapshot') return validateWipeSnapshot(payload, scope);
     throw new TypeError('Unsupported player-intelligence event kind.');
 }
@@ -393,6 +409,11 @@ function createEvent(input) {
         'player_metric_observed',
         'presence_observed'].includes(raw.kind);
     validateSubject(raw.subject, subjectRequired);
+    if (raw.kind === 'provider_availability_observed' &&
+        (raw.subject.steamId !== null || raw.subject.battlemetricsPlayerId !== null ||
+            raw.subject.exactName !== null)) {
+        throw new TypeError('provider availability observations require a global null subject.');
+    }
     validatePayload(raw.kind, raw.payload, raw.scope);
     validateProvenance(raw.provenance);
     if (!CONFIDENCE_VALUES.includes(raw.confidence)) throw new TypeError('confidence is unsupported.');

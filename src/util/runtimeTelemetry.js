@@ -23,7 +23,8 @@ const OPERATIONS = Object.freeze([
     'pi_rebuild_clans',
     'pi_rebuild_presence',
     'pi_rebuild_wipes',
-    'pi_rebuild_total'
+    'pi_rebuild_total',
+    'pi_history_append'
 ]);
 const OUTCOMES = Object.freeze(['success', 'failure', 'timeout', 'skipped', 'dropped']);
 const SLOW_THRESHOLDS_MS = Object.freeze({
@@ -38,19 +39,31 @@ const SLOW_THRESHOLDS_MS = Object.freeze({
     pi_rebuild_clans: 1000,
     pi_rebuild_presence: 1000,
     pi_rebuild_wipes: 1000,
-    pi_rebuild_total: 2000
+    pi_rebuild_total: 2000,
+    pi_history_append: 1000
 });
 const SOURCE_FIELDS = Object.freeze({
     imports: Object.freeze(['active', 'previewsPending', 'decisionsClaimed', 'decisionQueues']),
     ocr: Object.freeze(['active', 'queued', 'queuedBytes']),
     scans: Object.freeze([
-        'active', 'forcedRerunsQueued', 'workerActive', 'workerQueued', 'workerCompleted', 'workerFailures',
-        'workerStalePlans'
+        'active', 'forcedRerunsQueued', 'automaticBackoffs', 'automaticBackoffSkips', 'workerActive',
+        'workerQueued', 'workerCompleted', 'workerFailures', 'workerStalePlans', 'workerConsecutiveFailures',
+        'workerRssMiB', 'workerHeapUsedMiB', 'workerProviderInvocationsOutstanding',
+        'workerProviderCircuitsOpen'
     ]),
     translations: Object.freeze(['active', 'queued']),
     services: Object.freeze(['active', 'queued', 'running', 'restarts', 'failures', 'circuitOpen']),
     loops: Object.freeze(['active', 'running', 'scheduled', 'failures'])
 });
+const SOURCE_TEXT_FIELDS = Object.freeze({
+    scans: Object.freeze(['workerStage', 'workerLastCode', 'workerLastMessage', 'workerLastAt', 'workerLastStage'])
+});
+const WORKER_STAGES = new Set([
+    'idle', 'initializing', 'reading_state', 'reading_history', 'rebuilding', 'reconciling',
+    'steam_profiles', 'online_players', 'warbandits', 'finalizing', 'sending_result',
+    'committing', 'queued'
+]);
+const SAFE_WORKER_MESSAGE = /^(?:(?:Worker process (?:could not start|emitted an error|exited before commit|exceeded its deadline)|Queued worker inputs expired|Worker queue is full|Worker (?:plan|request) exceeded its size limit|Worker plan became stale before commit|Worker IPC delivery failed|Stable identity candidate input (?:exceeded its limit|was invalid))\.|Worker scan failed \([A-Z0-9_]{1,64}\)\.)(?: stderr: (?:final IPC result delivery failed|JavaScript heap out of memory|worker module not found|Node\.js assertion failure|uncaught (?:RangeError|ReferenceError|SyntaxError|TypeError)|fatal Node\.js runtime error)\.)?$/u;
 
 /** @returns {any} */
 function operationWindow() {
@@ -79,6 +92,18 @@ function finiteNonNegative(value) {
 function boundedGauge(value) {
     const number = Number(value);
     return Number.isFinite(number) ? Math.min(MAX_GAUGE, Math.max(0, Math.round(number))) : 0;
+}
+
+/** @param {string} field @param {unknown} value */
+function boundedSourceText(field, value) {
+    if (typeof value !== 'string') return null;
+    if ((field === 'workerStage' || field === 'workerLastStage') && WORKER_STAGES.has(value)) return value;
+    if (field === 'workerLastCode' && /^[A-Z0-9_]{1,64}$/u.test(value)) return value;
+    if (field === 'workerLastAt' && value.length <= 32 && !Number.isNaN(Date.parse(value))) {
+        return new Date(value).toISOString();
+    }
+    if (field === 'workerLastMessage' && value.length <= 180 && SAFE_WORKER_MESSAGE.test(value)) return value;
+    return null;
 }
 
 /** @param {number} bytes */
@@ -155,12 +180,14 @@ function collectSources(sources) {
     let failures = 0;
     for (const [source, fields] of Object.entries(SOURCE_FIELDS)) {
         let failed = false;
-        /** @type {Record<string, number>} */
+        /** @type {Record<string, any>} */
         let current = Object.fromEntries(fields.map(field => [field, 0]));
         try {
             const supplied = sources[source] ? sources[source]() : null;
             if (supplied && typeof supplied === 'object') {
                 current = Object.fromEntries(fields.map(field => [field, boundedGauge(supplied[field])]));
+                const textFields = /** @type {Record<string, readonly string[]>} */ (SOURCE_TEXT_FIELDS)[source] || [];
+                for (const field of textFields) current[field] = boundedSourceText(field, supplied[field]);
             }
             else if (sources[source]) failed = true;
         }
@@ -202,9 +229,18 @@ function formatRuntime(snapshot) {
         `previewsPending=${imports.previewsPending} decisionsClaimed=${imports.decisionsClaimed} ` +
         `decisionQueues=${imports.decisionQueues} ocrActive=${ocr.active} ocrQueued=${ocr.queued} ` +
         `ocrQueuedMiB=${mebibytes(ocr.queuedBytes)} scansActive=${scans.active} ` +
-        `scansQueued=${scans.forcedRerunsQueued} scanWorkersActive=${scans.workerActive} ` +
+        `scansQueued=${scans.forcedRerunsQueued} scanBackoffs=${scans.automaticBackoffs} ` +
+        `scanBackoffSkips=${scans.automaticBackoffSkips} scanWorkersActive=${scans.workerActive} ` +
         `scanWorkersQueued=${scans.workerQueued} scanWorkersCompleted=${scans.workerCompleted} ` +
         `scanWorkerFailures=${scans.workerFailures} scanWorkerStalePlans=${scans.workerStalePlans} ` +
+        `scanWorkerConsecutiveFailures=${scans.workerConsecutiveFailures} ` +
+        `scanWorkerStage=${scans.workerStage || 'unknown'} scanWorkerRssMiB=${scans.workerRssMiB} ` +
+        `scanWorkerHeapUsedMiB=${scans.workerHeapUsedMiB} ` +
+        `scanWorkerProviderOutstanding=${scans.workerProviderInvocationsOutstanding} ` +
+        `scanWorkerProviderCircuitsOpen=${scans.workerProviderCircuitsOpen} ` +
+        `scanWorkerLastCode=${scans.workerLastCode || 'none'} ` +
+        `scanWorkerLastStage=${scans.workerLastStage || 'none'} ` +
+        `scanWorkerLastAt=${scans.workerLastAt || 'none'} ` +
         `translationsActive=${translations.active} ` +
         `translationsQueued=${translations.queued} loopsActive=${loops.active} loopsRunning=${loops.running} ` +
         `loopsScheduled=${loops.scheduled} loopFailures=${loops.failures} ` +
@@ -390,8 +426,11 @@ function createRuntimeTelemetry(dependencies = {}) {
         eluBaselineValid = eluCollected;
         const heapPressure = snapshot.process.heapLimitMiB > 0 &&
             snapshot.process.heapUsedMiB / snapshot.process.heapLimitMiB >= 0.75;
+        const scans = snapshot.sources.scans || {};
         const degraded = snapshot.eventLoop.p99Ms >= 250 || snapshot.eventLoop.maxMs >= 1000 ||
-            snapshot.sourceFailures > 0 || snapshot.collectorFailures > 0 || heapPressure;
+            snapshot.sourceFailures > 0 || snapshot.collectorFailures > 0 || heapPressure ||
+            scans.workerConsecutiveFailures > 0 || scans.automaticBackoffs > 0 ||
+            scans.workerProviderCircuitsOpen > 0;
         log('RUNTIME', formatRuntime(snapshot), degraded ? 'warn' : 'info');
         log('RUNTIME_WORK', formatWork(snapshot.operations), 'info');
         return snapshot;

@@ -59,13 +59,40 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   only journal writer: it validates a strict bounded plan, keeps checkpoint/scope comparisons exact, rebases unrelated
   journal appends, and rejects only corrections or identity read-sets that changed during provider work. One stale
   retry and manual reruns survive the bounded coalesced FIFO; shutdown waits for any parent commit. `1.22.44` is the
-  current release. Only `master` plus the useful
+  baseline immediately before this release. The supplied `1.22.44` production excerpt contains no bot crash, restart
+  or OOM and keeps RSS broadly stable around 0.9-1.0 GiB, but it also proves that the scan isolation was not yet
+  operationally useful:
+  the worker completed zero plans, its failures rose from 7 to 18 at about 114.8 seconds each, and the parent still
+  rebuilt a full projection about every 103.5 seconds, averaging 18.38 seconds and peaking around 21.8 seconds.
+  Release `1.22.45` makes the worker use a compact scan-only projection, removes full projection rebuilds from the
+  BattleMetrics hook, validates local tracker/teammate-CSV SteamID/BattleMetrics pairs inside the disposable worker,
+  and adds bounded provider RPC, automatic scan backoff and privacy-safe worker-stage diagnostics. Presence now has
+  an explicit global provider-availability event: only a complete roster may infer offline, while incomplete,
+  censored or failed views degrade to unknown and may retain valid positive online observations. Its deterministic
+  sample key includes mode, provider timestamp and roster fingerprint; a recovery that reuses the same provider
+  timestamp uses `recordedAt`, so it cannot collide with the outage sample. The global complete marker is always last,
+  and an interrupted chunked recovery never persists it. Historical teammate-CSV aliases use a
+  null wipe scope, preventing the same thousands of server-wide rows from being appended after every wipe. The parsed
+  teammate CSV cache is bounded to 16 files, 40,000 rows and 32 MiB for ten minutes (10,000 rows/8 MiB per file) and
+  invalidates on file signature or local write; an incomplete read skips the whole local linking batch. JSONL
+  append work is now measured, but its cached-journal merge and strong revision remain `O(N)` and are not claimed fixed.
+  Provider RPC defaults to 30 seconds (`RPP_PLAYER_SCAN_PROVIDER_TIMEOUT_MS`, 1-45 s), with four calls in flight per
+  worker and still-pending parent invocations capped at eight globally/four per provider; late results are ignored and
+  the circuits/pending counts remain visible in `/runtime`. Before IPC delivery, every provider result is projected
+  onto the exact method contract: unknown fields and accessors are never read, Steam/WarBandits aliases are limited
+  to 256 and WarBandits pages to 100 rows; malformed or oversized results fail that optional enrichment closed.
+  A local 108,000-event synthetic benchmark measured the compact scan rebuild at 3,034 ms median versus 3,955 ms
+  for the full projection (-23%), with about 134.7 MiB versus 188.1 MiB heap growth (-28%); this is not production
+  evidence. Only `master` plus the useful
   `origin/master`/`upstream/master` remote-tracking references remained. Do not reset, overwrite, reimplement or
   discard these changes. Re-audit `git status --short` and `git diff` if the observed state differs.
-- Canonical package version is `1.22.44`. Architecture, synthetic benchmarks and production checks are documented in
+- Canonical package version is `1.22.45`. Architecture, synthetic benchmarks and production checks are documented in
   `docs/runtime_resilience_2026-10-11.md`. Local deterministic evidence does not prove Linux/systemd behavior.
-  Deployment of `1.22.44`, disappearance of the scan stalls, a new Discord import of the reported KIRK screenshot and
-  `/runtime` projection metrics remain unconfirmed, so do not claim production success.
+  Deployment of `1.22.45`, successful worker commits, disappearance of the parent projection stalls, a new Discord
+  import of the reported KIRK screenshot and `/runtime` scan/append metrics remain unconfirmed, so do not claim
+  production success. Before deploying, back up `data/player-intelligence`: `1.22.45` introduces
+  `provider_availability_observed` under schema 1, so a rollback to a release older than `1.22.45` cannot parse a
+  journal that already contains that event. Never delete or reset the persistent journal to make a rollback start.
 - Primary unresolved production fact: raid and **Pair with Server** notifications were observed on the Rust+ phone but not on the bot. The 2026-09-23/24 journal showed accepted MCS logins and quick reconnects but no inbound notification. Phone receipt proves Facepunch delivery to the phone only; MCS login proves Google accepted the bot's GCM identity only. Facepunch delivery to the bot's virtual device still requires a live capture. Canonical transport audit: `docs/fcm_transport_audit_2026-09-23.md`.
 - Implemented receiver path: `src/util/reliableFcmReceiver.js` owns accepted-login readiness, stream position, heartbeat/ack, inactivity detection, ports 5228/443 and capped reconnect; `fcmAlarmRouter.js` routes Host/Lite `alarm`; `src/plugins/raidAlarm/` performs immediate authoritative Rust-chat delivery and five-second duplicate suppression. Current Facepunch/Liam/RustPlusApi evidence still uses GCM/FCM/MCS and `appData.channelId=alarm`; no schema migration was found.
 - `!alarmstatus` reports MCS, generic push proof, matching server-pair age, alarm age, Host/account match, output/mute, raw logging and up to five alarms. An operational Rust+ connection with a saved `playerToken` reports `pair active` and **does not** arm a re-pair watcher. Only an unpaired/non-operational server arms one guild-scoped 120-second watcher; repeating the command does not add another timer. Entity-pair or another server/account cannot satisfy it. `!raidtest` validates outbound Rust chat only.
@@ -502,6 +529,12 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   exact-name races, unrelated concurrent rebases, one bounded stale retry, FIFO/coalescing across servers, payload
   bounds, parent-commit shutdown, child crash/reaping, fixed private telemetry, prepared roster equivalence and
   projector ordering. Production deployment and stall removal remain live checks.
+- Superseding QA for release `1.22.45` on 2026-10-11: `npm.cmd test` passes 430/430 and the following
+  `tsc --noEmit -p .` succeeds. `git diff --check` is clean. Coverage includes compact/full scan parity,
+  complete/incomplete/censored/failed presence semantics, conflict-safe local stable pairs, provider RPC timeout,
+  capacity cleanup and strict response projection, worker diagnostics/backoff, JSONL append telemetry and
+  teammate-CSV cache invalidation. Production still has to prove at least one completed worker plan and the
+  disappearance of the 18-22 second parent rebuilds.
 - Performance check for `1.22.3`: the dedicated glyph benchmark recalls the target among 2,000 aliases with 104 stored
   glyph variants and eight graphemes in a 20.797 ms median. The existing 200-player pipeline measured before/after at
   41.702/39.357 ms initial load, 0.044/0.030 ms quiet-poll mean and 51.356/50.742 ms for ten transitions; no measured
@@ -649,7 +682,7 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 - A live unauthenticated `/players` request on 2026-09-09 returned HTTP 403 `A subscription is required to use the API`; historical/offline name search is therefore optional. Without that permission, a unique currently-online partial match is accepted from the authoritative current server view, while a cached offline partial asks for the displayed exact name. Exact locally observed names remain usable.
 - `docs/external_player_data_sources_2026-09-10.md` records the live external-data audit. WarBandits EU 5X NoBPs exposes A2S on UDP query port `28015`: `A2S_INFO`/`A2S_RULES` provide useful server/build/map/performance metadata, but `A2S_PLAYER` returns censored generic identities and must not feed player tracking. The anonymous WarBandits `/stats/<server>` endpoint exposes server/wipe-specific SteamID64, current name, rank, playtime plus PvP/raid/farm/PvE statistics, so it is a strong identity/candidate source but not proof of current online status. Its use must be serialized/cached and stop on 429 or Cloudflare challenge. Steam presence is enrichment only; RCON would be authoritative but requires server-owner credentials.
 - The 2026-09-28 replacement audit keeps BattleMetrics as the primary tracker source: RustRadar's server catalogue works for the target WarBandits server, but its player API returned `503 player_data_source_unavailable`, its public client exposes BattleMetrics-shaped `bm_id`/`server_bm_id` identities, and its terms forbid automated extraction without written permission. Do not integrate its undocumented SPA routes. Reconsider only with a documented, permitted API and a successful 30-day shadow comparison. Canonical report: `docs/rustradar_battlemetrics_audit_2026-09-28.md`.
-- `src/plugins/warBandits/index.js` is the detached WarBandits provider. WarBandits is queried only during `!track`, never periodically. It caches the full validated server catalogue for one hour, matches exact BattleMetrics ID then hostname, resolves a server-specific name or SteamID64, and persists identity/stat/activity observations in `data/warbandits/`. Requests have a five-second timeout, a five-second serialized gap, five-minute response cache, and persisted 429/Cloudflare cooldown without retry. WarBandits failure cannot cancel a native tracker commit.
+- `src/plugins/warBandits/index.js` is the detached WarBandits provider. WarBandits is queried only during `!track`, never periodically. It caches the full validated server catalogue for one hour, matches exact BattleMetrics ID then hostname, resolves a server-specific name or SteamID64, and persists identity/stat/activity observations in `data/warbandits/`. Requests have a five-second timeout, a 4 MiB response limit, no redirects, a five-second serialized gap, five-minute response cache, and persisted 429/Cloudflare cooldown without retry. WarBandits failure cannot cancel a native tracker commit.
 - Superseding source decision (2026-09-10): the user purchased BattleMetrics Premium, so subscribed BattleMetrics is the primary presence source for this deployment. The previous no-paid plan remains relevant only as failure analysis: no free drop-in replacement exists for arbitrary SteamID64 presence on the censored WarBandits list. Premium failures still produce `unknown`, never a disconnect, and never cancel committed tracker data.
 - `RPP_BATTLEMETRICS_TOKEN` is loaded from the ignored repository-root `.env` through `dotenv` before config values are read. The committed `.env.example` contains only an empty placeholder. The tracker performs no RCON, ban, note, flag, trigger, account, favorite, or mutation API calls; do not grant those token permissions. Leave all token permissions unchecked when the UI permits it. `Account > Basic Account Information` is only the narrowest fallback if the UI requires a selected permission, not a tracker dependency, and must be validated with the live check.
 - `src/plugins/battlemetrics/index.js` is the detached read-only Premium provider. It validates the fixed BattleMetrics origin and JSON:API boundaries, uses five-second timeouts, bounded responses and results, five-/ten-minute caches, in-flight coalescing, and a `Retry-After`/rate-reset cooldown on HTTP 429 with no retry. Sanitized 401/403/404/429/timeout/schema failures never include tokens or response bodies. Live validation on 2026-09-10 confirmed server-player and session endpoints; co-play returned HTTP 400 when given session-style server/include parameters, so it is now called parameterless and server-filtered only when the response exposes that relationship.

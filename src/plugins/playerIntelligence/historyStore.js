@@ -6,6 +6,7 @@ const Path = require('node:path');
 const Crypto = require('node:crypto');
 
 const Contracts = require('./contracts.js');
+const RuntimeTelemetry = require('../../util/runtimeTelemetry.js');
 
 const sharedDirectories = new Map();
 
@@ -207,6 +208,7 @@ class JsonlHistoryStore {
             throw new TypeError('An empty player-intelligence append requires a guarded transaction.');
         }
         const events = inputs.map(input => Contracts.createEvent(input));
+        const span = RuntimeTelemetry.startSpan('pi_history_append');
         const operation = this.shared.queue.then(async () => {
             let existing;
             try {
@@ -295,7 +297,13 @@ class JsonlHistoryStore {
                 results: Object.freeze(results.map(result => Object.freeze(result))) });
         });
         this.shared.queue = operation.then(() => undefined, () => undefined);
-        return operation;
+        return operation.then((/** @type {any} */ result) => {
+            span.finish('success');
+            return result;
+        }, (/** @type {unknown} */ error) => {
+            span.finish('failure');
+            throw error;
+        });
     }
 
     /** @returns {Promise<Readonly<{events:readonly Readonly<Record<string,any>>[],revision:string}>>} */

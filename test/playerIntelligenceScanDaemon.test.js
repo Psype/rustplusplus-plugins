@@ -3,11 +3,13 @@ const EventEmitter = require('node:events');
 const Fs = require('node:fs');
 const Os = require('node:os');
 const Path = require('node:path');
+const Stream = require('node:stream');
 const Test = require('node:test');
 
 const Core = require('../src/plugins/playerIntelligence');
 const IsolatedScanDaemon = require('../src/plugins/playerIntelligence/isolatedScanDaemon.js');
 const ScanDaemon = require('../src/plugins/playerIntelligence/scanDaemon.js');
+const PlayerScanIpc = require('../src/workers/playerScanIpc.js');
 
 const STEAM_A = '76561197975819827';
 const STEAM_B = '76561198036538266';
@@ -91,6 +93,7 @@ class FakeScanChild extends EventEmitter {
         this.connected = true;
         this.exitCode = null;
         this.signalCode = null;
+        this.stderr = new Stream.PassThrough();
         this.onSend = onSend;
     }
 
@@ -106,6 +109,12 @@ class FakeScanChild extends EventEmitter {
         this.emit('exit', code, null);
     }
 
+    fail(error = new Error('worker process error')) {
+        if (this.exitCode !== null || this.signalCode !== null) return;
+        this.connected = false;
+        this.emit('error', error);
+    }
+
     kill(signal = 'SIGTERM') {
         if (this.exitCode !== null || this.signalCode !== null) return false;
         this.connected = false;
@@ -114,6 +123,131 @@ class FakeScanChild extends EventEmitter {
         return true;
     }
 }
+
+Test('final worker IPC callback errors become a fixed diagnostic and non-zero exit', () => {
+    const privateError = 'private-player-plan-and-provider-token';
+    let stderr = '';
+    let disconnected = 0;
+    const target = {
+        connected: true,
+        exitCode: 0,
+        stderr: { write: value => { stderr += value; } },
+        send: (_message, callback) => {
+            callback(new Error(privateError));
+            return true;
+        },
+        disconnect: () => { target.connected = false; disconnected += 1; }
+    };
+
+    Assert.equal(PlayerScanIpc.sendFinal(target, { v: 1, type: 'result', plan: { privateError } }), true);
+    Assert.equal(target.exitCode, PlayerScanIpc.FINAL_SEND_FAILURE_EXIT_CODE);
+    Assert.equal(disconnected, 1);
+    Assert.equal(stderr.trim(), PlayerScanIpc.FINAL_SEND_FAILURE_MARKER);
+    Assert.equal(stderr.includes(privateError), false);
+});
+
+Test('provider IPC requests reject immediately when their send cannot be delivered', async () => {
+    const privateError = 'private-provider-transport-details';
+    const pending = new Map();
+    const target = {
+        connected: true,
+        send: () => { throw new Error(privateError); }
+    };
+
+    const request = PlayerScanIpc.request(target, pending,
+        { v: 1, type: 'provider_request', callId: 7, provider: 'steam',
+            method: 'profileIdentity', args: [STEAM_A] });
+    Assert.equal(pending.size, 0);
+    await Assert.rejects(request, error => {
+        Assert.match(error.message, /could not be delivered/u);
+        Assert.equal(error.message.includes(privateError), false);
+        return true;
+    });
+});
+
+Test('local stable identity pairs commit without any external provider and remain idempotent', async t => {
+    const value = harness(t);
+    value.battlemetrics.onlinePlayers = [];
+    const candidate = {
+        steamId: STEAM_A,
+        battlemetricsPlayerId: '101',
+        name: 'Alice',
+        observedAt: '2026-10-02T14:05:00.000Z',
+        source: 'player-tracker',
+        sourceEventId: 'stable:player-tracker:alice'
+    };
+
+    await ScanDaemon.runCycle({ ...value, stableIdentityCandidates: [candidate] });
+    await ScanDaemon.runCycle({ ...value, stableIdentityCandidates: [candidate] });
+
+    const events = await value.store.readAll();
+    const local = events.filter(event => event.provenance.source === 'player-tracker');
+    Assert.equal(local.length, 1);
+    Assert.deepEqual(local[0].subject, {
+        steamId: STEAM_A,
+        battlemetricsPlayerId: '101',
+        exactName: 'Alice'
+    });
+    const person = Core.rebuild(events).identities.findByIdentifier('101')[0];
+    Assert.equal(person.steamId, STEAM_A);
+});
+
+Test('local stable identity pairs fail closed against projected and same-cycle conflicts', async t => {
+    const projected = harness(t);
+    projected.battlemetrics.onlinePlayers = [];
+    await projected.store.append(identityEvent({
+        steamId: STEAM_B,
+        battlemetricsPlayerId: '101',
+        exactName: 'Bob'
+    }, 'existing-bob'));
+    await ScanDaemon.runCycle({
+        ...projected,
+        stableIdentityCandidates: [{
+            steamId: STEAM_A, battlemetricsPlayerId: '101', name: 'Alice',
+            observedAt: '2026-10-02T14:05:00.000Z', source: 'player-tracker',
+            sourceEventId: 'stable:player-tracker:conflict-existing'
+        }]
+    });
+    let events = await projected.store.readAll();
+    Assert.equal(events.some(event => event.provenance.source === 'player-tracker'), false);
+    Assert.deepEqual(Core.rebuild(events).identities.findByIdentifier('101').map(person => person.steamId), [STEAM_B]);
+
+    const sameCycle = harness(t);
+    sameCycle.battlemetrics.onlinePlayers = [];
+    await ScanDaemon.runCycle({
+        ...sameCycle,
+        stableIdentityCandidates: [
+            { steamId: STEAM_A, battlemetricsPlayerId: '201', name: 'Alice',
+                observedAt: '2026-10-02T14:05:00.000Z', source: 'player-tracker',
+                sourceEventId: 'stable:player-tracker:conflict-a' },
+            { steamId: STEAM_A, battlemetricsPlayerId: '202', name: 'Alice',
+                observedAt: '2026-10-02T14:05:00.000Z', source: 'teammate-language-database',
+                sourceEventId: 'stable:teammate-language-database:conflict-b' }
+        ]
+    });
+    events = await sameCycle.store.readAll();
+    Assert.equal(events.some(event => ['player-tracker', 'teammate-language-database']
+        .includes(event.provenance.source)), false);
+});
+
+Test('an external provider failure cannot roll back a validated local stable pair', async t => {
+    const value = harness(t);
+    value.battlemetrics.onlinePlayers = [];
+    const result = await ScanDaemon.runCycle({
+        ...value,
+        stableIdentityCandidates: [{
+            steamId: STEAM_A, battlemetricsPlayerId: '101', name: 'Alice',
+            observedAt: '2026-10-02T14:05:00.000Z', source: 'player-tracker',
+            sourceEventId: 'stable:player-tracker:provider-independent'
+        }],
+        warBanditsProvider: {
+            scanCurrentWipePage: async () => { throw new Error('temporary external outage'); }
+        }
+    });
+    Assert.equal(result.warBanditsPageFailures, 1);
+    Assert.equal((await value.store.readAll()).some(event => event.provenance.source === 'player-tracker' &&
+        event.subject.steamId === STEAM_A && event.subject.battlemetricsPlayerId === '101'), true);
+});
 
 Test('background scan refreshes known online SteamIDs once per wipe and resumes from durable state', async t => {
     const value = harness(t);
@@ -596,6 +730,30 @@ Test('partial Steam aliases are recorded but remain retryable until the profile 
     Assert.equal(calls, 2);
 });
 
+Test('an oversized Steam alias history is never marked complete after bounded projection', async t => {
+    const value = harness(t);
+    await value.store.append(identityEvent({
+        steamId: STEAM_A, battlemetricsPlayerId: null, exactName: null
+    }, 'pending-oversized-alias-history', 'discord-steamid-list'));
+    value.dependencies.steamProfileIdentity = async steamId => ({
+        steamId,
+        currentName: 'Alice current',
+        pastAliases: Array.from({ length: 257 }, (_unused, index) => ({ name: `Alice past ${index}` })),
+        aliasesComplete: true
+    });
+
+    const first = await ScanDaemon.runCycle({ ...value });
+    Assert.equal(first.steamProfileFailures, 1);
+    Assert.equal(first.steamProfilesRefreshed, 0);
+    const state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
+    Assert.deepEqual(state.profiledSteamIds, []);
+    Assert.equal(state.steamProfileRetries[0].steamId, STEAM_A);
+    const names = Core.rebuild(await value.store.readAll()).identities
+        .getPerson(`steam:${STEAM_A}`).names.map(alias => alias.name);
+    Assert.equal(names.includes('Alice past 255'), true);
+    Assert.equal(names.includes('Alice past 256'), false);
+});
+
 Test('the background scan stores Steam current and past names as verified aliases', async t => {
     const value = harness(t);
     await value.store.append(identityEvent({
@@ -748,6 +906,31 @@ Test('pending reconciliation drains a bounded WarBandits batch per cycle', async
     Assert.equal(result.pendingWarBanditsAttempts, ScanDaemon.PENDING_WARBANDITS_BATCH_SIZE);
     Assert.deepEqual(calls, ['AlphaOne', 'BravoTwo', 'CharlieThree', 'DeltaFour']);
     Assert.equal(result.pendingReconciliationActive, true);
+});
+
+Test('oversized WarBandits aliases remain retryable instead of becoming a false completed lookup', async t => {
+    const value = harness(t);
+    await value.store.append(identityEvent({
+        steamId: null, battlemetricsPlayerId: null, exactName: 'Target Player'
+    }, 'pending-warbandits-oversized-aliases', 'discord-cinfo'));
+    const warBanditsProvider = {
+        resolvePlayerRecent: async () => ({
+            available: true,
+            ambiguous: false,
+            player: {
+                steamId: STEAM_A,
+                name: 'Target Player',
+                aliases: Array.from({ length: 257 }, (_unused, index) => `Target Alias ${index}`)
+            }
+        })
+    };
+
+    const result = await ScanDaemon.runCycle({ ...value, warBanditsProvider, forceWarBanditsRescan: true });
+    Assert.equal(result.pendingWarBanditsAttempts, 1);
+    Assert.equal(result.pendingIdentitiesLinked, 0);
+    const state = JSON.parse(Fs.readFileSync(Path.join(value.directory, 'scan-daemon.json'), 'utf8'));
+    Assert.equal(state.pendingReconciliation.warBanditsRetries.length, 1);
+    Assert.deepEqual(state.pendingReconciliation.checkedWarBanditsKeys, []);
 });
 
 Test('each explicit scanplayers pass rearms unresolved identities', async t => {
@@ -1431,6 +1614,95 @@ Test('isolated scheduling keeps injected test work deterministic and in-process'
     Assert.equal(calls, 1);
 });
 
+Test('background scan warning TTL distinguishes a new failure code or message', async t => {
+    ScanDaemon.resetRuntimeCachesForTests();
+    t.after(() => ScanDaemon.resetRuntimeCachesForTests());
+    const value = harness(t);
+    const warnings = [];
+    value.context.rustplus.log = (_category, message, level) => warnings.push({ message, level });
+
+    const rejectWith = (code, message) => ({
+        ...value,
+        isolateProcess: true,
+        forceWarBanditsRescan: true,
+        dependencies: {
+            ...value.dependencies,
+            isolatedScanRunner: async () => {
+                const error = new Error(message);
+                error.code = code;
+                throw error;
+            }
+        }
+    });
+    const first = rejectWith('WORKER_EXITED', 'worker stopped at rebuilding');
+    Assert.equal(ScanDaemon.schedule(first), true);
+    await ScanDaemon.waitForIdle(value.directory);
+    Assert.equal(ScanDaemon.schedule(first), true);
+    await ScanDaemon.waitForIdle(value.directory);
+    Assert.equal(warnings.length, 1);
+
+    Assert.equal(ScanDaemon.schedule(rejectWith('WORKER_EXITED', 'worker stopped at finalizing')), true);
+    await ScanDaemon.waitForIdle(value.directory);
+    Assert.equal(ScanDaemon.schedule(rejectWith('WORKER_TIMEOUT', 'worker stopped at finalizing')), true);
+    await ScanDaemon.waitForIdle(value.directory);
+    Assert.equal(warnings.length, 3);
+    Assert.deepEqual(warnings.map(item => item.level), ['warn', 'warn', 'warn']);
+});
+
+Test('a throwing scan logger cannot reject the scheduler boundary', async t => {
+    ScanDaemon.resetRuntimeCachesForTests();
+    t.after(() => ScanDaemon.resetRuntimeCachesForTests());
+    const value = harness(t);
+    value.context.rustplus.log = () => { throw new Error('logger unavailable'); };
+    const options = {
+        ...value,
+        isolateProcess: true,
+        forceWarBanditsRescan: true,
+        dependencies: {
+            ...value.dependencies,
+            isolatedScanRunner: async () => {
+                const error = new Error('worker failed safely');
+                error.code = 'WORKER_FAILURE';
+                throw error;
+            }
+        }
+    };
+
+    Assert.equal(ScanDaemon.schedule(options), true);
+    await ScanDaemon.waitForIdle(value.directory);
+    Assert.equal(ScanDaemon.getRuntimeStatus().active, 0);
+    Assert.equal(ScanDaemon.schedule(options), true);
+    await ScanDaemon.waitForIdle(value.directory);
+});
+
+Test('background scheduling contains clock and runner admission failures', t => {
+    ScanDaemon.resetRuntimeCachesForTests();
+    t.after(() => ScanDaemon.resetRuntimeCachesForTests());
+    const value = harness(t);
+    Assert.equal(ScanDaemon.schedule({
+        ...value,
+        isolateProcess: true,
+        forceWarBanditsRescan: true,
+        dependencies: {
+            ...value.dependencies,
+            now: () => { throw new Error('clock unavailable'); }
+        }
+    }), false);
+
+    const dependencies = { ...value.dependencies };
+    Object.defineProperty(dependencies, 'isolatedScanRunner', {
+        enumerable: true,
+        get() { throw new Error('runner unavailable'); }
+    });
+    Assert.equal(ScanDaemon.schedule({
+        ...value,
+        isolateProcess: true,
+        forceWarBanditsRescan: true,
+        dependencies
+    }), false);
+    Assert.equal(ScanDaemon.getRuntimeStatus().active, 0);
+});
+
 Test('the real scan worker can plan read-only work for a parent commit', async t => {
     const value = harness(t);
     value.scope.circular = value.scope;
@@ -1447,6 +1719,9 @@ Test('the real scan worker can plan read-only work for a parent commit', async t
     Assert.equal(status.active, 0);
     Assert.equal(status.completed >= 1, true);
     Assert.equal(status.failures, 0);
+    Assert.equal(status.stage, 'idle');
+    Assert.equal(status.rssMiB, 0);
+    Assert.equal(status.heapUsedMiB, 0);
 });
 
 Test('a worker crash after provider RPC cannot mutate the journal or scan state', async t => {
@@ -1476,6 +1751,398 @@ Test('a worker crash after provider RPC cannot mutate the journal or scan state'
     Assert.equal(providerCalls, 1);
     Assert.equal((await value.store.readAll()).length, 0);
     Assert.equal(Fs.existsSync(Path.join(value.directory, 'scan-daemon.json')), false);
+});
+
+Test('isolated provider RPC rejects non-exact envelopes before invoking a provider', async t => {
+    const value = harness(t);
+    let providerCalls = 0;
+    let response = null;
+    value.dependencies.steamProfileIdentity = async () => {
+        providerCalls += 1;
+        return { steamId: STEAM_A, currentName: 'Alice', pastAliases: [] };
+    };
+    const child = new FakeScanChild((message, instance) => {
+        if (message.type === 'run') {
+            queueMicrotask(() => instance.emit('message', {
+                v: 1,
+                type: 'provider_request',
+                callId: 1,
+                provider: 'steam',
+                method: 'profileIdentity',
+                args: [STEAM_A],
+                unexpected: 'private-forged-field'
+            }));
+        }
+        else if (message.type === 'provider_response') {
+            response = message;
+            queueMicrotask(() => instance.crash(91));
+        }
+    });
+
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, { forkImpl: () => child }),
+        error => error.code === 'WORKER_EXITED');
+    Assert.equal(providerCalls, 0);
+    Assert.deepEqual(response, { v: 1, type: 'provider_response', callId: 1,
+        ok: false, error: 'Player scan provider request is invalid.' });
+    Assert.equal(JSON.stringify(response).includes('private-forged-field'), false);
+});
+
+Test('isolated provider RPC bounds simultaneous parent calls under a worker flood', async t => {
+    const value = harness(t);
+    let providerCalls = 0;
+    const responses = [];
+    const providerResolvers = [];
+    value.dependencies.steamProfileIdentity = () => {
+        providerCalls += 1;
+        return new Promise(resolve => providerResolvers.push(resolve));
+    };
+    const child = new FakeScanChild((message, instance) => {
+        if (message.type === 'run') {
+            queueMicrotask(() => {
+                for (let callId = 1; callId <= IsolatedScanDaemon.MAX_IN_FLIGHT_PROVIDER_CALLS + 3;
+                    callId += 1) {
+                    instance.emit('message', { v: 1, type: 'provider_request', callId,
+                        provider: 'steam', method: 'profileIdentity', args: [STEAM_A] });
+                }
+                setImmediate(() => instance.crash(91));
+            });
+        }
+        else if (message.type === 'provider_response') responses.push(message);
+    });
+
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, {
+        forkImpl: () => child,
+        providerTimeoutMs: 1000
+    }), error => error.code === 'WORKER_EXITED');
+    Assert.equal(providerCalls, IsolatedScanDaemon.MAX_IN_FLIGHT_PROVIDER_CALLS);
+    Assert.equal(responses.length, 3);
+    Assert.equal(responses.every(item => item.ok === false &&
+        item.error === 'Player scan provider request limit reached.'), true);
+    for (const resolve of providerResolvers) resolve(null);
+    await new Promise(resolve => setImmediate(resolve));
+});
+
+Test('a saturated provider circuit does not prevent another scan provider', async t => {
+    const value = harness(t);
+    let steamCalls = 0;
+    let battlemetricsCalls = 0;
+    const steamResolvers = [];
+    value.dependencies.steamProfileIdentity = () => {
+        steamCalls += 1;
+        return new Promise(resolve => steamResolvers.push(resolve));
+    };
+    value.dependencies.battlemetricsProvider = {
+        resolveSteamId: async battlemetricsPlayerId => {
+            battlemetricsCalls += 1;
+            return { available: true, steamId: STEAM_A, battlemetricsPlayerId };
+        }
+    };
+    const saturatingChild = new FakeScanChild((message, instance) => {
+        if (message.type !== 'run') return;
+        queueMicrotask(() => {
+            for (let callId = 1;
+                callId <= IsolatedScanDaemon.MAX_OUTSTANDING_PROVIDER_INVOCATIONS_PER_PROVIDER;
+                callId += 1) {
+                instance.emit('message', { v: 1, type: 'provider_request', callId,
+                    provider: 'steam', method: 'profileIdentity', args: [STEAM_A] });
+            }
+            setImmediate(() => instance.crash(91));
+        });
+    });
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, {
+        forkImpl: () => saturatingChild,
+        providerTimeoutMs: 1000
+    }), error => error.code === 'WORKER_EXITED');
+    Assert.equal(steamCalls, IsolatedScanDaemon.MAX_OUTSTANDING_PROVIDER_INVOCATIONS_PER_PROVIDER);
+    Assert.equal(IsolatedScanDaemon.getRuntimeStatus().providerInvocationsOutstanding,
+        IsolatedScanDaemon.MAX_OUTSTANDING_PROVIDER_INVOCATIONS_PER_PROVIDER);
+    Assert.equal(IsolatedScanDaemon.getRuntimeStatus().providerCircuitsOpen, 1);
+    Assert.equal(ScanDaemon.getRuntimeStatus().workerProviderInvocationsOutstanding,
+        IsolatedScanDaemon.MAX_OUTSTANDING_PROVIDER_INVOCATIONS_PER_PROVIDER);
+    Assert.equal(ScanDaemon.getRuntimeStatus().workerProviderCircuitsOpen, 1);
+
+    const mixedResponses = [];
+    const mixedChild = new FakeScanChild((message, instance) => {
+        if (message.type === 'run') {
+            queueMicrotask(() => {
+                instance.emit('message', { v: 1, type: 'provider_request', callId: 1,
+                    provider: 'steam', method: 'profileIdentity', args: [STEAM_A] });
+                instance.emit('message', { v: 1, type: 'provider_request', callId: 2,
+                    provider: 'battlemetrics', method: 'resolveSteamId', args: ['101'] });
+            });
+        }
+        else if (message.type === 'provider_response') {
+            mixedResponses.push(message);
+            if (mixedResponses.length === 2) queueMicrotask(() => instance.crash(91));
+        }
+    });
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, { forkImpl: () => mixedChild }),
+        error => error.code === 'WORKER_EXITED');
+    Assert.equal(steamCalls, IsolatedScanDaemon.MAX_OUTSTANDING_PROVIDER_INVOCATIONS_PER_PROVIDER);
+    Assert.equal(battlemetricsCalls, 1);
+    Assert.equal(mixedResponses.find(item => item.callId === 1).error,
+        'Player scan provider-specific capacity is exhausted.');
+    Assert.equal(mixedResponses.find(item => item.callId === 2).ok, true);
+
+    for (const resolve of steamResolvers) resolve(null);
+    await new Promise(resolve => setImmediate(resolve));
+    Assert.equal(IsolatedScanDaemon.getRuntimeStatus().providerInvocationsOutstanding, 0);
+    Assert.equal(IsolatedScanDaemon.getRuntimeStatus().providerCircuitsOpen, 0);
+});
+
+Test('isolated provider RPC globally bounds unresolved invocations across worker cycles', async t => {
+    const value = harness(t);
+    const providerResolvers = [];
+    const providerCalls = { steam: 0, battlemetrics: 0, warbandits: 0 };
+    value.dependencies.steamProfileIdentity = () => {
+        providerCalls.steam += 1;
+        return new Promise(resolve => providerResolvers.push(resolve));
+    };
+    value.dependencies.battlemetricsProvider = {
+        resolveSteamId: () => {
+            providerCalls.battlemetrics += 1;
+            return new Promise(resolve => providerResolvers.push(resolve));
+        }
+    };
+    value.warBanditsProvider = {
+        resolvePlayer: () => {
+            providerCalls.warbandits += 1;
+            return new Promise(resolve => providerResolvers.push(resolve));
+        }
+    };
+    const failedCycle = async (provider, method, args, count) => {
+        const child = new FakeScanChild((message, instance) => {
+            if (message.type !== 'run') return;
+            queueMicrotask(() => {
+                for (let callId = 1; callId <= count; callId += 1) {
+                    instance.emit('message', { v: 1, type: 'provider_request', callId,
+                        provider, method, args });
+                }
+                setImmediate(() => instance.crash(91));
+            });
+        });
+        await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, {
+            forkImpl: () => child,
+            providerTimeoutMs: 1000
+        }), error => error.code === 'WORKER_EXITED');
+    };
+
+    Assert.equal(IsolatedScanDaemon.MAX_OUTSTANDING_PROVIDER_INVOCATIONS,
+        IsolatedScanDaemon.MAX_OUTSTANDING_PROVIDER_INVOCATIONS_PER_PROVIDER * 2);
+    await failedCycle('steam', 'profileIdentity', [STEAM_A], 3);
+    await failedCycle('battlemetrics', 'resolveSteamId', ['101'], 3);
+    await failedCycle('warbandits', 'resolvePlayer', ['Alice'], 2);
+    Assert.equal(providerCalls.steam + providerCalls.battlemetrics + providerCalls.warbandits,
+        IsolatedScanDaemon.MAX_OUTSTANDING_PROVIDER_INVOCATIONS);
+    Assert.equal(IsolatedScanDaemon.getRuntimeStatus().providerInvocationsOutstanding,
+        IsolatedScanDaemon.MAX_OUTSTANDING_PROVIDER_INVOCATIONS);
+    Assert.equal(IsolatedScanDaemon.getRuntimeStatus().providerCircuitsOpen, 1);
+
+    const responses = [];
+    const blockedChild = new FakeScanChild((message, instance) => {
+        if (message.type === 'run') {
+            queueMicrotask(() => instance.emit('message', { v: 1, type: 'provider_request', callId: 1,
+                provider: 'warbandits', method: 'resolvePlayer', args: ['Alice'] }));
+        }
+        else if (message.type === 'provider_response') {
+            responses.push(message);
+            queueMicrotask(() => instance.crash(91));
+        }
+    });
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, { forkImpl: () => blockedChild }),
+        error => error.code === 'WORKER_EXITED');
+    Assert.equal(providerCalls.warbandits, 2);
+    Assert.deepEqual(responses, [{ v: 1, type: 'provider_response', callId: 1,
+        ok: false, error: 'Player scan provider capacity is exhausted.' }]);
+
+    for (const resolve of providerResolvers) resolve(null);
+    await new Promise(resolve => setImmediate(resolve));
+    Assert.equal(IsolatedScanDaemon.getRuntimeStatus().providerInvocationsOutstanding, 0);
+    Assert.equal(IsolatedScanDaemon.getRuntimeStatus().providerCircuitsOpen, 0);
+
+    value.dependencies.steamProfileIdentity = async steamId => ({
+        steamId, currentName: 'Alice', pastAliases: [], aliasesComplete: true
+    });
+    const recoveredResponses = [];
+    const recoveredChild = new FakeScanChild((message, instance) => {
+        if (message.type === 'run') {
+            queueMicrotask(() => instance.emit('message', { v: 1, type: 'provider_request', callId: 1,
+                provider: 'steam', method: 'profileIdentity', args: [STEAM_A] }));
+        }
+        else if (message.type === 'provider_response') {
+            recoveredResponses.push(message);
+            queueMicrotask(() => instance.crash(91));
+        }
+    });
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, { forkImpl: () => recoveredChild }),
+        error => error.code === 'WORKER_EXITED');
+    Assert.equal(recoveredResponses.length, 1);
+    Assert.equal(recoveredResponses[0].ok, true);
+});
+
+Test('isolated provider RPC times out below the worker deadline and ignores a late result', async t => {
+    const value = harness(t);
+    const plan = await ScanDaemon.runCycle({ ...value, planOnly: true });
+    let resolveProvider;
+    value.dependencies.steamProfileIdentity = () => new Promise(resolve => { resolveProvider = resolve; });
+    const responses = [];
+    const child = new FakeScanChild((message, instance) => {
+        if (message.type === 'run') {
+            queueMicrotask(() => instance.emit('message', { v: 1, type: 'provider_request', callId: 1,
+                provider: 'steam', method: 'profileIdentity', args: [STEAM_A] }));
+        }
+        else if (message.type === 'provider_response') {
+            responses.push(message);
+            if (message.ok === false) {
+                queueMicrotask(() => instance.emit('message', { v: 1, type: 'result', plan }));
+            }
+        }
+    });
+
+    Assert.equal(IsolatedScanDaemon.PROVIDER_CALL_TIMEOUT_MS < IsolatedScanDaemon.WORKER_TIMEOUT_MS, true);
+    const result = await IsolatedScanDaemon.runCycle(value, {
+        forkImpl: () => child,
+        timeoutMs: 1000,
+        providerTimeoutMs: 10
+    });
+    Assert.equal(result.skipped, false);
+    Assert.deepEqual(responses, [{ v: 1, type: 'provider_response', callId: 1,
+        ok: false, error: 'Player scan provider request timed out.' }]);
+
+    let latePayloadReads = 0;
+    const lateResult = { steamId: STEAM_A, pastAliases: [] };
+    Object.defineProperty(lateResult, 'currentName', { enumerable: true, get: () => {
+        latePayloadReads += 1;
+        return 'late-private-name';
+    } });
+    resolveProvider(lateResult);
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    Assert.equal(responses.length, 1);
+    Assert.equal(latePayloadReads, 0);
+});
+
+Test('isolated worker telemetry returns to zero after payload and spawn failures', async t => {
+    const invalidPayload = harness(t);
+    invalidPayload.dependencies.now = () => new Date('invalid');
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(invalidPayload), /clock is invalid/u);
+    Assert.deepEqual({
+        stage: IsolatedScanDaemon.getRuntimeStatus().stage,
+        rssMiB: IsolatedScanDaemon.getRuntimeStatus().rssMiB,
+        heapUsedMiB: IsolatedScanDaemon.getRuntimeStatus().heapUsedMiB
+    }, { stage: 'idle', rssMiB: 0, heapUsedMiB: 0 });
+
+    const failedSpawn = harness(t);
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(failedSpawn, {
+        forkImpl: () => { throw new Error('private spawn failure'); }
+    }), error => error.code === 'WORKER_SPAWN_FAILED');
+    const status = IsolatedScanDaemon.getRuntimeStatus();
+    Assert.deepEqual({ stage: status.stage, rssMiB: status.rssMiB, heapUsedMiB: status.heapUsedMiB },
+        { stage: 'idle', rssMiB: 0, heapUsedMiB: 0 });
+});
+
+Test('isolated worker diagnostics retain bounded progress and only a safe stderr classification', async t => {
+    const value = harness(t);
+    const privateValue = 'private-player-name-and-token';
+    let forkOptions = null;
+    /** @type {any} */
+    let liveStatus = null;
+    const child = new FakeScanChild((message, instance) => {
+        if (message.type !== 'run') return;
+        instance.emit('message', { v: 1, type: 'progress', stage: 'rebuilding',
+            rssMiB: 701, heapUsedMiB: 512 });
+        liveStatus = IsolatedScanDaemon.getRuntimeStatus();
+        instance.emit('message', { v: 1, type: 'progress', stage: 'not-a-stage',
+            rssMiB: 999999, heapUsedMiB: 999999 });
+        instance.stderr.write(`${privateValue.repeat(2000)}\n` +
+            'FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory\n');
+        queueMicrotask(() => instance.crash(134));
+    });
+
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, {
+        forkImpl: (_path, _args, options) => { forkOptions = options; return child; }
+    }), error => {
+        Assert.equal(error.code, 'WORKER_EXITED');
+        Assert.match(error.message, /stderr: JavaScript heap out of memory/u);
+        Assert.equal(error.message.includes(privateValue), false);
+        return true;
+    });
+
+    Assert.deepEqual(forkOptions.stdio, ['ignore', 'ignore', 'pipe', 'ipc']);
+    Assert.equal(liveStatus.stage, 'rebuilding');
+    Assert.equal(liveStatus.rssMiB, 701);
+    Assert.equal(liveStatus.heapUsedMiB, 512);
+    const status = IsolatedScanDaemon.getRuntimeStatus();
+    Assert.equal(status.active, 0);
+    Assert.equal(status.stage, 'idle');
+    Assert.equal(status.rssMiB, 0);
+    Assert.equal(status.heapUsedMiB, 0);
+    Assert.equal(status.lastCode, 'WORKER_EXITED');
+    Assert.equal(status.lastStage, 'rebuilding');
+    Assert.match(status.lastMessage, /JavaScript heap out of memory/u);
+    Assert.equal(status.lastMessage.includes(privateValue), false);
+    Assert.equal(Number.isNaN(Date.parse(status.lastAt)), false);
+    Assert.equal(status.consecutiveFailures > 0, true);
+
+    const plan = await ScanDaemon.runCycle({ ...value, planOnly: true });
+    const successChild = new FakeScanChild((message, instance) => {
+        if (message.type !== 'run') return;
+        instance.emit('message', { v: 1, type: 'progress', stage: 'finalizing',
+            rssMiB: 222, heapUsedMiB: 111 });
+        queueMicrotask(() => instance.emit('message', { v: 1, type: 'result', plan }));
+    });
+    await IsolatedScanDaemon.runCycle(value, { forkImpl: () => successChild });
+    const recovered = IsolatedScanDaemon.getRuntimeStatus();
+    Assert.equal(recovered.consecutiveFailures, 0);
+    Assert.equal(recovered.lastCode, 'WORKER_EXITED');
+    Assert.equal(recovered.rssMiB, 0);
+    Assert.equal(recovered.heapUsedMiB, 0);
+});
+
+Test('isolated worker process errors include only classified stderr in retained diagnostics', async t => {
+    const value = harness(t);
+    const privateValue = 'private-stderr-player-name';
+    const child = new FakeScanChild((message, instance) => {
+        if (message.type !== 'run') return;
+        instance.emit('message', { v: 1, type: 'progress', stage: 'reading_history',
+            rssMiB: 200, heapUsedMiB: 100 });
+        instance.stderr.write(`${privateValue}\nTypeError: internal worker failure\n`);
+        queueMicrotask(() => instance.fail(new Error('child transport failed')));
+    });
+
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, { forkImpl: () => child }), error => {
+        Assert.equal(error.code, 'WORKER_ERROR');
+        Assert.match(error.message, /stderr: uncaught TypeError/u);
+        return true;
+    });
+    const status = IsolatedScanDaemon.getRuntimeStatus();
+    Assert.equal(status.lastCode, 'WORKER_ERROR');
+    Assert.equal(status.lastStage, 'reading_history');
+    Assert.match(status.lastMessage, /stderr: uncaught TypeError/u);
+    Assert.equal(status.lastMessage.includes(privateValue), false);
+});
+
+Test('isolated worker reports a failed final IPC delivery without exposing stderr details', async t => {
+    const value = harness(t);
+    const privateValue = 'private-plan-and-player-value';
+    const child = new FakeScanChild((message, instance) => {
+        if (message.type !== 'run') return;
+        instance.emit('message', { v: 1, type: 'progress', stage: 'sending_result',
+            rssMiB: 200, heapUsedMiB: 100 });
+        instance.stderr.write(`${privateValue}\n${PlayerScanIpc.FINAL_SEND_FAILURE_MARKER}\n`);
+        queueMicrotask(() => instance.crash(PlayerScanIpc.FINAL_SEND_FAILURE_EXIT_CODE));
+    });
+
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, { forkImpl: () => child }), error => {
+        Assert.equal(error.code, 'WORKER_EXITED');
+        Assert.match(error.message, /stderr: final IPC result delivery failed/u);
+        Assert.equal(error.message.includes(privateValue), false);
+        return true;
+    });
+    const status = IsolatedScanDaemon.getRuntimeStatus();
+    Assert.equal(status.lastStage, 'sending_result');
+    Assert.match(status.lastMessage, /stderr: final IPC result delivery failed/u);
+    Assert.equal(status.lastMessage.includes(privateValue), false);
 });
 
 Test('the isolated payload bounds BattleMetrics tables while projecting them', async t => {
@@ -1576,6 +2243,9 @@ Test('a manual rescan bypasses the completed-sweep delay and enforces a cooldown
     Assert.deepEqual(ScanDaemon.getRuntimeCacheStatus(value.dependencies.now().getTime()), {
         manualTriggers: 1,
         manualTriggerLimit: 256,
+        automaticBackoffs: 0,
+        automaticBackoffLimit: 256,
+        automaticBackoffSkips: 0,
         warnings: 0,
         warningLimit: 256
     });
@@ -1587,6 +2257,76 @@ Test('a manual rescan bypasses the completed-sweep delay and enforces a cooldown
         { accepted: true, state: 'started', retryAfterSeconds: 0 });
     await ScanDaemon.waitForIdle(value.directory);
     Assert.equal(calls, 3);
+});
+
+Test('automatic scan failures back off per directory while manual scans bypass and success resets it', async t => {
+    ScanDaemon.resetRuntimeCachesForTests();
+    t.after(() => ScanDaemon.resetRuntimeCachesForTests());
+    const value = harness(t);
+    const other = harness(t);
+    let calls = 0;
+    let shouldFail = true;
+    const isolatedScanRunner = async () => {
+        calls += 1;
+        if (!shouldFail) return { skipped: false };
+        const error = new Error(`isolated worker failure while processing item ${calls}`);
+        error.code = 'WORKER_EXITED';
+        throw error;
+    };
+    const options = {
+        ...value,
+        isolateProcess: true,
+        dependencies: { ...value.dependencies, isolatedScanRunner }
+    };
+
+    Assert.equal(ScanDaemon.schedule(options), true);
+    await ScanDaemon.waitForIdle(value.directory);
+    Assert.equal(calls, 1);
+    Assert.deepEqual(ScanDaemon.getRuntimeCacheStatus(value.dependencies.now().getTime()), {
+        manualTriggers: 0,
+        manualTriggerLimit: 256,
+        automaticBackoffs: 1,
+        automaticBackoffLimit: 256,
+        automaticBackoffSkips: 0,
+        warnings: 1,
+        warningLimit: 256
+    });
+
+    value.setNow('2026-10-03T12:04:59.000Z');
+    Assert.equal(ScanDaemon.schedule(options), false);
+    Assert.equal(calls, 1);
+
+    // A different directory remains independent from this server's failure state.
+    const otherOptions = {
+        ...other,
+        isolateProcess: true,
+        dependencies: { ...other.dependencies, isolatedScanRunner: async () => ({ skipped: false }) }
+    };
+    Assert.equal(ScanDaemon.schedule(otherOptions), true);
+    await ScanDaemon.waitForIdle(other.directory);
+
+    value.setNow('2026-10-03T12:05:00.000Z');
+    Assert.equal(ScanDaemon.schedule(options), true);
+    await ScanDaemon.waitForIdle(value.directory);
+    Assert.equal(calls, 2);
+
+    // The stable failure code doubles the delay even when per-item/provider details change in its message.
+    value.setNow('2026-10-03T12:10:00.000Z');
+    Assert.equal(ScanDaemon.schedule(options), false);
+    Assert.equal(calls, 2);
+    Assert.equal(ScanDaemon.getRuntimeCacheStatus(value.dependencies.now().getTime()).automaticBackoffSkips, 2);
+
+    shouldFail = false;
+    Assert.deepEqual(ScanDaemon.requestRescan(options),
+        { accepted: true, state: 'started', retryAfterSeconds: 0 });
+    await ScanDaemon.waitForIdle(value.directory);
+    Assert.equal(calls, 3);
+    Assert.equal(ScanDaemon.getRuntimeCacheStatus(value.dependencies.now().getTime()).automaticBackoffs, 0);
+
+    // The successful forced run reset the failure state, so an automatic cycle can start immediately.
+    Assert.equal(ScanDaemon.schedule(options), true);
+    await ScanDaemon.waitForIdle(value.directory);
+    Assert.equal(calls, 4);
 });
 
 Test('a manual rescan queues one forced cycle behind an active cycle', async t => {
@@ -1718,6 +2458,141 @@ Test('failed isolated admission does not consume the manual rescan cooldown', as
     await ScanDaemon.waitForIdle(value.directory);
     Assert.equal(calls, 1);
     Assert.equal(ScanDaemon.requestRescan(value).state, 'cooldown');
+});
+
+Test('isolated admission rejects an oversized stable candidate array before spawning', t => {
+    const value = harness(t);
+    let forks = 0;
+    const candidates = new Array(IsolatedScanDaemon.MAX_STABLE_IDENTITY_CANDIDATES + 1);
+
+    Assert.throws(() => IsolatedScanDaemon.runCycle({ ...value, stableIdentityCandidates: candidates }, {
+        forkImpl: () => { forks += 1; return new FakeScanChild(); }
+    }), error => error.code === 'STABLE_IDENTITY_CANDIDATES_TOO_LARGE');
+    Assert.equal(forks, 0);
+});
+
+Test('isolated admission bounds aggregate stable candidate bytes before spawning', t => {
+    const value = harness(t);
+    let forks = 0;
+    const largeCandidate = Object.freeze({
+        steamId: STEAM_A,
+        battlemetricsPlayerId: '12345678901234567890123456789012',
+        name: '😀'.repeat(128),
+        observedAt: '2026-10-03T12:00:00.000Z',
+        source: 'teammate-language-database',
+        sourceEventId: '€'.repeat(256)
+    });
+    const candidates = new Array(IsolatedScanDaemon.MAX_STABLE_IDENTITY_CANDIDATES).fill(largeCandidate);
+
+    Assert.throws(() => IsolatedScanDaemon.runCycle({ ...value, stableIdentityCandidates: candidates }, {
+        forkImpl: () => { forks += 1; return new FakeScanChild(); }
+    }), error => error.code === 'STABLE_IDENTITY_CANDIDATES_TOO_LARGE');
+    Assert.equal(forks, 0);
+    Assert.equal(IsolatedScanDaemon.MAX_STABLE_IDENTITY_CANDIDATE_BYTES, 12 * 1024 * 1024);
+});
+
+Test('parent IPC run callback failures reject immediately without leaking callback details', async t => {
+    const value = harness(t);
+    const privateError = 'private-run-ipc-callback-value';
+    const child = new FakeScanChild();
+    child.send = (_message, callback) => {
+        queueMicrotask(() => callback(new Error(privateError)));
+        return true;
+    };
+
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, { forkImpl: () => child, timeoutMs: 5000 }),
+        error => {
+            Assert.equal(error.code, 'WORKER_IPC_SEND_FAILED');
+            Assert.equal(error.message.includes(privateError), false);
+            return true;
+        });
+});
+
+Test('parent IPC provider-response callback failures terminate the cycle safely', async t => {
+    const value = harness(t);
+    const privateError = 'private-provider-response-callback-value';
+    const child = new FakeScanChild((message, instance) => {
+        if (message.type === 'run') queueMicrotask(() => instance.emit('message', {
+            v: 1, type: 'provider_request', callId: 1, provider: 'steam',
+            method: 'profileIdentity', args: [STEAM_A]
+        }));
+    });
+    const originalSend = child.send.bind(child);
+    child.send = (message, callback) => {
+        if (message.type !== 'provider_response') return originalSend(message, callback);
+        queueMicrotask(() => callback(new Error(privateError)));
+        return true;
+    };
+
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, { forkImpl: () => child, timeoutMs: 5000 }),
+        error => {
+            Assert.equal(error.code, 'WORKER_IPC_SEND_FAILED');
+            Assert.equal(error.message.includes(privateError), false);
+            return true;
+        });
+});
+
+Test('worker warnings are deduplicated across one-shot children and stderr errors stay guarded', async t => {
+    const value = harness(t);
+    const logs = [];
+    value.context.rustplus.log = (...args) => logs.push(args);
+    const warning = 'same-parent-warning-dedup-test';
+    const childForCycle = () => new FakeScanChild((message, instance) => {
+        if (message.type !== 'run') return;
+        queueMicrotask(() => {
+            instance.stderr.emit('error', new Error('guarded stderr test error'));
+            instance.emit('message', { v: 1, type: 'warning', message: warning });
+            instance.emit('message', { v: 1, type: 'failure', code: 'EXPECTED_TEST_FAILURE',
+                message: 'expected test failure' });
+        });
+    });
+
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, { forkImpl: childForCycle }));
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, { forkImpl: childForCycle }));
+    Assert.equal(logs.filter(entry => entry[1] === warning).length, 1);
+
+    value.context.rustplus.log = () => { throw new Error('optional logger failure'); };
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, { forkImpl: () =>
+        new FakeScanChild((message, instance) => {
+            if (message.type !== 'run') return;
+            queueMicrotask(() => {
+                instance.emit('message', { v: 1, type: 'warning', message: 'throwing-logger-warning' });
+                instance.emit('message', { v: 1, type: 'failure', code: 'EXPECTED_WORKER_FAILURE',
+                    message: 'expected worker failure' });
+            });
+        })
+    }), error => error.code === 'EXPECTED_WORKER_FAILURE');
+});
+
+Test('oversized provider aliases are an unavailable response instead of a false no-match', async t => {
+    const value = harness(t);
+    value.dependencies.steamProfileIdentity = async () => ({
+        steamId: STEAM_A,
+        currentName: 'Alice',
+        pastAliases: Array.from({ length: 257 }, (_unused, index) => ({
+            name: `Alias ${index}`, timeChanged: null
+        })),
+        aliasesComplete: true
+    });
+    let response = null;
+    const child = new FakeScanChild((message, instance) => {
+        if (message.type === 'run') {
+            queueMicrotask(() => instance.emit('message', {
+                v: 1, type: 'provider_request', callId: 1, provider: 'steam',
+                method: 'profileIdentity', args: [STEAM_A]
+            }));
+        }
+        else if (message.type === 'provider_response') {
+            response = message;
+            queueMicrotask(() => instance.emit('message', { v: 1, type: 'failure',
+                code: 'EXPECTED_TEST_FAILURE', message: 'expected test failure' }));
+        }
+    });
+
+    await Assert.rejects(() => IsolatedScanDaemon.runCycle(value, { forkImpl: () => child }),
+        error => error.code === 'EXPECTED_TEST_FAILURE');
+    Assert.equal(response.ok, false);
+    Assert.equal(response.error, 'Player scan provider response exceeded its limit.');
 });
 
 Test('scan daemon shutdown waits for an active parent commit and remains idempotent', async t => {

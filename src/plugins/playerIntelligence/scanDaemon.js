@@ -18,6 +18,10 @@ const MAX_LOCAL_REFRESHES_PER_CYCLE = 100;
 const RESCAN_DELAY_MS = 12 * 60 * 60 * 1000;
 const MANUAL_RESCAN_COOLDOWN_MS = 5 * 60 * 1000;
 const MANUAL_TRIGGER_MAX_ENTRIES = 256;
+const AUTOMATIC_FAILURE_BACKOFF_BASE_MS = 5 * 60 * 1000;
+const AUTOMATIC_FAILURE_BACKOFF_MAX_MS = 60 * 60 * 1000;
+const AUTOMATIC_FAILURE_BACKOFF_TTL_MS = 24 * 60 * 60 * 1000;
+const AUTOMATIC_FAILURE_BACKOFF_MAX_ENTRIES = 256;
 const WARNING_TTL_MS = 60 * 60 * 1000;
 const WARNING_MAX_ENTRIES = 256;
 const RETRY_BASE_MS = 60 * 1000;
@@ -35,9 +39,13 @@ const WARBANDITS_PENDING_SOURCE = 'warbandits-pending-reconciliation-daemon';
 const BATTLEMETRICS_IDENTIFIER_SOURCE = 'battlemetrics-identifier-daemon';
 const STEAM_CURRENT_SOURCE = 'steam-profile-current';
 const STEAM_ALIAS_SOURCE = 'steam-profile-alias-history';
+const LOCAL_STABLE_IDENTITY_SOURCES = new Set(['player-tracker', 'teammate-language-database']);
+const MAX_LOCAL_STABLE_IDENTITIES_PER_CYCLE = 100;
+const MAX_PROVIDER_ALIASES_PER_IDENTITY = 256;
 const PLAN_IDENTITY_SOURCES = new Set([
     ONLINE_SOURCE, WARBANDITS_SOURCE, WARBANDITS_LOOKUP_SOURCE, WARBANDITS_PENDING_SOURCE,
-    BATTLEMETRICS_IDENTIFIER_SOURCE, STEAM_CURRENT_SOURCE, STEAM_ALIAS_SOURCE
+    BATTLEMETRICS_IDENTIFIER_SOURCE, STEAM_CURRENT_SOURCE, STEAM_ALIAS_SOURCE,
+    ...LOCAL_STABLE_IDENTITY_SOURCES
 ]);
 const PLAN_METRIC_SOURCES = new Set([
     WARBANDITS_SOURCE, WARBANDITS_LOOKUP_SOURCE, WARBANDITS_PENDING_SOURCE
@@ -64,10 +72,15 @@ const MAX_IMMEDIATE_STALE_RETRIES = 1;
 const manualTriggerTimes = BoundedTtlCache.createBoundedTtlCache({
     maxEntries: MANUAL_TRIGGER_MAX_ENTRIES, defaultTtlMs: MANUAL_RESCAN_COOLDOWN_MS
 });
+const automaticFailureBackoffs = BoundedTtlCache.createBoundedTtlCache({
+    maxEntries: AUTOMATIC_FAILURE_BACKOFF_MAX_ENTRIES,
+    defaultTtlMs: AUTOMATIC_FAILURE_BACKOFF_TTL_MS
+});
 const warningTimes = BoundedTtlCache.createBoundedTtlCache({
     maxEntries: WARNING_MAX_ENTRIES, defaultTtlMs: WARNING_TTL_MS
 });
 let temporaryCounter = 0;
+let automaticBackoffSkips = 0;
 
 class ScanDaemonStateError extends Error {
     /** @param {string} file @param {unknown} cause */
@@ -244,19 +257,27 @@ function identityGuardRevisions(events, descriptors) {
     });
     for (const event of events) {
         if (event.kind !== 'identity_observed') continue;
-        const positions = new Set();
+        /** @type {Set<number>|null} */
+        let positions = null;
         if (event.subject.steamId) {
-            for (const position of steamIndexes.get(event.subject.steamId) || []) positions.add(position);
+            const matches = steamIndexes.get(event.subject.steamId);
+            if (matches && matches.size > 0) positions = new Set(matches);
         }
         if (event.subject.battlemetricsPlayerId) {
-            for (const position of battlemetricsIndexes.get(event.subject.battlemetricsPlayerId) || []) {
-                positions.add(position);
+            const matches = battlemetricsIndexes.get(event.subject.battlemetricsPlayerId);
+            if (matches && matches.size > 0) {
+                if (positions === null) positions = new Set(matches);
+                else for (const position of matches) positions.add(position);
             }
         }
         if (event.subject.exactName) {
-            for (const position of nameIndexes.get(normalize(event.subject.exactName)) || []) positions.add(position);
+            const matches = nameIndexes.get(normalize(event.subject.exactName));
+            if (matches && matches.size > 0) {
+                if (positions === null) positions = new Set(matches);
+                else for (const position of matches) positions.add(position);
+            }
         }
-        if (positions.size === 0) continue;
+        if (positions === null) continue;
         const encoded = JSON.stringify(event);
         const prefix = `${Buffer.byteLength(encoded)}:`;
         for (const position of positions) {
@@ -510,12 +531,15 @@ async function writeStateAtomic(file, state) {
 
 /** @param {any} context @param {string} message */
 function logWarning(context, message) {
-    if (context.rustplus && typeof context.rustplus.log === 'function') {
-        context.rustplus.log('PLAYER_INTELLIGENCE', message, 'warn');
+    try {
+        if (context && context.rustplus && typeof context.rustplus.log === 'function') {
+            context.rustplus.log('PLAYER_INTELLIGENCE', message, 'warn');
+        }
+        else if (context && context.client && typeof context.client.log === 'function') {
+            context.client.log('PLAYER_INTELLIGENCE', message, 'warn');
+        }
     }
-    else if (context.client && typeof context.client.log === 'function') {
-        context.client.log('PLAYER_INTELLIGENCE', message, 'warn');
-    }
+    catch (_error) { /* Diagnostics must never change scan scheduling or reject an async boundary. */ }
 }
 
 /** @param {any} context @param {string} key @param {string} message */
@@ -524,6 +548,62 @@ function logWarningOnce(context, key, message) {
     if (warningTimes.get(key, current)) return;
     warningTimes.set(key, true, WARNING_TTL_MS, current);
     logWarning(context, message);
+}
+
+/** @param {string} directoryKey @param {unknown} error */
+function scanWarningKey(directoryKey, error) {
+    const rawCode = error && typeof /** @type {any} */ (error).code === 'string' ?
+        /** @type {any} */ (error).code : 'SCAN_FAILURE';
+    const code = /^[A-Z0-9_]{1,64}$/u.test(rawCode) ? rawCode : 'SCAN_FAILURE';
+    const message = error instanceof Error ? error.message : `${error || 'unknown error'}`;
+    const fingerprint = Crypto.createHash('sha256').update(`${code}\u0000${message}`).digest('hex').slice(0, 16);
+    return `${directoryKey}:scan:${code}:${fingerprint}`;
+}
+
+/** @param {unknown} error */
+function scanFailureFingerprint(error) {
+    const rawCode = error && typeof /** @type {any} */ (error).code === 'string' ?
+        /** @type {any} */ (error).code : 'SCAN_FAILURE';
+    const code = /^[A-Z0-9_]{1,64}$/u.test(rawCode) ? rawCode : 'SCAN_FAILURE';
+    // Provider messages may contain the current player/page and therefore vary on every attempt. Backoff must
+    // follow the stable failure class or a failing provider can accidentally reset itself to the shortest delay.
+    return code;
+}
+
+/** @param {string} directoryKey @param {unknown} error @param {number} current */
+function recordAutomaticFailure(directoryKey, error, current) {
+    if (error && /** @type {any} */ (error).code === 'STALE_SCAN_PLAN') return;
+    const fingerprint = scanFailureFingerprint(error);
+    const previous = automaticFailureBackoffs.get(directoryKey, current);
+    const failures = previous && previous.fingerprint === fingerprint ?
+        Math.min(Number.MAX_SAFE_INTEGER, previous.failures + 1) : 1;
+    const exponent = Math.min(20, failures - 1);
+    const delayMs = Math.min(AUTOMATIC_FAILURE_BACKOFF_MAX_MS,
+        AUTOMATIC_FAILURE_BACKOFF_BASE_MS * (2 ** exponent));
+    automaticFailureBackoffs.set(directoryKey, Object.freeze({
+        fingerprint,
+        failures,
+        nextAttemptAt: Math.min(Number.MAX_SAFE_INTEGER, current + delayMs)
+    }), AUTOMATIC_FAILURE_BACKOFF_TTL_MS, current);
+}
+
+/** @param {string} directoryKey @param {number} current */
+function automaticBackoffActive(directoryKey, current) {
+    const backoff = automaticFailureBackoffs.get(directoryKey, current);
+    return Boolean(backoff && backoff.nextAttemptAt > current);
+}
+
+/** @param {any} options @param {number} fallback */
+function scheduleTime(options, fallback) {
+    try { return nowDate(options.dependencies || {}).getTime(); }
+    catch (_error) { return fallback; }
+}
+
+/** @param {any} dependencies @param {string} stage */
+function reportProgress(dependencies, stage) {
+    if (!dependencies || typeof dependencies.scanProgress !== 'function') return;
+    try { dependencies.scanProgress(stage); }
+    catch (_error) { /* Worker observability must never affect scan behavior. */ }
 }
 
 /** @param {any} scope @param {any} identity @param {any} details */
@@ -630,6 +710,35 @@ function onlineSteamMatches(projection, online) {
     }).filter(Boolean);
 }
 
+/** @param {any} options */
+function localStableIdentityCandidates(options) {
+    if (!Array.isArray(options.stableIdentityCandidates)) return [];
+    return options.stableIdentityCandidates.flatMap((/** @type {any} */ candidate) => {
+        if (!candidate || typeof candidate !== 'object' ||
+            !LOCAL_STABLE_IDENTITY_SOURCES.has(candidate.source)) return [];
+        const steamId = /^7656119\d{10}$/u.test(`${candidate.steamId || ''}`) ? `${candidate.steamId}` : null;
+        const battlemetricsPlayerId = /^\d{1,32}$/u.test(`${candidate.battlemetricsPlayerId || ''}`) ?
+            `${candidate.battlemetricsPlayerId}` : null;
+        const name = sanitize(candidate.name);
+        const observedAt = canonicalIso(candidate.observedAt);
+        const sourceEventId = typeof candidate.sourceEventId === 'string' &&
+            candidate.sourceEventId.length > 0 && candidate.sourceEventId.length <= 240 ?
+            candidate.sourceEventId : null;
+        if (!steamId || !battlemetricsPlayerId || !name || Array.from(name).length > 128 ||
+            !observedAt || !sourceEventId) return [];
+        return [Object.freeze({ steamId, battlemetricsPlayerId, name, observedAt,
+            source: candidate.source, sourceEventId })];
+    });
+}
+
+/** @param {any} projection @param {any} identity */
+function projectionHasVerifiedIdentity(projection, identity) {
+    return projection.identities.findByIdentifier(identity.steamId).some((/** @type {any} */ person) =>
+        person.steamId === identity.steamId &&
+        person.battlemetricsPlayerIds.includes(identity.battlemetricsPlayerId) &&
+        person.names.some((/** @type {any} */ alias) => alias.name === identity.name && alias.verified));
+}
+
 /** @param {any[]} online */
 function uniqueOnlineNames(online) {
     const values = new Map();
@@ -668,6 +777,7 @@ async function runCycle(options) {
     const dependencies = options.dependencies || {};
     const current = nowDate(dependencies);
     const recordedAt = current.toISOString();
+    reportProgress(dependencies, 'reading_state');
     const state = await readState(options, current);
     const forcedRescan = options.forceWarBanditsRescan === true;
     if (forcedRescan) {
@@ -693,6 +803,7 @@ async function runCycle(options) {
     let baseRevision = null;
     let baseControlRevision = null;
     let existing;
+    reportProgress(dependencies, 'reading_history');
     if (options.planOnly === true) {
         if (typeof options.store.readSnapshot !== 'function') {
             throw new TypeError('Read-only player scan planning requires a revisioned journal snapshot.');
@@ -704,7 +815,8 @@ async function runCycle(options) {
     }
     else existing = await options.store.readAll();
     recoverSetsFromJournal(existing, options.scope, seen, refreshed);
-    const projection = Core.rebuild(existing);
+    reportProgress(dependencies, 'rebuilding');
+    const projection = options.planOnly === true ? Core.rebuildForScan(existing) : Core.rebuild(existing);
     const provider = options.warBanditsProvider;
     const battlemetricsProvider = dependencies.battlemetricsProvider;
     const reliable = options.scope.battlemetrics &&
@@ -747,6 +859,45 @@ async function runCycle(options) {
         cycleBattlemetricsBySteamId.set(steamId, battlemetricsPlayerId);
         cycleSteamByBattlemetricsId.set(battlemetricsPlayerId, steamId);
     }
+
+    // Stable pairs sourced from the local tracker/legacy CSV are intentionally validated in the disposable planner,
+    // never in the latency-sensitive BattleMetrics hook. Conflicting candidates all fail closed; no first-wins link
+    // can make an existing BattleMetrics identity ambiguous.
+    const localCandidates = localStableIdentityCandidates(options);
+    const candidateBattlemetricsBySteam = new Map();
+    const candidateSteamByBattlemetrics = new Map();
+    for (const candidate of localCandidates) {
+        const battlemetricsIds = candidateBattlemetricsBySteam.get(candidate.steamId) || new Set();
+        battlemetricsIds.add(candidate.battlemetricsPlayerId);
+        candidateBattlemetricsBySteam.set(candidate.steamId, battlemetricsIds);
+        const steamIds = candidateSteamByBattlemetrics.get(candidate.battlemetricsPlayerId) || new Set();
+        steamIds.add(candidate.steamId);
+        candidateSteamByBattlemetrics.set(candidate.battlemetricsPlayerId, steamIds);
+    }
+    let localStableIdentitiesAdded = 0;
+    for (const candidate of localCandidates) {
+        if (candidateBattlemetricsBySteam.get(candidate.steamId).size !== 1 ||
+            candidateSteamByBattlemetrics.get(candidate.battlemetricsPlayerId).size !== 1) continue;
+        const consolidated = Core.consolidateProjection(projection, {
+            ...candidate, caseFidelity: true, allowExactName: false
+        });
+        if (consolidated.status === 'conflict' ||
+            consolidated.identity.steamId !== candidate.steamId ||
+            consolidated.identity.battlemetricsPlayerId !== candidate.battlemetricsPlayerId ||
+            cyclePairConflicts(candidate.steamId, candidate.battlemetricsPlayerId)) continue;
+        rememberCyclePair(candidate.steamId, candidate.battlemetricsPlayerId);
+        if (projectionHasVerifiedIdentity(projection, candidate) ||
+            localStableIdentitiesAdded >= MAX_LOCAL_STABLE_IDENTITIES_PER_CYCLE) continue;
+        events.push(identityEvent(options.scope, candidate, {
+            guildId: options.context.guildId,
+            observedAt: candidate.observedAt,
+            recordedAt,
+            source: candidate.source,
+            sourceEventId: `${candidate.sourceEventId}:pair`,
+            confidence: 'verified'
+        }));
+        localStableIdentitiesAdded += 1;
+    }
     for (const steamId of targeted) {
         if (targetedRetries.delete(steamId)) retryChanged = true;
     }
@@ -754,9 +905,10 @@ async function runCycle(options) {
         if (steamProfileRetries.delete(steamId)) retryChanged = true;
     }
     const latestPlaytimes = new Map(projection.metrics.observations
-        .filter(value => value.serverKey === options.scope.serverKey && value.provider === 'warbandits' &&
+        .filter((/** @type {any} */ value) => value.serverKey === options.scope.serverKey &&
+            value.provider === 'warbandits' &&
             value.metric === 'playtime' && value.personId.startsWith('steam:'))
-        .map(value => [value.personId.slice(6), value.value]));
+        .map((/** @type {any} */ value) => [value.personId.slice(6), value.value]));
 
     /** @param {any} row @param {string} source @param {string} observedAt */
     function observePlaytime(row, source, observedAt) {
@@ -810,6 +962,7 @@ async function runCycle(options) {
         return Number.isFinite(elapsed) && elapsed >= 0 && elapsed < PENDING_RECONCILIATION_BUDGET_MS;
     };
 
+    reportProgress(dependencies, 'reconciling');
     if (reconciliation.active && battlemetricsEnabled && pendingBattlemetricsReady) {
         for (let attempt = 0; attempt < PENDING_BATTLEMETRICS_BATCH_SIZE && pendingBudgetAvailable(); attempt += 1) {
             const selection = PendingReconciler.selectWork(
@@ -908,7 +1061,11 @@ async function runCycle(options) {
                     `WarBandits pending reconciliation paused safely: ${error instanceof Error ?
                         error.message : error}.`);
             }
-            const player = result && result.available === true && result.ambiguous !== true ? result.player : null;
+            const rawPlayer = result && result.available === true && result.ambiguous !== true ?
+                result.player : null;
+            const playerAliasesComplete = !rawPlayer || !Array.isArray(rawPlayer.aliases) ||
+                rawPlayer.aliases.length <= MAX_PROVIDER_ALIASES_PER_IDENTITY;
+            const player = playerAliasesComplete ? rawPlayer : null;
             if (PendingReconciler.exactWarBanditsMatch(player, candidate.query)) {
                 reconciliation.warBanditsFailures = 0;
                 reconciliation.warBanditsRetryAt = null;
@@ -945,7 +1102,8 @@ async function runCycle(options) {
                         }));
                     }
                     const names = new Set([candidate.query, player.name,
-                        ...(Array.isArray(player.aliases) ? player.aliases : [])]
+                        ...(Array.isArray(player.aliases) ?
+                            player.aliases.slice(0, MAX_PROVIDER_ALIASES_PER_IDENTITY) : [])]
                         .map(sanitize).filter(name => name && Array.from(name).length <= 128));
                     for (const name of names) {
                         events.push(identityEvent(options.scope, {
@@ -968,7 +1126,7 @@ async function runCycle(options) {
                         canonicalIso(result.observedAt) || recordedAt);
                 }
             }
-            else if (result && result.available === true) {
+            else if (result && result.available === true && playerAliasesComplete) {
                 reconciliation.warBanditsFailures = 0;
                 reconciliation.warBanditsRetryAt = null;
                 checkedWarBanditsKeys.add(candidate.key);
@@ -986,6 +1144,7 @@ async function runCycle(options) {
         }
     }
 
+    reportProgress(dependencies, 'steam_profiles');
     const steamProfileIdentity = dependencies.steamProfileIdentity;
     if (typeof steamProfileIdentity === 'function') {
         const profileSteamIds = projection.identities.persons
@@ -996,7 +1155,7 @@ async function runCycle(options) {
         const dueSteamIds = profileSteamIds.filter((/** @type {string} */ steamId) => {
             const retry = steamProfileRetries.get(steamId);
             return retry && Date.parse(retry.nextAttemptAt) <= current.getTime();
-        }).sort((left, right) => {
+        }).sort((/** @type {string} */ left, /** @type {string} */ right) => {
             const leftRetry = /** @type {any} */ (steamProfileRetries.get(left));
             const rightRetry = /** @type {any} */ (steamProfileRetries.get(right));
             return leftRetry.nextAttemptAt.localeCompare(rightRetry.nextAttemptAt) || left.localeCompare(right);
@@ -1044,7 +1203,10 @@ async function runCycle(options) {
                         confidence: 'verified'
                     }));
                 }
-                const pastNames = new Set((Array.isArray(profile.pastAliases) ? profile.pastAliases : [])
+                const rawPastAliases = Array.isArray(profile.pastAliases) ? profile.pastAliases : [];
+                const aliasesComplete = rawPastAliases.length <= MAX_PROVIDER_ALIASES_PER_IDENTITY &&
+                    profile.aliasesComplete !== false;
+                const pastNames = new Set(rawPastAliases.slice(0, MAX_PROVIDER_ALIASES_PER_IDENTITY)
                     .map((/** @type {any} */ alias) => sanitize(alias && alias.name || alias))
                     .filter((/** @type {string} */ name) => name && name !== currentName));
                 for (const name of pastNames) {
@@ -1064,7 +1226,7 @@ async function runCycle(options) {
                         confidence: 'verified'
                     }));
                 }
-                if (profile.aliasesComplete !== false) {
+                if (aliasesComplete) {
                     profiled.add(profileSteamId);
                     steamProfilesRefreshed = 1;
                     profileComplete = true;
@@ -1081,6 +1243,7 @@ async function runCycle(options) {
         }
     }
 
+    reportProgress(dependencies, 'online_players');
     for (const match of onlineSteamMatches(projection, online)) {
         if (events.length >= MAX_LOCAL_REFRESHES_PER_CYCLE || refreshed.has(match.steamId)) continue;
         if (cyclePairConflicts(match.steamId, match.battlemetricsPlayerId)) continue;
@@ -1096,6 +1259,7 @@ async function runCycle(options) {
         newlyRefreshed.add(match.steamId);
     }
 
+    reportProgress(dependencies, 'warbandits');
     if (provider && (typeof provider.resolvePlayerRecent === 'function' ||
         typeof provider.resolvePlayer === 'function')) {
         const candidates = targetedLookupCandidates(existing, projection, options.scope, targeted);
@@ -1294,6 +1458,7 @@ async function runCycle(options) {
         }
     }
 
+    reportProgress(dependencies, 'finalizing');
     newlySeen.forEach(value => seen.add(value));
     newlyRefreshed.forEach(value => refreshed.add(value));
     let changed = forcedRescan || state.needsMigrationWrite === true || retryChanged || reconciliationChanged ||
@@ -1532,45 +1697,16 @@ async function commitPlan(options, input) {
                 // cursor and remains exact-CAS protected above. If the old projection thought a manual
                 // reconciliation was complete, keep it active so aliases appended during the RPC are not
                 // missed by that campaign.
-                const plannedPairs = events.filter((/** @type {Readonly<Record<string, any>>} */ event) =>
-                    event.kind === 'identity_observed' &&
-                    event.subject.steamId && event.subject.battlemetricsPlayerId);
-                let currentProjection = null;
-                if (plannedPairs.length > 0 || (state && result.pendingReconciliationCompleted === true)) {
-                    currentProjection = Core.rebuild(currentEvents);
-                }
-                for (const event of plannedPairs) {
-                    const consolidation = Core.consolidateProjection(currentProjection, {
-                        steamId: event.subject.steamId,
-                        battlemetricsPlayerId: event.subject.battlemetricsPlayerId,
-                        name: event.subject.exactName,
-                        caseFidelity: event.payload.caseFidelity,
-                        allowExactName: false
-                    });
-                    if (consolidation.status === 'conflict') throw new StaleScanPlanError('journal');
-                }
+                // Every planned stable pair carries a digest of all observations sharing its SteamID,
+                // BattleMetrics ID or decision names. The equality check above therefore proves that the
+                // worker's accepted identity decision is still valid without rebuilding the multi-million-item
+                // read model in the latency-sensitive parent process. Control events are guarded separately.
                 if (state && result.pendingReconciliationCompleted === true) {
-                    const checkpoint = state.pendingReconciliation;
-                    const dependencies = options.dependencies || {};
-                    const battlemetricsEnabled = Boolean(dependencies.battlemetricsProvider &&
-                        typeof dependencies.battlemetricsProvider.resolveSteamId === 'function');
-                    const provider = options.warBanditsProvider;
-                    const warBanditsEnabled = Boolean(provider &&
-                        (typeof provider.resolvePlayerRecent === 'function' ||
-                            typeof provider.resolvePlayer === 'function'));
-                    const rows = PendingReconciler.pendingRows(currentProjection);
-                    const checkedBattlemetricsIds = new Set(checkpoint.checkedBattlemetricsIds);
-                    const hasBattlemetricsWork = battlemetricsEnabled &&
-                        PendingReconciler.battlemetricsCandidates(currentProjection, rows)
-                            .some(candidate => !checkedBattlemetricsIds.has(candidate.battlemetricsPlayerId));
-                    const checkedWarBanditsKeys = new Set(checkpoint.checkedWarBanditsKeys);
-                    const hasWarBanditsWork = warBanditsEnabled && PendingReconciler.warBanditsCandidates(
-                        currentProjection, checkedBattlemetricsIds, battlemetricsEnabled, rows)
-                        .some(candidate => !checkedWarBanditsKeys.has(candidate.key));
-                    if (hasBattlemetricsWork || hasWarBanditsWork) {
-                        checkpoint.active = true;
-                        checkpoint.completedAt = null;
-                    }
+                    // Any concurrent append may introduce a pending alias. Re-open the bounded campaign and let
+                    // the next isolated plan prove completion from a stable snapshot; this is conservative and
+                    // avoids a full parent-side projection merely to distinguish relevant from unrelated appends.
+                    state.pendingReconciliation.active = true;
+                    state.pendingReconciliation.completedAt = null;
                 }
             }
         },
@@ -1594,29 +1730,45 @@ function schedule(options) {
     // the next scheduler tick start that exact request before ordinary background work.
     const queuedRerun = forcedReruns.get(key);
     const runOptions = queuedRerun || options;
-    const span = RuntimeTelemetry.startSpan('scan_cycle');
-    const runner = runOptions.isolateProcess === true ?
-        ((runOptions.dependencies && runOptions.dependencies.isolatedScanRunner) ||
-            // Lazy loading avoids a scan-daemon/worker-supervisor module cycle.
-            require('./isolatedScanDaemon.js').runCycle) : runCycle;
+    const forced = runOptions.forceWarBanditsRescan === true;
+    let current = Date.now();
+    /** @type {ReturnType<typeof RuntimeTelemetry.startSpan>|null} */
+    let span = null;
     let execution;
     try {
+        current = nowDate(runOptions.dependencies || {}).getTime();
+        if (!forced && automaticBackoffActive(key, current)) {
+            automaticBackoffSkips = Math.min(Number.MAX_SAFE_INTEGER, automaticBackoffSkips + 1);
+            return false;
+        }
+        span = RuntimeTelemetry.startSpan('scan_cycle');
+        const runner = runOptions.isolateProcess === true ?
+            ((runOptions.dependencies && runOptions.dependencies.isolatedScanRunner) ||
+                // Lazy loading avoids a scan-daemon/worker-supervisor module cycle.
+                require('./isolatedScanDaemon.js').runCycle) : runCycle;
         execution = runner(runOptions);
     }
     catch (error) {
-        span.finish('failure');
-        const reason = error instanceof Error ? error.message : `${error}`;
-        logWarningOnce(runOptions.context, key,
-            `Background player scan paused safely: ${reason}.`);
+        try {
+            if (span) span.finish('failure');
+            if (!forced) recordAutomaticFailure(key, error, scheduleTime(runOptions, current));
+            const reason = error instanceof Error ? error.message : `${error}`;
+            logWarningOnce(runOptions.context, scanWarningKey(key, error),
+                `Background player scan paused safely: ${reason}.`);
+        }
+        catch (_secondaryError) { /* The background admission boundary is deliberately no-throw. */ }
         return false;
     }
+    const activeSpan = span;
+    if (!activeSpan) return false;
     if (forcedReruns.get(key) === runOptions) forcedReruns.delete(key);
     const promise = Promise.resolve(execution).then(result => {
         staleRetryCounts.delete(key);
-        span.finish('success');
+        automaticFailureBackoffs.delete(key);
+        activeSpan.finish('success');
         return result;
     }).catch(error => {
-        span.finish('failure');
+        activeSpan.finish('failure');
         if (error && error.code === 'STALE_SCAN_PLAN') {
             // A manual !scanplayers request can already be queued behind this cycle. Keep its
             // forced flag, current scope and providers, and give that distinct request its own
@@ -1631,8 +1783,11 @@ function schedule(options) {
                 else staleRetryCounts.delete(key);
             }
         }
-        else staleRetryCounts.delete(key);
-        logWarningOnce(runOptions.context, key,
+        else {
+            staleRetryCounts.delete(key);
+            if (!forced) recordAutomaticFailure(key, error, scheduleTime(runOptions, current));
+        }
+        logWarningOnce(runOptions.context, scanWarningKey(key, error),
             `Background player scan paused safely: ${error && error.message ? error.message : error}.`);
         return null;
     }).finally(() => {
@@ -1704,11 +1859,23 @@ function getRuntimeStatus() {
     return Object.freeze({
         active: inFlight.size,
         forcedRerunsQueued: forcedReruns.size,
+        automaticBackoffs: automaticFailureBackoffs.count(),
+        automaticBackoffSkips,
         workerActive: worker.active,
         workerQueued: worker.queued,
         workerCompleted: worker.completed,
         workerFailures: worker.failures,
-        workerStalePlans: worker.stalePlans
+        workerStalePlans: worker.stalePlans,
+        workerConsecutiveFailures: worker.consecutiveFailures,
+        workerStage: worker.stage,
+        workerRssMiB: worker.rssMiB,
+        workerHeapUsedMiB: worker.heapUsedMiB,
+        workerProviderInvocationsOutstanding: worker.providerInvocationsOutstanding,
+        workerProviderCircuitsOpen: worker.providerCircuitsOpen,
+        workerLastCode: worker.lastCode,
+        workerLastMessage: worker.lastMessage,
+        workerLastAt: worker.lastAt,
+        workerLastStage: worker.lastStage
     });
 }
 
@@ -1721,6 +1888,9 @@ function getRuntimeCacheStatus(nowMs = Date.now()) {
     return Object.freeze({
         manualTriggers: manualTriggerTimes.count(nowMs),
         manualTriggerLimit: MANUAL_TRIGGER_MAX_ENTRIES,
+        automaticBackoffs: automaticFailureBackoffs.count(nowMs),
+        automaticBackoffLimit: AUTOMATIC_FAILURE_BACKOFF_MAX_ENTRIES,
+        automaticBackoffSkips,
         warnings: warningTimes.count(nowMs),
         warningLimit: WARNING_MAX_ENTRIES
     });
@@ -1728,10 +1898,14 @@ function getRuntimeCacheStatus(nowMs = Date.now()) {
 
 function resetRuntimeCachesForTests() {
     manualTriggerTimes.clear();
+    automaticFailureBackoffs.clear();
+    automaticBackoffSkips = 0;
     warningTimes.clear();
 }
 
 module.exports = Object.freeze({
+    AUTOMATIC_FAILURE_BACKOFF_BASE_MS,
+    AUTOMATIC_FAILURE_BACKOFF_MAX_MS,
     ONLINE_SOURCE,
     MANUAL_RESCAN_COOLDOWN_MS,
     PENDING_BATTLEMETRICS_BATCH_SIZE,

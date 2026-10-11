@@ -66,7 +66,13 @@ Test('runtime telemetry emits one immutable bounded 60-second aggregate without 
                 message: sentinel }),
             ocr: () => ({ active: 1, queued: 2, queuedBytes: 3 * 1024 * 1024, steamId: sentinel }),
             scans: () => ({ active: 1, forcedRerunsQueued: 1, workerActive: 1, workerQueued: 2,
-                workerCompleted: 12, workerFailures: 3, workerStalePlans: 4, path: sentinel }),
+                automaticBackoffs: 1, automaticBackoffSkips: 5,
+                workerCompleted: 12, workerFailures: 3, workerStalePlans: 4,
+                workerConsecutiveFailures: 2, workerStage: 'rebuilding', workerRssMiB: 701,
+                workerHeapUsedMiB: 512, workerProviderInvocationsOutstanding: 4,
+                workerProviderCircuitsOpen: 1, workerLastCode: 'WORKER_IPC_SEND_FAILED',
+                workerLastMessage: 'Worker IPC delivery failed.',
+                workerLastAt: '2026-10-11T14:15:00.000Z', workerLastStage: 'rebuilding', path: sentinel }),
             translations: () => ({ active: 2, queued: 0, token: sentinel })
         }
     }), true);
@@ -81,6 +87,8 @@ Test('runtime telemetry emits one immutable bounded 60-second aggregate without 
         const fast = value.telemetry.startSpan('ocr_run');
         fast.finish('success');
     }
+    const append = value.telemetry.startSpan('pi_history_append');
+    append.finish('success');
     value.advance(56500);
     value.setCpu({ user: 901000, system: 100500 });
     value.setElu({ active: 510, idle: 590 });
@@ -103,6 +111,7 @@ Test('runtime telemetry emits one immutable bounded 60-second aggregate without 
     Assert.equal(snapshot.operations.translation.slow, 1);
     Assert.equal(snapshot.operations.ocr_run.started, 10000);
     Assert.equal(snapshot.operations.ocr_run.completed, 10000);
+    Assert.equal(snapshot.operations.pi_history_append.success, 1);
     Assert.equal(snapshot.sources.imports.previewsPending, 2);
     Assert.equal(snapshot.collectorFailures, 0);
     Assert.deepEqual(Object.keys(snapshot.sources.imports),
@@ -110,11 +119,23 @@ Test('runtime telemetry emits one immutable bounded 60-second aggregate without 
     Assert.deepEqual(snapshot.sources.scans, {
         active: 1,
         forcedRerunsQueued: 1,
+        automaticBackoffs: 1,
+        automaticBackoffSkips: 5,
         workerActive: 1,
         workerQueued: 2,
         workerCompleted: 12,
         workerFailures: 3,
-        workerStalePlans: 4
+        workerStalePlans: 4,
+        workerConsecutiveFailures: 2,
+        workerRssMiB: 701,
+        workerHeapUsedMiB: 512,
+        workerProviderInvocationsOutstanding: 4,
+        workerProviderCircuitsOpen: 1,
+        workerStage: 'rebuilding',
+        workerLastCode: 'WORKER_IPC_SEND_FAILED',
+        workerLastMessage: 'Worker IPC delivery failed.',
+        workerLastAt: '2026-10-11T14:15:00.000Z',
+        workerLastStage: 'rebuilding'
     });
     Assert.equal(Object.isFrozen(snapshot), true);
     Assert.equal(Object.isFrozen(snapshot.operations.translation), true);
@@ -130,7 +151,11 @@ Test('runtime telemetry emits one immutable bounded 60-second aggregate without 
     Assert.match(value.logs.find(log => log.title === 'RUNTIME_WORK').message,
         /ocr_queue_wait_started=0 .*ocr_queue_wait_maxMs=0/);
     Assert.match(value.logs.find(log => log.title === 'RUNTIME').message,
-        /scanWorkersActive=1 scanWorkersQueued=2 scanWorkersCompleted=12 scanWorkerFailures=3 scanWorkerStalePlans=4/);
+        /scanBackoffs=1 scanBackoffSkips=5 scanWorkersActive=1 scanWorkersQueued=2 .*scanWorkerStalePlans=4/);
+    Assert.match(value.logs.find(log => log.title === 'RUNTIME').message,
+        /scanWorkerConsecutiveFailures=2 scanWorkerStage=rebuilding scanWorkerRssMiB=701 scanWorkerHeapUsedMiB=512/);
+    Assert.match(value.logs.find(log => log.title === 'RUNTIME').message,
+        /scanWorkerProviderOutstanding=4 scanWorkerProviderCircuitsOpen=1/);
 
     value.telemetry.stop();
     Assert.equal(value.cleared(), true);

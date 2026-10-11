@@ -30,20 +30,42 @@ sérialisées.
   leur clé et n'ajoutent pas de racine forte.
 - Les Maps `inFlight`, verrous et revendications de décision retirent leurs entrées en `finally`. Leur admission et
   leur équité relèvent des lots 6, 9 ou 10, pas d'un cache TTL.
+- Les RPC du scan ne sont pas un cache : au plus quatre appels sont en vol dans un worker. Après timeout, les
+  invocations fournisseur réellement encore pendantes restent plafonnées à huit globalement et quatre par provider ;
+  une réponse tardive est jetée et les compteurs/circuits/pending sont visibles dans `/runtime`. Le délai vaut 30 s
+  par défaut et `RPP_PLAYER_SCAN_PROVIDER_TIMEOUT_MS` l'autorise entre 1 et 45 s.
 
-## Petits états dérivés bornés en release 1.22.36
+## Petits états dérivés bornés en release 1.22.36, resserrés en 1.22.45
 
 | Métier | Contenu dérivé | TTL | Plafond | Sémantique conservée |
 | --- | --- | ---: | ---: | --- |
-| Hook player-intelligence | fiabilité, wipe et deux SHA-256 de contenu | 24 h depuis le dernier poll calme | 128 | une expiration force un replay idempotent |
+| Hook player-intelligence | mode de disponibilité, wipe, empreintes et liste online courante | 24 h depuis le dernier poll calme | 32 serveurs × 2 000 online | une expiration force un replay idempotent |
 | Scan daemon | cooldown d'un rescan manuel | 5 min | 256 | même seconde de reprise, expiration à la frontière |
+| Scan daemon | backoff d'échec worker automatique | 24 h de conservation, reprise 5–60 min | 256 | `!scanplayers` contourne la pause ; un succès la retire |
 | Scan daemon | anti-spam d'avertissement | 1 h | 256 | le travail échoue toujours fermé, seul le log est supprimé |
 | Player tracker | choix complets d'un sélecteur | 5 min + 1 ms de frontière | 1 024 | choix valide exactement cinq minutes |
 | Player tracker | avis d'expiration sans candidats | 24 h après l'expiration | 1 024 | conserve `Selection expired` sans retenir le tableau lourd |
 
 Les empreintes de hook ne retiennent plus la concaténation de tous les joueurs : chaque vue triée est réduite à un
-SHA-256 de longueur fixe. Le TTL du hook est renouvelé sur le chemin calme afin de représenter l'inactivité ; le TTL
-interne du cache reste non glissant. Une sélection player-tracker consommée retire à la fois ses candidats et son avis.
+SHA-256 de longueur fixe. En `1.22.45`, le plafond passe de 128 à 32 serveurs parce que chaque état conserve aussi la
+dernière vue online bornée à 2 000 identités afin de produire des deltas sans reconstruire la projection. Le TTL du
+hook est renouvelé sur le chemin calme afin de représenter l'inactivité ; le TTL interne du cache reste non glissant.
+Chaque sample de disponibilité est identifié par mode, timestamp fournisseur et empreinte ; une recovery au même
+`updatedAt` emploie `recordedAt`. Le marker complet est toujours final et n'est jamais durable si le batch de recovery
+est interrompu. Une sélection player-tracker consommée retire à la fois ses candidats et son avis.
+
+## Cache CSV ajouté en release 1.22.45
+
+| Métier | Contenu dérivé | TTL | Plafond | Éviction / reconstruction |
+| --- | --- | ---: | ---: | --- |
+| Teammate language DB | lignes CSV validées, profondément immuables | 10 min absolues | 16 fichiers, 40 000 lignes, 32 MiB ; 10 000 lignes/8 MiB par fichier | LRU ; relecture si signature disque différente |
+
+La signature contient device, inode, taille, mtime et ctime. Elle est contrôlée avant et après lecture afin qu'un
+fichier modifié en course ne devienne jamais la vue cachée. Une écriture locale purge l'entrée avant et après l'appel,
+y compris si l'écriture échoue. Un fichier dépassant la borne est ignoré avec un avertissement borné ; le lot de
+liaisons locales échoue fermé pour ne jamais valider une paire contre une vue partielle. Ni ce refus ni l'éviction ne
+tronquent ou ne retirent une ligne du CSV canonique. Ses alias historiques sont server-wide et journalisés avec
+`wipeId:null` ; un nouveau wipe ne réémet plus les quelque 5 100 lignes observées.
 
 ## Structures qui ne sont pas des caches ordinaires
 
@@ -74,3 +96,16 @@ total. Le snapshot partagé demeure nécessaire à l'exclusion mutuelle des appe
 le parent rebase les ajouts sans rapport, mais refuse avant append un checkpoint/scope modifié, un contrôle d'identité
 modifié ou un read-set Steam/BM/nom devenu stale, sans introduire un second writer. Une politique d'archivage des
 transitions/sessions historiques resterait une décision métier distincte et n'est pas appliquée automatiquement.
+
+En `1.22.45`, le child construit une projection dédiée au scan : identités, métriques et preuves de clan seulement.
+Le cache faible correspondant reste attaché au snapshot immuable et n'est pas une nouvelle racine. Sur 108 000
+événements synthétiques, cette vue a réduit la médiane de 3 955 à 3 034 ms (-23 %) et la hausse de heap de 188,1 à
+134,7 MiB (-28 %) ; la production doit encore confirmer le gain et au moins un plan terminé.
+
+Le coût d'écriture canonique reste un résiduel : `mergeInShardOrder` recopie le snapshot courant et
+`historyRevision` le sérialise/hache, donc un append réel reste `O(N)`. `pi_history_append` l'instrumente sans changer
+la rétention ni la source de vérité. Ce journal ne doit jamais être soumis à une éviction LRU.
+
+`provider_availability_observed` est un nouvel event kind du schema 1. Après sa première écriture, une release
+antérieure à `1.22.45` ne peut pas lire le journal. Sauvegarder `data/player-intelligence` avant déploiement et ne
+jamais supprimer/tronquer ces données pour contourner un rollback incompatible.

@@ -22,6 +22,17 @@ global reconstruisait les candidats de toute la projection, puis reconsolidait c
 projection. Le coût croissait approximativement comme `observations × candidats`, avec de nombreux tableaux, objets
 et chaînes temporaires. Ce travail synchrone retardait aussi Discord, le daemon et la traduction.
 
+### Mesure de production 1.22.44 du 11 octobre
+
+Le nouvel extrait ne montre ni crash, ni redémarrage, ni OOM ; le RSS reste globalement entre 908 et 1 030 MiB,
+environ 952 MiB en moyenne, sans fuite monotone visible sur la fenêtre. Le scan isolé n'a toutefois produit aucun
+succès : `scanWorkersCompleted=0` et les échecs passent de 7 à 18, après environ 114,8 secondes par tentative. Le
+diagnostic précis était masqué par la suppression de `stderr` et la déduplication horaire du warning.
+
+Le parent a continué une projection complète environ toutes les 103,5 secondes, pour 18,38 secondes en moyenne et un
+maximum proche de 21,8 secondes. `1.22.44` a donc contenu les échecs du child sans résoudre la progression du scan ni
+le blocage CPU parent. Ces valeurs constituent le nouveau point de comparaison de production pour `1.22.45`.
+
 ## Invariants obligatoires
 
 - `Established` et les wipes restent interprétés en GMT ; chaque bloc `/cinfo` calcule son propre wipe et la date de
@@ -31,6 +42,8 @@ et chaînes temporaires. Ce travail synchrone retardait aussi Discord, le daemon
 - Les conflits SteamID/BattleMetrics échouent fermés et restent manuels.
 - Aucun fichier sous `data/player-intelligence` ni aucun sidecar persistant ne doit être supprimé ou réinitialisé.
 - Une panne fournisseur signifie `unknown`, pas déconnexion, et ne doit pas bloquer toute une file.
+- Avant `1.22.45`, sauvegarder le journal : après le premier `provider_availability_observed`, une release plus
+  ancienne ne sait plus le relire. Le rollback ne doit jamais contourner cela par une suppression de données.
 
 ## Protocole de livraison
 
@@ -38,6 +51,9 @@ Chaque lot suit le même ordre : test de régression, modification ciblée, mesu
 `git diff --check`, incrément SemVer, documentation, commit et push de `master`. Une validation locale ne vaut pas
 preuve de production. Après déploiement, les temps de réponse, le heap et la progression des files doivent être
 comparés au point de départ ci-dessus.
+
+Release `1.22.45` : `npm.cmd test` passe 430/430 tests, puis `tsc --noEmit -p .` réussit ;
+`git diff --check` est propre. La production Linux reste une validation distincte.
 
 ## Feuille de route par lot
 
@@ -144,6 +160,16 @@ Résultat local : les hooks retiennent au plus 128 états de taille fixe et rejo
 expiration. Les cooldowns/avertissements sont plafonnés à 256. Les 1 024 sélections expirent à cinq minutes ; un
 avis minimal borné conserve le message `expired` pendant 24 heures sans garder les candidats.
 
+### Lot 5c — Cache du CSV teammate-language — release 1.22.45
+
+Statut : implémenté et validé localement en `1.22.45`; déploiement à vérifier.
+
+Les appels de hook ne reparsent plus le même CSV à chaque cycle. Le cache contient au plus 16 vues de fichiers,
+40 000 lignes et 32 MiB de lignes profondément immuables pendant dix minutes ; chaque fichier accepté est limité à
+10 000 lignes et 8 MiB. Sa clé disque inclut device, inode, taille, mtime et ctime ; la signature est relue après le
+contenu afin de refuser une course de modification. Une écriture locale purge le cache avant et après l'opération,
+y compris en cas d'échec. Le CSV reste la donnée canonique et aucune ligne persistante n'est évincée.
+
 ### Lot 6a — Reprise durable WarBandits — release 1.22.37
 
 Statut : implémenté et validé localement ; déploiement à vérifier.
@@ -228,9 +254,9 @@ Le total pending peut encore augmenter pendant que la découverte du wipe ajoute
 résout. La progression se juge donc avec les états `queued`, `retry`, `attempted-unresolved` et `waiting`, pas avec le
 seul total brut. Une ligne prioritaire qui reste en tête doit désormais indiquer explicitement pourquoi.
 
-### Lot 6d — Bornes temporelles des fournisseurs
+### Lot 6d — Bornes temporelles des fournisseurs — release 1.22.45
 
-Statut : planifié comme sous-lot séparé.
+Statut : implémenté et validé localement en `1.22.45`; déploiement à vérifier.
 
 1. Séparer l'exécution Steam du pipeline WarBandits sans ouvrir deux cycles pour un même répertoire.
 2. Ajouter des budgets/annulations aux frontières fournisseurs.
@@ -238,9 +264,16 @@ Statut : planifié comme sous-lot séparé.
 
 Critères : durée de cycle bornée, abandon propre d'un fournisseur lent et reprise durable au cycle suivant.
 
+Résultat local attendu par la nouvelle architecture : chaque RPC child → parent est validé par provider/méthode,
+borné en taille et limité à quatre appels en vol. Le délai par appel vaut 30 secondes par défaut et une réponse tardive
+ne peut plus revenir vers un child terminé. Les invocations parent encore pendantes sont plafonnées à huit globalement
+et quatre par fournisseur. Un échec automatique déclenche un backoff 5/10/20/40/60 minutes ; une commande manuelle le
+contourne et un succès le réinitialise. `/runtime` expose compteurs, stage, circuits/pending et diagnostic allowlisté.
+Les services externes restent facultatifs pour les consolidations locales déjà prouvées.
+
 ### Lot 7 — Priorité interactive et travail en arrière-plan
 
-Statut : planifié.
+Statut : partiellement réalisé en `1.22.45`; la validation production reste requise.
 
 1. Distinguer tâches interactives, commits et enrichissements opportunistes.
 2. Donner la priorité aux accusés Discord et aux lectures locales courtes.
@@ -248,6 +281,18 @@ Statut : planifié.
 4. Annuler proprement les résultats devenus obsolètes sans supprimer de preuve.
 
 Critères : pas de famine du daemon et latence interactive bornée sous charge.
+
+Le hook BattleMetrics n'appelle plus `readAll()`/`Core.rebuild()` et ne garde qu'un état borné à 32 serveurs et
+2 000 identités online chacun. La projection compacte et les enrichissements sont réservés au child. Les paires
+Steam/BM locales tracker/CSV sont revalidées dans ce child avant les appels externes et peuvent être committées même
+si un fournisseur facultatif échoue. Ce découpage vise directement les projections parent de 18–22 secondes, mais ne
+constitue pas encore une politique générale de priorité pour toutes les commandes et tous les commits.
+
+La disponibilité BattleMetrics est désormais un marker global fail-closed. Sa clé inclut mode, timestamp et empreinte
+de roster ; une recovery au même `updatedAt` se décale sur `recordedAt`. Le marker complet est appendu en dernier et
+une recovery interrompue ne le persiste pas. Seule la vue complète conclut offline ; les vues incomplètes/censurées/
+échouées passent les absents en unknown. Les 5 100 alias historiques CSV observés utilisent `wipeId:null` et ne sont
+plus re-journalisés à chaque wipe.
 
 ### Lot 8 — Accusés Discord et budgets de commande
 
@@ -284,7 +329,8 @@ Critères : nombre maximal de jobs et de pixels connu, nettoyage testé, sémant
 
 ### Lot 11 — Journal et projecteurs
 
-Statut : optimisation transparente réalisée en `1.22.44`; snapshots durables reportés faute de besoin mesuré.
+Statut : optimisation transparente réalisée en `1.22.44`, projection scan spécialisée et instrumentation d'append
+ajoutées en `1.22.45`; snapshots durables reportés faute de besoin mesuré.
 
 Le produit cartésien alias × BattleMetrics IDs de `projectionCandidates` a été remplacé par une représentation
 linéaire `B + 2A`. En `1.22.44`, le replay historique des membres non résolus partage un catalogue Unicode préparé,
@@ -295,6 +341,16 @@ Sur le corpus synthétique de 2 700 personnes, le replay 120 captures × 4 slots
 et 1 200 captures prennent environ 1,70 s. Les projecteurs identité/métriques/présence traitent 81 000 événements en
 environ 0,39 s et 324 000 en environ 1,24 s. Leur poids ne justifie donc pas encore un snapshot dérivé persistant.
 
+Le planner `1.22.45` n'a besoin ni des sessions de présence, ni des wipes, ni de l'historique/affinité clan complet.
+Sa projection dédiée conserve identités, métriques et preuves de clan. Sur 108 000 événements synthétiques, elle
+mesure 3 034 ms médian contre 3 955 ms pour la projection complète (-23 %) et environ +134,7 MiB de heap contre
++188,1 MiB (-28 %). Le RSS ne permet pas de conclure sur ce corpus et la machine Linux doit encore confirmer le gain.
+
+Un append réel reste toutefois linéaire dans la taille du snapshot courant : `mergeInShardOrder` recopie la vue et la
+révision forte sérialise/hache les événements. `pi_history_append` mesure maintenant cette phase séparément. Le lot 11
+n'est donc pas clos tant que la production montre des pauses d'append significatives ; toute solution ultérieure doit
+garder le JSONL comme autorité, l'ordre fsync/checkpoint et la détection de corruption.
+
 1. Mesurer le coût de `readAll` et des reconstructions par commande.
 2. Réutiliser une projection immuable tant que le journal n’a pas changé.
 3. Ajouter si nécessaire des snapshots dérivés versionnés et reconstruisibles, jamais une nouvelle autorité mutable.
@@ -304,8 +360,8 @@ Critères : journal JSONL toujours source de vérité, replay complet détermini
 
 ### Lot 12 — Runtime de production
 
-Statut : runtime natif validé sur la fenêtre fournie en `1.22.43`; isolation du scan réalisée en `1.22.44`, validation
-serveur encore requise.
+Statut : runtime natif validé sur la fenêtre fournie en `1.22.43`; isolation du scan réalisée en `1.22.44`, puis
+projection compacte, RPC bornés, diagnostics et backoff ajoutés en `1.22.45`. Validation serveur encore requise.
 
 1. Lancer Node directement via `index.js` plutôt que conserver `ts-node` en continu — réalisé ; la validation
    TypeScript reste exécutée avant release.
@@ -322,13 +378,19 @@ le parent comme writer unique avec checkpoint/scope exacts et guards ciblés Ste
 sont rebasés ; corrections, conflits et supersessions rendent le plan stale avec un seul retry immédiat. Une FIFO
 bornée/coalescée conserve les reruns manuels, rafraîchit le wipe au dispatch et l'arrêt attend le commit parent. Le
 journal est fsync avant le checkpoint : une panne peut laisser le checkpoint en retard, jamais en avance. La
-production doit maintenant confirmer la disparition des stalls avant tout ajout de `MemoryMax`.
+production `1.22.44` a montré zéro plan terminé et des projections parent de 18–22 secondes. `1.22.45` supprime cette
+projection du hook, spécialise celle du child et rend enfin sa panne visible. La production doit maintenant confirmer
+au moins un plan committé et la disparition des stalls avant tout ajout de `MemoryMax`.
+
+Le rollback n'est plus symétrique après la première disponibilité fournisseur écrite :
+`provider_availability_observed` est un kind schema-1 inconnu de `1.22.44`. Faire une sauvegarde préalable et revenir
+uniquement vers une version compatible, sans jamais supprimer `data/player-intelligence`.
 
 ## Vérifications de production restantes
 
 Après `git pull` et redémarrage :
 
-1. vérifier `RUSTPLUS v1.22.44 OPERATIONAL` ;
+1. sauvegarder `data/player-intelligence`, puis vérifier `RUSTPLUS v1.22.45 OPERATIONAL` ;
 2. noter RSS, `heapUsed` et temps de réponse avant l’import ;
 3. rejouer le lot de 11 SteamID, puis un lot de 100 ID si disponible ;
 4. exiger un aperçu rapide, les noms locaux déjà vérifiés et aucun dialogue Replace/Keep pour le lot identique ;
@@ -340,6 +402,8 @@ Après `git pull` et redémarrage :
    candidats, puis observer temps et heap d’un import image répété.
 9. attendre une fenêtre, exécuter `/runtime`, puis corréler `RUNTIME`, `RUNTIME_WORK` et les éventuels `RUNTIME_SLOW`
    avec RSS/heap systemd avant, pendant et après un import ; la réponse doit rester éphémère et sans donnée joueur.
+   Exiger au moins un worker `completed`, vérifier stages/backoff/dernier code et corréler `pi_history_append` avec les
+   pauses restantes ; le parent ne doit plus reconstruire toute la projection toutes les ~103,5 secondes.
 10. laisser échouer un profil Steam, vérifier qu'il reprend automatiquement après son backoff, puis injecter de
     nouveaux IDs en continu et confirmer qu'un retry dû passe après au plus deux nouveaux IDs dans chaque file.
 11. à un moment choisi où les pseudos sont stables, lancer `!scanplayers` une fois et vérifier que la campagne pending
@@ -347,6 +411,9 @@ Après `git pull` et redémarrage :
     `queued`/`retry` et la hausse explicable de `attempted-unresolved`; le total brut peut monter si la découverte ajoute
     simultanément davantage de joueurs. Relancer ensuite `!scanplayers` et vérifier qu'une nouvelle passe réessaie les
     identités encore non résolues.
+12. provoquer successivement une liste BattleMetrics complète, une liste fiable mais incomplète et une panne ou vue
+    censurée. Seule la liste complète peut rendre les absents offline ; les autres doivent conserver les online
+    positifs valides et passer les absents en unknown sans créer d'alias masqué.
 
 Les lots 1 à 3 suppriment le chemin chaud précisément observé, le lot 4 rend les prochaines décisions mesurables et
 le lot 5 borne les caches/états dérivés identifiés et le lot 6 reprend le travail fournisseur sans famine. Aucun ne

@@ -5,7 +5,7 @@ const Contracts = require('./contracts.js');
 const HistoryStore = require('./historyStore.js');
 const { projectIdentities } = require('./identityProjector.js');
 const { projectMetrics } = require('./metricProjector.js');
-const { projectClans } = require('./clanProjector.js');
+const { projectClanEvidence, projectClans } = require('./clanProjector.js');
 const { projectPresence } = require('./presenceProjector.js');
 const { projectWipes } = require('./wipeProjector.js');
 const IdentityConsolidator = require('./identityConsolidator.js');
@@ -22,6 +22,8 @@ const RuntimeTelemetry = require('../../util/runtimeTelemetry.js');
 const rebuildCache = new WeakMap();
 /** @type {WeakMap<readonly Readonly<Record<string, any>>[], readonly Readonly<Record<string, any>>[]>} */
 const effectiveEventsCache = new WeakMap();
+/** @type {WeakMap<readonly Readonly<Record<string, any>>[], any>} */
+const scanRebuildCache = new WeakMap();
 
 /**
  * Keep projection timings on a fixed, private-data-free dimension set. Bypassing spans while telemetry is disabled
@@ -122,6 +124,26 @@ function rebuild(events) {
 }
 
 /**
+ * Read model for the isolated scan planner. Presence sessions, wipe history, full clan history and affinity are not
+ * consumed by that planner; omitting them keeps the disposable child below the host's shared memory ceiling.
+ * @param {readonly Readonly<Record<string, any>>[]} events
+ */
+function rebuildForScan(events) {
+    if (Object.isFrozen(events) && scanRebuildCache.has(events)) return scanRebuildCache.get(events);
+    return measured('pi_rebuild_total', () => {
+        const canonical = effectiveEvents(events);
+        const identities = measured('pi_rebuild_identities', () => projectIdentities(canonical));
+        const projection = Contracts.deepFreeze({
+            identities,
+            metrics: measured('pi_rebuild_metrics', () => projectMetrics(canonical, identities)),
+            clans: measured('pi_rebuild_clans', () => projectClanEvidence(canonical, identities))
+        });
+        if (Object.isFrozen(events)) scanRebuildCache.set(events, projection);
+        return projection;
+    });
+}
+
+/**
  * Cooperative variant for main-process callers. Each projector remains synchronous, but Discord/network work can run
  * between the fixed projection stages. A worker is still preferable if telemetry shows one individual stage blocking.
  * @param {readonly Readonly<Record<string, any>>[]} events
@@ -159,5 +181,6 @@ module.exports = Object.freeze({
     ...IdentityConsolidator,
     effectiveEvents,
     rebuild,
+    rebuildForScan,
     rebuildAsync
 });

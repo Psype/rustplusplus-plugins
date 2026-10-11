@@ -5,6 +5,22 @@ const { deepFreeze } = require('./contracts.js');
 
 /** @param {readonly Readonly<Record<string, any>>[]} events @param {ReturnType<import('./identityProjector.js')['projectIdentities']>} identities */
 function projectPresence(events, identities) {
+    /** @type {Map<string, any[]>} */
+    const availabilityByProvider = new Map();
+    for (const event of events) {
+        if (event.kind !== 'provider_availability_observed') continue;
+        const key = `${event.scope.serverKey}\u0000${event.provenance.source}`;
+        const values = availabilityByProvider.get(key) || [];
+        values.push(event);
+        availabilityByProvider.set(key, values);
+    }
+    for (const [key, values] of availabilityByProvider) {
+        values.sort((left, right) => left.observedAt.localeCompare(right.observedAt) ||
+            left.recordedAt.localeCompare(right.recordedAt) ||
+            Number(left.payload.state === 'available') - Number(right.payload.state === 'available') ||
+            left.eventId.localeCompare(right.eventId));
+        availabilityByProvider.set(key, values);
+    }
     /** @type {Map<string, {personId: string, serverKey: string, source: string, events: any[]}>} */
     const groups = new Map();
     for (const event of events) {
@@ -25,7 +41,33 @@ function projectPresence(events, identities) {
     /** @type {any[]} */
     const providers = [];
     for (const group of groups.values()) {
-        group.events.sort((left, right) => left.observedAt.localeCompare(right.observedAt) ||
+        const firstPresenceAt = group.events.reduce((first, event) =>
+            first === null || event.observedAt < first ? event.observedAt : first, /** @type {string|null} */ (null));
+        // Availability and explicit positives emitted by one roster sample share both timestamps. The positive
+        // observation wins without introducing a zero-duration offline/unknown segment. A later provider sample
+        // can legitimately reuse observedAt, however, so recordedAt is part of the sample identity.
+        const explicitOnlineSamples = new Set(group.events.filter(event => event.payload.state === 'online')
+            .map(event => `${event.observedAt}\u0000${event.recordedAt}`));
+        const providerAvailability = [];
+        for (const event of availabilityByProvider.get(`${group.serverKey}\u0000${group.source}`) || []) {
+            if (firstPresenceAt === null || event.observedAt < firstPresenceAt) continue;
+            providerAvailability.push(event);
+        }
+        const timeline = [...group.events, ...providerAvailability.map(event => ({
+            eventId: event.eventId,
+            observedAt: event.observedAt,
+            recordedAt: event.recordedAt,
+            payload: {
+                state: event.payload.state === 'unavailable' ? 'unknown' : 'offline',
+                providerSessionId: null,
+                reason: event.payload.reason
+            },
+            providerAvailability: event.payload.state
+        }))].sort((left, right) => left.observedAt.localeCompare(right.observedAt) ||
+            left.recordedAt.localeCompare(right.recordedAt) ||
+            Number(Boolean(right.providerAvailability)) - Number(Boolean(left.providerAvailability)) ||
+            Number(left.providerAvailability === 'available') -
+                Number(right.providerAvailability === 'available') ||
             left.eventId.localeCompare(right.eventId));
         const transitions = [];
         const segments = [];
@@ -33,7 +75,11 @@ function projectPresence(events, identities) {
         let previous = null;
         let segment = null;
         let session = null;
-        for (const event of group.events) {
+        for (const event of timeline) {
+            // A provider marker applies to everyone not positively observed by that exact sample. Do not match
+            // only observedAt: providers can retain it while a later poll changes completeness or roster data.
+            if (event.providerAvailability && explicitOnlineSamples.has(
+                `${event.observedAt}\u0000${event.recordedAt}`)) continue;
             const state = event.payload.state;
             const sessionChanged = state === 'online' && session && event.payload.providerSessionId !== null &&
                 session.providerSessionId !== null && event.payload.providerSessionId !== session.providerSessionId;
@@ -41,8 +87,9 @@ function projectPresence(events, identities) {
             if (segment) {
                 segments.push({ ...segment, endAt: event.observedAt });
             }
-            if (sessionChanged) {
-                sessions.push({ ...session, endedAt: event.observedAt, preciseEnd: true });
+            if (sessionChanged && session) {
+                sessions.push({ ...session, endedAt: event.observedAt,
+                    preciseEnd: session.uncertainFrom === null });
                 session = null;
             }
             if (state === 'online' && !session) {

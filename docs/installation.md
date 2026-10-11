@@ -48,8 +48,17 @@ retry. At most one scan worker runs at once and pending servers use a bounded, c
 remain forced, and shutdown waits for an active parent commit. `RPP_PLAYER_SCAN_WORKER_HEAP_MIB` sets its V8 heap limit between 512 and
 2048 MiB (1536 by default). Lower it only after checking real `/runtime` failures: this limit contains the child heap,
 but the child still shares the systemd service cgroup and host RAM with the core bot.
+Each provider RPC made by that child is independently bounded. `RPP_PLAYER_SCAN_PROVIDER_TIMEOUT_MS` accepts
+1,000-45,000 ms (30,000 by default); expiry fails only that optional enrichment, never the bot core. Keep this below
+the overall worker deadline and diagnose repeated expiry/backoff through `/runtime` before increasing it.
 Run only one RustPlusPlus parent against a given `data/player-intelligence` directory; the revision guard serializes
 writers inside that parent and is not a cross-process file lock.
+
+The shared teammate identity CSV remains under `data/teammate-language-database`. Each file is admitted up to
+10,000 rows and 8 MiB; the immutable read cache retains at most 16 files, 40,000 rows and 32 MiB for ten minutes.
+If a file exceeds a limit, the bot emits a bounded warning and skips that local reconciliation batch without
+truncating, deleting or rewriting the CSV. Keep the file intact, take a backup, then compact duplicate or obsolete
+rows deliberately before retrying; the bot never performs this compaction automatically.
 
 Journal evidence is fsynced before the scan checkpoint is replaced. Those two files are deliberately ordered but not
 an atomic cross-file transaction: a crash during parent commit may leave durable journal events with an older

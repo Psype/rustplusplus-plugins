@@ -5,10 +5,12 @@ const Performance = require('node:perf_hooks').performance;
 
 const Core = require('../plugins/playerIntelligence/index.js');
 const ScanDaemon = require('../plugins/playerIntelligence/scanDaemon.js');
+const Ipc = require('./playerScanIpc.js');
 
 let nextCallId = 1;
 let running = false;
 const providerCalls = new Map();
+const MAX_REPORTED_MEMORY_MIB = 4096;
 
 /** @param {unknown} error */
 function safeError(error) {
@@ -17,23 +19,37 @@ function safeError(error) {
         'unknown error';
 }
 
-/** @param {any} message @param {()=>void} [callback] */
-function send(message, callback) {
-    if (typeof process.send !== 'function' || !process.connected) {
-        if (callback) callback();
-        return;
-    }
-    try { process.send(message, callback); }
-    catch (_error) { if (callback) callback(); }
+/** @param {any} message */
+function send(message) {
+    Ipc.send(process, message);
+}
+
+/** @param {number} bytes */
+function memoryMiB(bytes) {
+    const value = Number(bytes);
+    if (!Number.isFinite(value) || value <= 0) return 0;
+    return Math.min(MAX_REPORTED_MEMORY_MIB, Math.round(value / (1024 * 1024)));
+}
+
+/** @param {string} stage */
+function reportProgress(stage) {
+    let memory = {};
+    try { memory = process.memoryUsage(); }
+    catch (_error) { /* Progress is diagnostic-only and must never affect the scan. */ }
+    send({
+        v: 1,
+        type: 'progress',
+        stage,
+        rssMiB: memoryMiB(/** @type {any} */ (memory).rss),
+        heapUsedMiB: memoryMiB(/** @type {any} */ (memory).heapUsed)
+    });
 }
 
 /** @param {string} provider @param {string} method @param {any[]} args */
 function providerRequest(provider, method, args) {
     const callId = nextCallId++;
-    return new Promise((resolve, reject) => {
-        providerCalls.set(callId, { resolve, reject });
-        send({ v: 1, type: 'provider_request', callId, provider, method, args });
-    });
+    return Ipc.request(process, providerCalls,
+        { v: 1, type: 'provider_request', callId, provider, method, args });
 }
 
 /** @param {any} payload */
@@ -60,7 +76,8 @@ function optionsFrom(payload) {
     /** @type {any} */
     const dependencies = {
         now: () => new Date(payload.now),
-        monotonicNow: () => Performance.now()
+        monotonicNow: () => Performance.now(),
+        scanProgress: reportProgress
     };
     if (payload.providers.steamProfileIdentity === true) {
         dependencies.steamProfileIdentity = (/** @type {string} */ steamId) =>
@@ -92,6 +109,8 @@ function optionsFrom(payload) {
     return {
         context,
         scope: payload.scope,
+        stableIdentityCandidates: Array.isArray(payload.stableIdentityCandidates) ?
+            payload.stableIdentityCandidates : [],
         store: readOnlyStore,
         directory: diskStore.directory,
         dependencies,
@@ -105,6 +124,7 @@ function optionsFrom(payload) {
 async function run(payload) {
     if (running) throw new Error('Player scan worker already has an active request.');
     running = true;
+    reportProgress('initializing');
     try { return await ScanDaemon.runCycle(optionsFrom(payload)); }
     finally { running = false; }
 }
@@ -123,19 +143,17 @@ process.on('message', rawMessage => {
     }
     if (message.type !== 'run') return;
     void run(message.payload).then(plan => {
-        send({ v: 1, type: 'result', plan }, () => {
-            if (process.connected) process.disconnect();
-        });
+        reportProgress('sending_result');
+        Ipc.sendPlan(process, plan);
     }).catch(error => {
-        send({ v: 1, type: 'failure', code: `${error && error.code || 'SCAN_FAILED'}`.slice(0, 64),
-            message: safeError(error) }, () => {
-            if (process.connected) process.disconnect();
-        });
+        Ipc.sendFinal(process, { v: 1, type: 'failure',
+            code: `${error && error.code || 'SCAN_FAILED'}`.slice(0, 64), message: safeError(error) });
     });
 });
 
 process.on('disconnect', () => {
     for (const call of providerCalls.values()) call.reject(new Error('Player scan parent disconnected.'));
     providerCalls.clear();
-    process.exitCode = 0;
+    // Preserve the dedicated non-zero exit selected when the final IPC callback reports failed delivery.
+    if (process.exitCode === undefined || process.exitCode === null) process.exitCode = 0;
 });

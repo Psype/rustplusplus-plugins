@@ -9,6 +9,7 @@ const Path = require('path');
 const PlayerNameReconciler = require('../../util/playerNameReconciler.js');
 
 const API_TIMEOUT_MS = 5000;
+const API_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
 const DEFAULT_API_ROOT = 'https://api.warbandits.gg';
 const DEFAULT_CATALOG_TTL_MS = 60 * 60 * 1000;
 const DEFAULT_CLOUDFLARE_COOLDOWN_MS = 15 * 60 * 1000;
@@ -467,7 +468,13 @@ function createProvider(dependencies = {}) {
                 throw error;
             }
             try {
-                const response = await httpClient.get(url, { ...options, timeout: API_TIMEOUT_MS });
+                const response = await httpClient.get(url, {
+                    ...options,
+                    timeout: API_TIMEOUT_MS,
+                    maxContentLength: API_RESPONSE_MAX_BYTES,
+                    maxBodyLength: API_RESPONSE_MAX_BYTES,
+                    maxRedirects: 0
+                });
                 if (isHtmlResponse(response)) {
                     const error = new Error('WarBandits returned an HTML challenge.');
                     error.response = {

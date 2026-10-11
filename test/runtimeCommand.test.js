@@ -15,7 +15,13 @@ function snapshot() {
             imports: { active: 1, previewsPending: 2, decisionsClaimed: 0, decisionQueues: 1 },
             ocr: { active: 1, queued: 2, queuedBytes: 1000 },
             scans: { active: 1, forcedRerunsQueued: 0, workerActive: 1, workerQueued: 2,
-                workerCompleted: 12, workerFailures: 3, workerStalePlans: 4 },
+                automaticBackoffs: 1, automaticBackoffSkips: 5,
+                workerCompleted: 12, workerFailures: 3, workerStalePlans: 4,
+                workerConsecutiveFailures: 2, workerStage: 'rebuilding', workerRssMiB: 701,
+                workerHeapUsedMiB: 512, workerProviderInvocationsOutstanding: 4,
+                workerProviderCircuitsOpen: 1, workerLastCode: 'WORKER_EXITED',
+                workerLastMessage: 'Worker process exited before commit. stderr: JavaScript heap out of memory.',
+                workerLastAt: '2026-10-11T14:15:00.000Z', workerLastStage: 'rebuilding' },
             translations: { active: 0, queued: 0 }
         },
         sourceFailures: 0,
@@ -24,7 +30,7 @@ function snapshot() {
             import_prepare: operation, import_decision: operation, scan_cycle: operation,
             pi_rebuild_identities: operation, pi_rebuild_metrics: operation,
             pi_rebuild_clans: operation, pi_rebuild_presence: operation,
-            pi_rebuild_wipes: operation, pi_rebuild_total: operation }
+            pi_rebuild_wipes: operation, pi_rebuild_total: operation, pi_history_append: operation }
     });
 }
 
@@ -64,13 +70,80 @@ Test('/runtime defers first, is ephemeral and renders only aggregate admin telem
     Assert.match(value.edits[0].content, /OCR: run 2 started, 2 completed .*p95 25 ms.*queue .*p95 25 ms/);
     Assert.match(value.edits[0].content, /Imports: prepare .*decision/);
     Assert.match(value.edits[0].content,
-        /scans 1 active, 0 queued, worker 1 active, 2 queued, 12 completed, 3 failed, 4 stale/);
+        /scans 1 active, 0 queued, worker 1 active, 2 queued, 12 completed, 3 failed, 4 stale, 1 backoff, 5 deferred/);
     Assert.match(value.edits[0].content,
-        /PI rebuild completed\/p95\/max ms: total 2\/25\/20 \| identities 2\/25\/20 .*wipes 2\/25\/20/);
+        /Scan worker: stage rebuilding \| RSS 701 MiB \| heap 512 MiB \| 2 consecutive failures \| provider RPC 4 pending, 1 circuits open/);
+    Assert.match(value.edits[0].content,
+        /Last scan worker failure: WORKER_EXITED at rebuilding on 2026-10-11T14:15:00\.000Z .*heap out of memory/);
+    Assert.match(value.edits[0].content,
+        /PI rebuild completed\/p95\/max ms: total 2\/25\/20 \| identities 2\/25\/20 .*wipes 2\/25\/20 .*journal append 2\/25\/20/);
     Assert.match(value.edits[0].content, /Health: degraded/);
     Assert.equal(value.edits[0].content.length <= 1950, true);
     Assert.equal(value.edits[0].content.includes(sentinel), false);
     Assert.deepEqual(value.edits[0].allowedMentions, { parse: [] });
+});
+
+Test('/runtime rejects free-form scan diagnostics even when a malformed snapshot is injected', async () => {
+    const value = harness(true);
+    const sentinel = 'private-player-name-76561198000000000';
+    const unsafe = snapshot();
+    unsafe.sources.scans = {
+        ...unsafe.sources.scans,
+        workerStage: sentinel,
+        workerLastCode: sentinel,
+        workerLastMessage: sentinel,
+        workerLastAt: sentinel,
+        workerLastStage: sentinel
+    };
+    await RuntimeCommand.execute(value.client, value.interaction, {
+        telemetry: { isEnabled: () => true, getLastSnapshot: () => unsafe }
+    });
+    Assert.equal(value.edits[0].content.includes(sentinel), false);
+    Assert.match(value.edits[0].content, /Scan worker: stage unknown/);
+    Assert.match(value.edits[0].content, /Last scan worker failure: none/);
+});
+
+Test('/runtime exposes only the fixed admission and IPC failure diagnostics', () => {
+    const messages = [
+        'Worker IPC delivery failed.',
+        'Stable identity candidate input exceeded its limit.',
+        'Stable identity candidate input was invalid.'
+    ];
+    for (const message of messages) {
+        const current = snapshot();
+        current.sources.scans = {
+            ...current.sources.scans,
+            workerLastCode: 'WORKER_IPC_SEND_FAILED',
+            workerLastMessage: message,
+            workerLastAt: '2026-10-11T14:15:00.000Z',
+            workerLastStage: 'initializing'
+        };
+        Assert.equal(RuntimeCommand.render(current).includes(message), true);
+    }
+});
+
+Test('/runtime reports an active automatic scan backoff as degraded without a live worker failure', async () => {
+    const value = harness(true);
+    const backoffOnly = snapshot();
+    backoffOnly.process = { ...backoffOnly.process, heapUsedMiB: 1000 };
+    backoffOnly.eventLoop = { utilizationPct: 1, p50Ms: 1, p95Ms: 2, p99Ms: 3, maxMs: 4 };
+    backoffOnly.sources.scans = {
+        ...backoffOnly.sources.scans,
+        workerConsecutiveFailures: 0,
+        workerStage: 'idle',
+        workerRssMiB: 0,
+        workerHeapUsedMiB: 0,
+        workerProviderInvocationsOutstanding: 0,
+        workerProviderCircuitsOpen: 0,
+        workerLastCode: null,
+        workerLastMessage: null,
+        workerLastAt: null,
+        workerLastStage: null
+    };
+    await RuntimeCommand.execute(value.client, value.interaction, {
+        telemetry: { isEnabled: () => true, getLastSnapshot: () => backoffOnly }
+    });
+    Assert.match(value.edits[0].content, /Health: degraded .*scan worker/);
 });
 
 Test('/runtime refuses non-administrators after acknowledging the interaction', async () => {

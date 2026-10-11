@@ -78,6 +78,7 @@ RuntimeTelemetry.start({
 client.build();
 /** @type {Promise<void>|null} */
 let shutdownPromise = null;
+const SHUTDOWN_GRACE_MS = 30 * 1000;
 function shutdownIsolatedServices() {
     if (shutdownPromise) return shutdownPromise;
     /** @param {()=>unknown} callback */
@@ -95,7 +96,9 @@ function shutdownIsolatedServices() {
 process.once('exit', () => { void shutdownIsolatedServices(); });
 for (const signal of ['SIGINT', 'SIGTERM']) {
     process.once(signal, () => {
-        const forcedExit = setTimeout(() => process.exit(0), 5000);
+        // The scan supervisor waits for an already-started parent journal commit. Five seconds was shorter than a
+        // large fsync/revision pass and could leave the append-only JSONL with a partial final line during restart.
+        const forcedExit = setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS);
         void shutdownIsolatedServices().finally(() => {
             clearTimeout(forcedExit);
             process.exit(0);

@@ -15,10 +15,24 @@ const COLLECTOR_VERSION = 'player-intelligence-1';
 const DATA_DIRECTORY = Path.join(__dirname, '..', '..', '..', 'data', 'player-intelligence');
 const MAX_QUERY_LENGTH = 128;
 const IN_GAME_BUDGET = 122;
-const HOOK_STATE_MAX_ENTRIES = 128;
+const HOOK_STATE_MAX_ENTRIES = 32;
 const HOOK_STATE_TTL_MS = 24 * 60 * 60 * 1000;
+const HOOK_ONLINE_IDENTITY_LIMIT = 2000;
+const HOOK_APPEND_BATCH_LIMIT = 5000;
+// Stable candidates are copied into a process-isolated job queue. Keep every job finite; tracker evidence is
+// admitted first, then only the most recently recorded legacy CSV rows fill the remaining capacity.
+const MAX_TRACKER_IDENTITY_CANDIDATES = 2048;
+const MAX_LEGACY_IDENTITY_CANDIDATES = 10000;
+const MAX_STABLE_IDENTITY_CANDIDATES =
+    MAX_TRACKER_IDENTITY_CANDIDATES + MAX_LEGACY_IDENTITY_CANDIDATES;
+const STABLE_CANDIDATE_WARNING_MAX_ENTRIES = 64;
+const STABLE_CANDIDATE_WARNING_TTL_MS = 60 * 60 * 1000;
 const hookStates = BoundedTtlCache.createBoundedTtlCache({
     maxEntries: HOOK_STATE_MAX_ENTRIES, defaultTtlMs: HOOK_STATE_TTL_MS
+});
+const stableCandidateWarningTimes = BoundedTtlCache.createBoundedTtlCache({
+    maxEntries: STABLE_CANDIDATE_WARNING_MAX_ENTRIES,
+    defaultTtlMs: STABLE_CANDIDATE_WARNING_TTL_MS
 });
 
 /** @param {any} context @returns {any} */
@@ -41,6 +55,64 @@ function stableFingerprint(values) {
     const hash = Crypto.createHash('sha256');
     for (const value of values.sort()) hash.update(`${value.length}:`, 'utf8').update(value, 'utf8');
     return hash.digest('hex');
+}
+
+/** @param {any} battlemetrics @param {string} playerId @param {{id:string,name:string|null}|null} [fallback] */
+function battlemetricsIdentity(battlemetrics, playerId, fallback = null) {
+    if (!/^\d{1,32}$/u.test(`${playerId}`)) return null;
+    const current = bmPlayer(battlemetrics, playerId);
+    if (current) return current;
+    const fallbackName = fallback && `${fallback.id}` === `${playerId}` ? sanitize(fallback.name) || null : null;
+    return Object.freeze({ steamId: null, battlemetricsPlayerId: `${playerId}`, name: fallbackName });
+}
+
+/** @param {any} battlemetrics */
+function onlineBattlemetricsSnapshot(battlemetrics) {
+    const source = Array.isArray(battlemetrics && battlemetrics.onlinePlayers) ?
+        battlemetrics.onlinePlayers : Object.values(battlemetrics && battlemetrics.players || {})
+            .filter((/** @type {any} */ player) => player && player.status === true)
+            .map((/** @type {any} */ player) => player.id);
+    let complete = source.length <= HOOK_ONLINE_IDENTITY_LIMIT;
+    const values = new Map();
+    for (const rawId of source.slice(0, HOOK_ONLINE_IDENTITY_LIMIT)) {
+        const id = `${rawId && typeof rawId === 'object' ? rawId.id : rawId || ''}`;
+        if (!/^\d{1,32}$/u.test(id)) {
+            complete = false;
+            continue;
+        }
+        if (values.has(id)) continue;
+        const identity = bmPlayer(battlemetrics, id);
+        values.set(id, Object.freeze({ id, name: identity ? identity.name : null }));
+    }
+    const identities = Object.freeze([...values.values()].sort((left, right) =>
+        left.id.localeCompare(right.id, 'en', { numeric: true })));
+    return Object.freeze({ complete, identities, ids: Object.freeze(identities.map(identity => identity.id)) });
+}
+
+/** @param {any} battlemetrics @param {readonly {id:string,name:string|null}[]} online */
+function battlemetricsHookFingerprint(battlemetrics, online) {
+    const values = online.map(identity => `online:${identity.id}:${identity.name}`);
+    // Login/logout/new-player arrays are transient hints already represented by the authoritative roster. Keeping
+    // them in the fingerprint would replay an unchanged sample after those arrays are cleared. Offline name changes
+    // are the only delta-only input that produces an event, so retain just their current semantic value.
+    const changed = Array.isArray(battlemetrics && battlemetrics.nameChangedPlayers) ?
+        battlemetrics.nameChangedPlayers : [];
+    for (const row of changed.slice(0, HOOK_ONLINE_IDENTITY_LIMIT)) {
+        const id = `${row && typeof row === 'object' ? row.id : row || ''}`;
+        if (!/^\d{1,32}$/u.test(id)) continue;
+        const player = battlemetrics && battlemetrics.players && battlemetrics.players[id];
+        const name = sanitize(player && player.name || row && typeof row === 'object' && row.name || '');
+        const status = player && typeof player.status === 'boolean' ? `${player.status}` : 'unknown';
+        values.push(`changed:${id}:${name}:${status}`);
+    }
+    return stableFingerprint(values);
+}
+
+/** @param {any} store @param {readonly any[]} events */
+async function appendHookEvents(store, events) {
+    for (let offset = 0; offset < events.length; offset += HOOK_APPEND_BATCH_LIMIT) {
+        await store.appendMany(events.slice(offset, offset + HOOK_APPEND_BATCH_LIMIT));
+    }
 }
 
 /** @param {unknown} value */
@@ -188,8 +260,9 @@ function getStore(context, scope) {
     return new Core.JsonlHistoryStore({ directory: getDataDirectory(context, scope) });
 }
 
-/** @param {any} context @param {any} scope @param {any} store @param {any} dependencies */
-function playerScanOptions(context, scope, store, dependencies) {
+/** @param {any} context @param {any} scope @param {any} store @param {any} dependencies
+ * @param {readonly any[]|null} [identityCandidates] */
+function playerScanOptions(context, scope, store, dependencies, identityCandidates = null) {
     const scanDependencies = { ...dependencies };
     if (!Object.hasOwn(scanDependencies, 'steamProfileIdentity')) {
         scanDependencies.steamProfileIdentity = (/** @type {string} */ steamId) =>
@@ -205,6 +278,7 @@ function playerScanOptions(context, scope, store, dependencies) {
         directory: typeof store.directory === 'string' ? store.directory : getDataDirectory(context, scope),
         dependencies: Object.freeze(scanDependencies),
         warBanditsProvider: dependencies.warBanditsProvider || null,
+        stableIdentityCandidates: identityCandidates || stableIdentityCandidates(context, scope, dependencies),
         // The global worker FIFO can outlive a wipe boundary. Re-evaluate the canonical runtime scope
         // when the job is dispatched and again before its parent-side commit.
         resolveCurrentScope: getScope,
@@ -215,12 +289,15 @@ function playerScanOptions(context, scope, store, dependencies) {
     });
 }
 
-/** @param {any} context @param {any} scope @param {any} store @param {any} dependencies */
-function schedulePlayerScan(context, scope, store, dependencies) {
-    if (!dependencies.playerScanDaemon && !dependencies.warBanditsProvider) return false;
+/** @param {any} context @param {any} scope @param {any} store @param {any} dependencies
+ * @param {readonly any[]|null} [identityCandidates] */
+function schedulePlayerScan(context, scope, store, dependencies, identityCandidates = null) {
+    const hasStablePairs = Array.isArray(identityCandidates) && identityCandidates.some(identity =>
+        identity && identity.steamId && identity.battlemetricsPlayerId);
+    if (!dependencies.playerScanDaemon && !dependencies.warBanditsProvider && !hasStablePairs) return false;
     const daemon = dependencies.playerScanDaemon || PlayerScanDaemon;
     if (!daemon || typeof daemon.schedule !== 'function') return false;
-    return daemon.schedule(playerScanOptions(context, scope, store, dependencies));
+    return daemon.schedule(playerScanOptions(context, scope, store, dependencies, identityCandidates));
 }
 
 /** @param {any} context @param {any} scope @param {any} store @param {any} dependencies */
@@ -293,39 +370,140 @@ function presenceEvent(scope, identity, state, details) {
     }, details);
 }
 
-/** @param {any} projection @param {string} personId */
-function subjectFromPerson(projection, personId) {
-    const person = projection.identities.persons.find((/** @type {any} */ item) => item.personId === personId);
-    if (person) return Object.freeze({
-        steamId: person.steamId,
-        battlemetricsPlayerId: person.battlemetricsPlayerIds[0] || null,
-        exactName: person.names.length > 0 ? person.names[person.names.length - 1].name : null
-    });
-    if (personId.startsWith('steam:')) return Object.freeze({
-        steamId: personId.slice(6), battlemetricsPlayerId: null, exactName: null
-    });
-    if (personId.startsWith('battlemetrics:')) return Object.freeze({
-        steamId: null, battlemetricsPlayerId: personId.slice(14), exactName: null
-    });
-    return null;
+/** @param {any} scope @param {'available'|'unavailable'} state @param {any} details */
+function providerAvailabilityEvent(scope, state, details) {
+    return baseEvent('provider_availability_observed', scope,
+        { steamId: null, battlemetricsPlayerId: null, exactName: null }, {
+            state,
+            reason: state === 'unavailable' ? details.reason || 'provider unavailable' : null
+        }, details);
 }
 
-/** @param {any} scope */
-function trackedIdentities(scope) {
+/** @param {any} scope @param {number} [limit] @param {()=>void} [onIncomplete] */
+function trackedIdentities(scope, limit = Number.MAX_SAFE_INTEGER, onIncomplete = () => undefined) {
     const identities = [];
     for (const tracker of Object.values(scope.instance.trackers || {})) {
+        if (!tracker || typeof tracker !== 'object') {
+            onIncomplete();
+            return Object.freeze([]);
+        }
         if (tracker.managedBy !== 'player-tracker' || `${tracker.serverId}` !== scope.serverId ||
             `${tracker.battlemetricsId}` !== scope.battlemetricsId) continue;
-        for (const player of tracker.players || []) {
-            const steamId = /^7656119\d{10}$/u.test(`${player.steamId || ''}`) ? `${player.steamId}` : null;
-            const battlemetricsPlayerId = /^\d+$/u.test(`${player.playerId || ''}`) ? `${player.playerId}` : null;
-            const name = sanitize(player.name);
+        if (!Array.isArray(tracker.players)) {
+            onIncomplete();
+            return Object.freeze([]);
+        }
+        for (const player of tracker.players) {
+            if (!player || typeof player !== 'object') {
+                onIncomplete();
+                return Object.freeze([]);
+            }
+            const rawSteamId = player && typeof player.steamId === 'string' && player.steamId.length === 17 ?
+                player.steamId : '';
+            const rawBattlemetricsPlayerId = player && typeof player.playerId === 'string' &&
+                player.playerId.length <= 32 ? player.playerId : '';
+            const rawName = player && typeof player.name === 'string' && player.name.length <= 256 ?
+                player.name : '';
+            const steamId = /^7656119\d{10}$/u.test(rawSteamId) ? rawSteamId : null;
+            const battlemetricsPlayerId = /^\d{1,32}$/u.test(rawBattlemetricsPlayerId) ?
+                rawBattlemetricsPlayerId : null;
+            const name = sanitize(rawName);
+            if (steamId && battlemetricsPlayerId && !name) {
+                onIncomplete();
+                return Object.freeze([]);
+            }
             if (steamId && battlemetricsPlayerId && name) {
                 identities.push(Object.freeze({ steamId, battlemetricsPlayerId, name }));
+                if (identities.length >= limit) return Object.freeze(identities);
             }
         }
     }
     return Object.freeze(identities);
+}
+
+/** @param {any} context @param {any} scope @param {string} code @param {string} message */
+function warnStableCandidatesOnce(context, scope, code, message) {
+    const fingerprint = Crypto.createHash('sha256').update(JSON.stringify([
+        scope.serverKey || scope.serverId || '', scope.wipeId || '', code
+    ])).digest('hex');
+    if (stableCandidateWarningTimes.has(fingerprint)) return;
+    stableCandidateWarningTimes.set(fingerprint, true);
+    try {
+        if (context.rustplus && typeof context.rustplus.log === 'function') {
+            context.rustplus.log('PLAYER_INTELLIGENCE', message, 'warn');
+        }
+        else if (context.client && typeof context.client.log === 'function') {
+            context.client.log('PLAYER_INTELLIGENCE', message, 'warn');
+        }
+    }
+    catch (_error) { /* Optional diagnostics must not make the live hook fail. */ }
+}
+
+/** @param {any} context @param {any} scope @param {any} dependencies */
+function stableIdentityCandidates(context, scope, dependencies) {
+    const candidates = new Map();
+    /** @param {any} identity @param {'player-tracker'|'teammate-language-database'} source
+     * @param {unknown} observedAt */
+    function add(identity, source, observedAt) {
+        const rawSteamId = identity && typeof identity.steamId === 'string' &&
+            identity.steamId.length === 17 ? identity.steamId : '';
+        const rawBattlemetricsPlayerId = identity && typeof identity.battlemetricsPlayerId === 'string' &&
+            identity.battlemetricsPlayerId.length <= 32 ? identity.battlemetricsPlayerId : '';
+        const rawName = identity && typeof identity.name === 'string' && identity.name.length <= 256 ?
+            identity.name : '';
+        const rawObservedAt = typeof observedAt === 'string' && observedAt.length <= 64 ? observedAt : null;
+        const steamId = /^7656119\d{10}$/u.test(rawSteamId) ? rawSteamId : null;
+        const battlemetricsPlayerId = /^\d{1,32}$/u.test(rawBattlemetricsPlayerId) ?
+            rawBattlemetricsPlayerId : null;
+        const name = sanitize(rawName);
+        const canonicalObservedAt = canonicalIso(rawObservedAt);
+        if (!steamId || !name || Array.from(name).length > 128 || !canonicalObservedAt) return;
+        const fingerprint = Crypto.createHash('sha256').update(JSON.stringify([
+            source, steamId, battlemetricsPlayerId, name, canonicalObservedAt
+        ])).digest('hex');
+        const key = `${source}\u0000${steamId}\u0000${battlemetricsPlayerId || ''}\u0000${name}`;
+        const previous = candidates.get(key);
+        if (previous && previous.observedAt >= canonicalObservedAt) return;
+        candidates.set(key, Object.freeze({
+            steamId, battlemetricsPlayerId, name, observedAt: canonicalObservedAt, source,
+            sourceEventId: `stable:${source}:${fingerprint}`
+        }));
+    }
+    let trackerIncomplete = false;
+    const trackerIdentities = trackedIdentities(scope, MAX_TRACKER_IDENTITY_CANDIDATES + 1,
+        () => { trackerIncomplete = true; });
+    if (trackerIncomplete || trackerIdentities.length > MAX_TRACKER_IDENTITY_CANDIDATES) {
+        warnStableCandidatesOnce(context, scope, trackerIncomplete ? 'tracker-incomplete' : 'tracker-overflow',
+            trackerIncomplete ?
+                'Stable identity candidates were skipped safely because the player tracker was incomplete.' :
+                'Stable identity candidates were skipped safely because the player tracker exceeded its limit.');
+        return Object.freeze([]);
+    }
+    for (const identity of trackerIdentities) {
+        add(identity, 'player-tracker', scope.wipeStart || '1970-01-01T00:00:00.000Z');
+    }
+    const history = dependencies.identityHistory;
+    let rows = [];
+    let historyUnavailable = false;
+    const hasHistory = history && typeof history.getIdentityRows === 'function';
+    try {
+        rows = hasHistory ? history.getIdentityRows({ guildId: context.guildId, serverId: scope.serverId },
+            {
+                limit: MAX_LEGACY_IDENTITY_CANDIDATES,
+                onWarning: () => { historyUnavailable = true; }
+            }) : [];
+    }
+    catch (_error) { historyUnavailable = true; }
+    if (hasHistory && (historyUnavailable || !Array.isArray(rows) ||
+        rows.length > MAX_LEGACY_IDENTITY_CANDIDATES)) {
+        warnStableCandidatesOnce(context, scope, 'history-incomplete',
+            'Stable identity candidates were skipped safely because identity history was not read completely.');
+        return Object.freeze([]);
+    }
+    for (const identity of rows) {
+        add(identity, 'teammate-language-database', identity && identity.observedAt);
+    }
+    return Object.freeze([...candidates.values()]);
 }
 
 /** @param {any} context */
@@ -529,14 +707,6 @@ function bmPlayer(battlemetrics, playerId) {
     return id && name ? Object.freeze({ steamId: null, battlemetricsPlayerId: id, name }) : null;
 }
 
-/** @param {any} projection @param {any} identity */
-function hasIdentity(projection, identity) {
-    return projection.identities.persons.some((/** @type {any} */ person) =>
-        (!identity.steamId || person.steamId === identity.steamId) &&
-        (!identity.battlemetricsPlayerId || person.battlemetricsPlayerIds.includes(identity.battlemetricsPlayerId)) &&
-        (!identity.name || person.names.some((/** @type {any} */ alias) => alias.name === identity.name)));
-}
-
 /** @param {any} context */
 async function onBattlemetricsUpdated(context) {
     const scope = getScope(context);
@@ -545,138 +715,233 @@ async function onBattlemetricsUpdated(context) {
     const store = getStore(context, scope);
     const reliable = scope.battlemetrics.lastUpdateSuccessful === true &&
         scope.battlemetrics.streamerMode !== true;
-    const trackerIdentities = trackedIdentities(scope);
-    const identityHistory = dependencies.identityHistory;
-    const legacyRows = identityHistory && typeof identityHistory.getIdentityRows === 'function' ?
-        identityHistory.getIdentityRows({ guildId: context.guildId, serverId: scope.serverId }) : [];
+    const stableCandidates = stableIdentityCandidates(context, scope, dependencies);
+    const trackerIdentities = stableCandidates.filter(identity => identity.source === 'player-tracker');
+    const legacyRows = stableCandidates.filter(identity => identity.source === 'teammate-language-database');
     const trackerFingerprint = stableFingerprint(trackerIdentities.map(identity =>
         `${identity.steamId}:${identity.battlemetricsPlayerId}:${identity.name}`));
     const legacyFingerprint = stableFingerprint(legacyRows.map((/** @type {any} */ identity) =>
         `${identity.observedAt}:${identity.steamId}:${identity.battlemetricsPlayerId || ''}:${identity.name}`)
     );
-    const hasDeltas = reliable && (context.firstTime ||
-        ['newPlayers', 'loginPlayers', 'logoutPlayers', 'nameChangedPlayers']
-            .some(key => Array.isArray(scope.battlemetrics[key]) && scope.battlemetrics[key].length > 0));
     const stateKey = typeof store.directory === 'string' ? store.directory : null;
     const hookTime = stateKey ? Date.parse(nowIso(dependencies)) : undefined;
-    const previousHookState = stateKey ? hookStates.get(stateKey, hookTime) : null;
-    if (previousHookState && previousHookState.reliable === reliable && !hasDeltas &&
+    const cachedHookState = stateKey ? hookStates.get(stateKey, hookTime) : null;
+    // A wipe changes only the authoritative roster scope. Stable tracker/history fingerprints describe identities,
+    // so keep comparing them across wipes to avoid journalling identical aliases once per wipe.
+    const previousIdentityState = cachedHookState;
+    const previousHookState = cachedHookState && cachedHookState.wipeId === scope.wipeId ? cachedHookState : null;
+    const onlineSnapshot = onlineBattlemetricsSnapshot(scope.battlemetrics);
+    const presenceReliable = reliable && onlineSnapshot.complete;
+    const availabilityMode = presenceReliable ? 'complete' : reliable ? 'incomplete' :
+        scope.battlemetrics.streamerMode === true ? 'censored' : 'failed';
+    const currentOnline = onlineSnapshot.identities;
+    const currentOnlineIds = new Set(onlineSnapshot.ids);
+    const deltaFingerprint = battlemetricsHookFingerprint(scope.battlemetrics, currentOnline);
+    if (!context.firstTime && previousHookState && previousHookState.reliable === presenceReliable &&
+        previousHookState.availabilityMode === availabilityMode &&
         previousHookState.wipeId === scope.wipeId && previousHookState.trackerFingerprint === trackerFingerprint &&
-        previousHookState.legacyFingerprint === legacyFingerprint) {
+        previousHookState.legacyFingerprint === legacyFingerprint &&
+        previousHookState.deltaFingerprint === deltaFingerprint) {
         hookStates.set(stateKey, previousHookState, HOOK_STATE_TTL_MS, hookTime);
-        schedulePlayerScan(context, scope, store, dependencies);
+        schedulePlayerScan(context, scope, store, dependencies, stableCandidates);
         return;
     }
-    const existing = await store.readAll();
-    // This hook runs on the main Discord/Rust+ process. Yield between the fixed projector stages so unrelated
-    // gateway and socket work can progress even when a large journal needs a cold rebuild.
-    const projection = await Core.rebuildAsync(existing);
     const recordedAt = nowIso(dependencies);
-    const observedAt = canonicalIso(scope.battlemetrics.updatedAt) || recordedAt;
+    const providerObservedAt = canonicalIso(scope.battlemetrics.updatedAt) || recordedAt;
+    const previousRecordedAt = canonicalIso(previousHookState && previousHookState.recordedAt);
+    const recoveringFromUntrustedPoll = presenceReliable && previousHookState &&
+        ['failed', 'censored'].includes(previousHookState.availabilityMode);
+    // On process startup the hook cache cannot reveal whether the durable journal ends in an outage. Use the local
+    // startup clock for a complete authoritative sample, so it can never sort before an already-journalled failure.
+    // Ordinary in-process cache expiry keeps provider time and therefore remains restart-idempotent.
+    const coldStartupSample = presenceReliable && !previousHookState && context.firstTime === true;
+    // A failed/censored poll is observed on our local clock because its provider timestamp is not trustworthy.
+    // If BattleMetrics then recovers with an unchanged or older timestamp, keep the recovery causally after that
+    // outage instead of letting projector ordering place the stale recovery before it.
+    const observedAt = coldStartupSample || (recoveringFromUntrustedPoll && previousRecordedAt &&
+        providerObservedAt <= previousRecordedAt) ? recordedAt : providerObservedAt;
+    // BattleMetrics can reuse updatedAt while roster completeness or membership changes. Include the bounded
+    // snapshot fingerprint so distinct samples remain distinct events, while an identical replay after restart
+    // is still idempotent.
+    const sampleKey = `${availabilityMode}:${observedAt}:${deltaFingerprint}`;
     const common = { guildId: context.guildId, observedAt, recordedAt, source: 'battlemetrics',
         confidence: 'verified', evidence: null };
+    const stableIdentityScope = { ...scope, wipeId: null };
     const events = [];
-    for (const identity of legacyRows) {
-        const consolidated = consolidateIdentity(projection, identity);
-        if (consolidated.status === 'conflict' || hasIdentity(projection, consolidated.identity)) continue;
-        events.push(identityEvent(scope, consolidated.identity, {
-            guildId: context.guildId,
-            observedAt: identity.observedAt,
-            recordedAt,
-            source: 'teammate-language-database',
-            sourceEventId: `legacy:${identity.steamId}:${identity.battlemetricsPlayerId || 'none'}:${
-                identity.observedAt}:${identity.name}`,
-            confidence: 'verified',
-            evidence: null
-        }));
-    }
-
-    if (!reliable) {
-        for (const provider of projection.presence.providers.filter(item =>
-            item.serverKey === scope.serverKey && item.source === 'battlemetrics' && item.currentState !== 'unknown')) {
-            const subject = subjectFromPerson(projection, provider.personId);
-            if (!subject) continue;
-            events.push(presenceEvent(scope, subject, 'unknown', {
-                ...common,
-                observedAt: recordedAt,
-                sourceEventId: `unavailable:${provider.personId}:${provider.lastObservedAt || 'initial'}`,
-                reason: scope.battlemetrics.streamerMode === true ? 'provider identities censored' :
-                    'provider update failed'
+    if (!previousIdentityState || previousIdentityState.legacyFingerprint !== legacyFingerprint) {
+        for (const identity of legacyRows) {
+            // Historical CSV identity evidence is server-wide, not wipe evidence. A null wipe scope keeps its
+            // deterministic event ID stable across Tuesday/Friday boundaries and prevents thousands of aliases
+            // from being appended again after every wipe.
+            events.push(identityEvent(stableIdentityScope, { ...identity, battlemetricsPlayerId: null }, {
+                guildId: context.guildId,
+                observedAt: identity.observedAt,
+                recordedAt,
+                source: 'teammate-language-database',
+                sourceEventId: `${identity.sourceEventId}:alias`,
+                confidence: 'verified',
+                evidence: null
             }));
         }
-        if (events.length > 0) await store.appendMany(events);
+    }
+    // Tracker/history evidence is local and stable: commit it even while BattleMetrics presence is unavailable.
+    // Fingerprints are stored only after this shared event batch was durably appended, so recovery cannot mistake
+    // a tracker change observed during an outage for evidence that was already journalled.
+    if (!previousIdentityState || previousIdentityState.trackerFingerprint !== trackerFingerprint) {
+        const trackerObservedAt = previousIdentityState &&
+            previousIdentityState.trackerFingerprint !== trackerFingerprint ?
+            recordedAt : scope.wipeStart || '1970-01-01T00:00:00.000Z';
+        for (const identity of trackerIdentities) {
+            events.push(identityEvent(scope, { ...identity, battlemetricsPlayerId: null }, {
+                ...common,
+                observedAt: trackerObservedAt,
+                source: 'player-tracker',
+                sourceEventId: `${identity.sourceEventId}:alias`,
+                confidence: 'verified'
+            }));
+        }
+    }
+
+    if (!presenceReliable) {
+        const previousOnline = new Map((previousHookState && previousHookState.onlineIdentities || [])
+            .map((/** @type {{id:string,name:string|null}} */ identity) => [identity.id, identity]));
+        // A successful but incomplete roster still contains valid positive presence. Failed or censored polls may
+        // contain stale/redacted names and must never overwrite the last reliable cache.
+        const availabilityChanged = !previousHookState || previousHookState.availabilityMode !== availabilityMode;
+        if (availabilityChanged) {
+            events.push(providerAvailabilityEvent(scope, 'unavailable', {
+                ...common,
+                observedAt: reliable ? observedAt : recordedAt,
+                sourceEventId: `unavailable:${sampleKey}`,
+                reason: scope.battlemetrics.streamerMode === true ? 'provider identities censored' :
+                    !reliable ? 'provider update failed' : 'provider online snapshot incomplete'
+            }));
+        }
+        if (reliable) {
+            if (availabilityChanged) {
+                // The global unavailable marker first makes the old complete roster unknown. Re-assert every valid
+                // positive afterwards; absent identities need no individual unknown event on this first transition.
+                for (const identity of currentOnline) {
+                    const observed = battlemetricsIdentity(scope.battlemetrics, identity.id, identity);
+                    if (!observed) continue;
+                    events.push(identityEvent(scope, observed, {
+                        ...common, sourceEventId: `poll:${sampleKey}:identity:${identity.id}`
+                    }));
+                    events.push(presenceEvent(scope, observed, 'online', {
+                        ...common, sourceEventId: `poll:${sampleKey}:presence:online:${identity.id}`
+                    }));
+                }
+            }
+            else {
+                // While the provider remains incomplete, emit only semantic deltas. Replaying every positive on
+                // each partial poll made the journal grow with O(roster) duplicates and obscured actual changes.
+                for (const [playerId, identity] of previousOnline) {
+                    if (currentOnlineIds.has(playerId)) continue;
+                    const observed = battlemetricsIdentity(scope.battlemetrics, playerId, identity);
+                    if (!observed) continue;
+                    events.push(presenceEvent(scope, observed, 'unknown', {
+                        ...common,
+                        reason: 'provider online snapshot incomplete',
+                        sourceEventId: `partial:${sampleKey}:presence:unknown:${playerId}`
+                    }));
+                }
+                for (const identity of currentOnline) {
+                    const previous = previousOnline.get(identity.id);
+                    const observed = battlemetricsIdentity(scope.battlemetrics, identity.id, identity);
+                    if (!observed || (previous && previous.name === identity.name)) continue;
+                    events.push(identityEvent(scope, observed, {
+                        ...common, sourceEventId: `poll:${sampleKey}:identity:${identity.id}`
+                    }));
+                    if (!previous) events.push(presenceEvent(scope, observed, 'online', {
+                        ...common, sourceEventId: `poll:${sampleKey}:presence:online:${identity.id}`
+                    }));
+                }
+            }
+        }
+        if (events.length > 0) await appendHookEvents(store, events);
         if (stateKey) hookStates.set(stateKey, {
-            reliable, wipeId: scope.wipeId, trackerFingerprint, legacyFingerprint
+            reliable: presenceReliable, wipeId: scope.wipeId, trackerFingerprint, legacyFingerprint, deltaFingerprint,
+            availabilityMode, recordedAt,
+            onlineIdentities: reliable ? currentOnline : Object.freeze([])
         }, HOOK_STATE_TTL_MS, hookTime);
-        schedulePlayerScan(context, scope, store, dependencies);
+        schedulePlayerScan(context, scope, store, dependencies, stableCandidates);
         return;
     }
 
-    const recovering = projection.presence.providers.some(item => item.serverKey === scope.serverKey &&
-        item.source === 'battlemetrics' && item.currentState === 'unknown');
+    const recovering = Boolean(previousHookState && previousHookState.availabilityMode !== 'complete');
+    const previousOnline = new Map((previousHookState && previousHookState.onlineIdentities || [])
+        .map((/** @type {{id:string,name:string|null}} */ identity) => [identity.id, identity]));
+    const availability = !previousHookState || context.firstTime || recovering ?
+        providerAvailabilityEvent(scope, 'available', {
+            ...common,
+            sourceEventId: `available:${sampleKey}`,
+            reason: null
+        }) : null;
+    /** @type {string[]} */
     let onlineIds;
+    /** @type {string[]} */
     let offlineIds;
-    if (context.firstTime || recovering) {
-        onlineIds = Array.isArray(scope.battlemetrics.onlinePlayers) ? scope.battlemetrics.onlinePlayers :
-            Object.values(scope.battlemetrics.players || {}).filter((/** @type {any} */ player) =>
-                player.status === true).map((/** @type {any} */ player) => player.id);
-        offlineIds = recovering ? Object.values(scope.battlemetrics.players || {})
-            .filter((/** @type {any} */ player) => player.status === false)
-            .map((/** @type {any} */ player) => player.id) : [];
+    if (!previousHookState || context.firstTime || recovering) {
+        onlineIds = [...currentOnlineIds];
+        // The complete-roster availability marker closes every absent identity without materializing thousands of
+        // redundant per-player offline observations.
+        offlineIds = [];
     }
     else {
-        onlineIds = [...(scope.battlemetrics.newPlayers || []), ...(scope.battlemetrics.loginPlayers || [])];
-        offlineIds = [...(scope.battlemetrics.logoutPlayers || [])];
+        onlineIds = [...currentOnlineIds].filter(id => !previousOnline.has(id));
+        const explicitLogoutIds = (scope.battlemetrics.logoutPlayers || [])
+            .map((/** @type {any} */ value) => `${value && typeof value === 'object' ? value.id : value}`)
+            .filter((/** @type {string} */ id) => !currentOnlineIds.has(id) &&
+                scope.battlemetrics.players && scope.battlemetrics.players[id]?.status === false);
+        offlineIds = [...new Set([
+            ...explicitLogoutIds,
+            ...(onlineSnapshot.complete ? [...previousOnline.keys()].filter(id => !currentOnlineIds.has(id)) : [])
+        ])];
     }
-    const changedIds = (scope.battlemetrics.nameChangedPlayers || [])
-        .map((/** @type {any} */ player) => player.id);
-    const presenceStates = new Map([
-        ...onlineIds.map((/** @type {any} */ id) => [`${id}`, 'online']),
-        ...offlineIds.map((/** @type {any} */ id) => [`${id}`, 'offline'])
-    ]);
+    const changedIds = [...new Set([
+        ...(scope.battlemetrics.nameChangedPlayers || [])
+            .map((/** @type {any} */ player) => `${player && typeof player === 'object' ? player.id : player}`),
+        ...currentOnline.filter(identity => previousOnline.has(identity.id) &&
+            previousOnline.get(identity.id).name !== identity.name).map(identity => identity.id)
+    ])];
+    /** @type {Map<string, 'online'|'offline'>} */
+    const presenceStates = new Map();
+    for (const id of onlineIds) presenceStates.set(`${id}`, 'online');
+    for (const id of offlineIds) presenceStates.set(`${id}`, 'offline');
     const identityIds = new Set([...presenceStates.keys(),
         ...changedIds.map((/** @type {any} */ id) => `${id}`)]);
     for (const playerId of identityIds) {
-        const observed = bmPlayer(scope.battlemetrics, playerId);
+        const observed = battlemetricsIdentity(scope.battlemetrics, playerId, previousOnline.get(playerId) || null);
         if (!observed) continue;
-        const consolidated = consolidateIdentity(projection, observed);
-        if (consolidated.status === 'conflict') continue;
-        events.push(identityEvent(scope, consolidated.identity, {
-            ...common, sourceEventId: `poll:${observedAt}:identity:${playerId}`
+        events.push(identityEvent(scope, observed, {
+            ...common, sourceEventId: `poll:${sampleKey}:identity:${playerId}`
         }));
     }
     for (const [playerId, state] of presenceStates) {
-        const observed = bmPlayer(scope.battlemetrics, playerId);
+        const observed = battlemetricsIdentity(scope.battlemetrics, playerId, previousOnline.get(playerId) || null);
         if (!observed) continue;
-        const consolidated = consolidateIdentity(projection, observed);
-        if (consolidated.status === 'conflict') continue;
-        events.push(presenceEvent(scope, consolidated.identity, state, {
-            ...common, sourceEventId: `poll:${observedAt}:presence:${state}:${playerId}`
+        events.push(presenceEvent(scope, observed, state, {
+            ...common, sourceEventId: `poll:${sampleKey}:presence:${state}:${playerId}`
         }));
     }
-    for (const identity of trackerIdentities) {
-        const consolidated = consolidateIdentity(projection, identity);
-        if (consolidated.status === 'conflict' || hasIdentity(projection, consolidated.identity)) continue;
-        events.push(identityEvent(scope, consolidated.identity, {
-            ...common,
-            source: 'player-tracker',
-            sourceEventId: `link:${identity.battlemetricsPlayerId}:${identity.steamId}:${identity.name}`,
-            confidence: 'verified'
-        }));
-    }
-    if (scope.wipeId && !projection.wipes.snapshots.some(item =>
-        item.serverKey === scope.serverKey && item.wipeId === scope.wipeId)) {
+    if (scope.wipeId && !previousHookState) {
         events.push(baseEvent('wipe_snapshot', scope,
             { steamId: null, battlemetricsPlayerId: null, exactName: null },
             { startsAt: scope.wipeStart, endsAt: null }, {
-                ...common, sourceEventId: `wipe:${scope.wipeId}`, confidence: 'verified'
+                ...common, observedAt: scope.wipeStart,
+                sourceEventId: `wipe:${scope.wipeId}`, confidence: 'verified'
             }));
     }
-    if (events.length > 0) await store.appendMany(events);
+    // Commit the complete-roster marker after every positive presence. If a chunked append is interrupted, the
+    // durable prefix remains conservative (possibly stale/unknown) and can never fabricate an offline player.
+    if (availability) events.push(availability);
+    if (events.length > 0) await appendHookEvents(store, events);
     if (stateKey) hookStates.set(stateKey, {
-        reliable, wipeId: scope.wipeId, trackerFingerprint, legacyFingerprint
+        reliable: presenceReliable, wipeId: scope.wipeId, trackerFingerprint, legacyFingerprint, deltaFingerprint,
+        availabilityMode, recordedAt,
+        onlineIdentities: currentOnline
     }, HOOK_STATE_TTL_MS, hookTime);
-    schedulePlayerScan(context, scope, store, dependencies);
+    schedulePlayerScan(context, scope, store, dependencies, stableCandidates);
 }
 
 /** @param {any} context */
@@ -1410,10 +1675,14 @@ function getRuntimeCacheStatus(nowMs = Date.now()) {
 
 function resetRuntimeCachesForTests() {
     hookStates.clear();
+    stableCandidateWarningTimes.clear();
 }
 
 module.exports = Object.freeze({
     DATA_DIRECTORY,
+    MAX_LEGACY_IDENTITY_CANDIDATES,
+    MAX_STABLE_IDENTITY_CANDIDATES,
+    MAX_TRACKER_IDENTITY_CANDIDATES,
     boundedList,
     commitParsedImport,
     commitParsedImports,

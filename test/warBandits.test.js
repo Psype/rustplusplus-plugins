@@ -190,6 +190,9 @@ Test('requests are serialized, gap-controlled and identical player lookups coale
     Assert.equal(test.calls[1].url.endsWith('/stats/eu5xnobps'), true);
     Assert.deepEqual(test.sleeps, [5000]);
     Assert.equal(test.calls[1].config.timeout, 5000);
+    Assert.equal(test.calls[1].config.maxContentLength, 4 * 1024 * 1024);
+    Assert.equal(test.calls[1].config.maxBodyLength, 4 * 1024 * 1024);
+    Assert.equal(test.calls[1].config.maxRedirects, 0);
     Assert.equal(test.calls[1].config.params.player_name, 'Psype');
 });
 

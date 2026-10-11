@@ -237,4 +237,63 @@ function projectClans(events, identities) {
     });
 }
 
-module.exports = Object.freeze({ projectClans });
+/**
+ * Compact clan evidence used by the background reconciliation planner. It preserves confirmed/deduplicated
+ * snapshot counts without materializing tag history, affinity pairs or the global fuzzy-roster catalogue.
+ * @param {readonly Readonly<Record<string, any>>[]} events
+ * @param {ReturnType<import('./identityProjector.js')['projectIdentities']>} identities
+ */
+function projectClanEvidence(events, identities) {
+    const evidenceSeen = new Set();
+    const snapshots = [];
+    /** @type {ReturnType<typeof prepareRosterResolver>|null} */
+    let rosterResolver = null;
+    /** @returns {ReturnType<typeof prepareRosterResolver>} */
+    function preparedRosterResolver() {
+        if (rosterResolver !== null) return rosterResolver;
+        const candidates = identityCandidates(events, identities).map(candidate => Object.freeze({
+            ...candidate,
+            personId: identities.resolveSubject({
+                steamId: candidate.steamId,
+                battlemetricsPlayerId: candidate.battlemetricsPlayerId,
+                exactName: candidate.name
+            }).personId
+        }));
+        rosterResolver = prepareRosterResolver(candidates, candidate => candidate.personId);
+        return rosterResolver;
+    }
+    const clanEvents = events.filter(event => event.kind === 'clan_snapshot').slice().sort((left, right) =>
+        left.observedAt.localeCompare(right.observedAt) || left.eventId.localeCompare(right.eventId));
+    for (const event of clanEvents) {
+        const evidenceKey = event.evidence ? `sha256:${event.evidence.hash.toLowerCase()}` : event.eventId;
+        const duplicate = evidenceSeen.has(evidenceKey);
+        if (!duplicate) evidenceSeen.add(evidenceKey);
+        const memberIds = new Set();
+        for (const member of event.payload.members) {
+            memberIds.add(identities.resolveSubject({
+                steamId: member.steamId,
+                battlemetricsPlayerId: member.battlemetricsPlayerId,
+                exactName: member.name
+            }).personId);
+        }
+        const unresolved = Array.isArray(event.payload.unresolvedMembers) ? event.payload.unresolvedMembers : [];
+        const matches = unresolved.length > 0 ? preparedRosterResolver().resolve(
+            unresolved.map((/** @type {any} */ member) => member.observedText), {}, new Set(memberIds)) : [];
+        for (const match of matches) {
+            if (match.status !== 'resolved' || !match.candidate) continue;
+            memberIds.add(identities.resolveSubject({
+                steamId: match.candidate.steamId,
+                battlemetricsPlayerId: match.candidate.battlemetricsPlayerId,
+                exactName: match.candidate.name
+            }).personId);
+        }
+        snapshots.push({
+            confirmed: COUNTED_CONFIDENCE.has(event.confidence),
+            duplicate,
+            members: [...memberIds].map(personId => ({ personId }))
+        });
+    }
+    return deepFreeze({ snapshots });
+}
+
+module.exports = Object.freeze({ projectClanEvidence, projectClans });
