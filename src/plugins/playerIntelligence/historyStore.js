@@ -3,6 +3,7 @@
 
 const Fs = require('node:fs');
 const Path = require('node:path');
+const Crypto = require('node:crypto');
 
 const Contracts = require('./contracts.js');
 
@@ -24,10 +25,21 @@ function getSharedState(directory) {
     const key = Path.resolve(directory);
     if (!sharedDirectories.has(key)) {
         sharedDirectories.set(key, {
-            queue: Promise.resolve(), knownEventIds: null, cachedEvents: null, diskSignature: null
+            queue: Promise.resolve(), knownEventIds: null, cachedEvents: null, diskSignature: null, revision: null
         });
     }
     return sharedDirectories.get(key);
+}
+
+/** @param {readonly Readonly<Record<string, any>>[]} events */
+function historyRevision(events) {
+    const hash = Crypto.createHash('sha256');
+    hash.update(`${events.length}:`, 'utf8');
+    for (const event of events) {
+        const encoded = JSON.stringify(event);
+        hash.update(`${Buffer.byteLength(encoded)}:`, 'utf8').update(encoded, 'utf8');
+    }
+    return `pi-revision:${hash.digest('hex')}`;
 }
 
 /** @param {string} directory */
@@ -59,14 +71,20 @@ async function readAllUnlocked(directory, names = null) {
     for (const file of files) {
         const path = Path.join(directory, file);
         const content = await Fs.promises.readFile(path, 'utf8');
-        const lines = content.split('\n');
-        for (let index = 0; index < lines.length; index += 1) {
-            if (lines[index] === '') continue;
+        let start = 0;
+        let line = 0;
+        while (start < content.length) {
+            const newline = content.indexOf('\n', start);
+            const end = newline === -1 ? content.length : newline;
+            line += 1;
+            const value = content.slice(start, end);
+            start = newline === -1 ? content.length : newline + 1;
+            if (value === '') continue;
             try {
-                events.push(Contracts.createEvent(JSON.parse(lines[index])));
+                events.push(Contracts.createEvent(JSON.parse(value)));
             }
             catch (error) {
-                throw new HistoryCorruptionError(path, index + 1, error);
+                throw new HistoryCorruptionError(path, line, error);
             }
         }
     }
@@ -77,7 +95,10 @@ async function readAllUnlocked(directory, names = null) {
 async function loadCachedEvents(shared, directory) {
     const names = await shardNames(directory);
     const signature = await diskSignature(directory, names);
-    if (shared.cachedEvents !== null && shared.diskSignature === signature) return shared.cachedEvents;
+    if (shared.cachedEvents !== null && shared.diskSignature === signature) {
+        if (shared.revision === null) shared.revision = historyRevision(shared.cachedEvents);
+        return shared.cachedEvents;
+    }
     const events = Object.freeze(await readAllUnlocked(directory, names));
     const verifiedNames = await shardNames(directory);
     const verifiedSignature = await diskSignature(directory, verifiedNames);
@@ -87,20 +108,45 @@ async function loadCachedEvents(shared, directory) {
     shared.cachedEvents = events;
     shared.diskSignature = signature;
     shared.knownEventIds = new Set(events.map(item => item.eventId));
+    shared.revision = historyRevision(events);
     return events;
 }
 
 /** @param {readonly Readonly<Record<string, any>>[]} existing
  * @param {readonly Readonly<Record<string, any>>[]} additions */
 function mergeInShardOrder(existing, additions) {
-    const shards = new Map();
-    for (const event of [...existing, ...additions]) {
+    const additionsByShard = new Map();
+    for (const event of additions) {
         const shard = `${event.recordedAt.slice(0, 7)}.jsonl`;
-        const values = shards.get(shard) || [];
+        const values = additionsByShard.get(shard) || [];
         values.push(event);
-        shards.set(shard, values);
+        additionsByShard.set(shard, values);
     }
-    return Object.freeze([...shards.keys()].sort().flatMap(shard => shards.get(shard)));
+    const additionShards = [...additionsByShard.keys()].sort();
+    const merged = [];
+    let existingIndex = 0;
+    let additionIndex = 0;
+    while (existingIndex < existing.length) {
+        const existingShard = `${existing[existingIndex].recordedAt.slice(0, 7)}.jsonl`;
+        while (additionIndex < additionShards.length && additionShards[additionIndex] < existingShard) {
+            merged.push(...additionsByShard.get(additionShards[additionIndex]));
+            additionIndex += 1;
+        }
+        while (existingIndex < existing.length &&
+            `${existing[existingIndex].recordedAt.slice(0, 7)}.jsonl` === existingShard) {
+            merged.push(existing[existingIndex]);
+            existingIndex += 1;
+        }
+        if (additionShards[additionIndex] === existingShard) {
+            merged.push(...additionsByShard.get(existingShard));
+            additionIndex += 1;
+        }
+    }
+    while (additionIndex < additionShards.length) {
+        merged.push(...additionsByShard.get(additionShards[additionIndex]));
+        additionIndex += 1;
+    }
+    return Object.freeze(merged);
 }
 
 class JsonlHistoryStore {
@@ -130,8 +176,35 @@ class JsonlHistoryStore {
      * @returns {Promise<readonly Readonly<{appended: boolean, event: Readonly<Record<string, any>>}>[]>}
      */
     appendMany(inputs) {
-        if (!Array.isArray(inputs) || inputs.length === 0 || inputs.length > 5000) {
-            throw new TypeError('Player-intelligence append batch must contain between 1 and 5000 events.');
+        return this.appendManyIfRevision(inputs, null).then(commit => commit.results);
+    }
+
+    /**
+     * Atomically compares the current journal revision and appends inside the same in-process writer queue.
+     * An empty batch is allowed so a read-only plan can guard its checkpoint write against a stale snapshot.
+     * Optional callbacks execute while the writer queue is held, allowing a caller to guard and commit
+     * an adjacent checkpoint without another in-process journal append interleaving.
+     * @param {readonly unknown[]} inputs @param {string|null} expectedRevision
+     * @param {{beforeAppend?:(events:readonly Readonly<Record<string,any>>[],revision:string)=>Promise<void>|void,
+     * afterAppend?:()=>Promise<void>|void}} [transaction]
+     * @returns {Promise<Readonly<{committed:boolean,revision:string,
+     * results:readonly Readonly<{appended:boolean,event:Readonly<Record<string,any>>}>[]}>>}
+     */
+    appendManyIfRevision(inputs, expectedRevision, transaction = {}) {
+        if (!Array.isArray(inputs) || inputs.length > 5000) {
+            throw new TypeError('Player-intelligence append batch must contain at most 5000 events.');
+        }
+        if (expectedRevision !== null && !/^pi-revision:[a-f0-9]{64}$/u.test(expectedRevision)) {
+            throw new TypeError('Player-intelligence expected revision is invalid.');
+        }
+        if (!transaction || typeof transaction !== 'object' ||
+            (transaction.beforeAppend !== undefined && typeof transaction.beforeAppend !== 'function') ||
+            (transaction.afterAppend !== undefined && typeof transaction.afterAppend !== 'function')) {
+            throw new TypeError('Player-intelligence append transaction is invalid.');
+        }
+        if (inputs.length === 0 && expectedRevision === null && !transaction.beforeAppend &&
+            !transaction.afterAppend) {
+            throw new TypeError('An empty player-intelligence append requires a guarded transaction.');
         }
         const events = inputs.map(input => Contracts.createEvent(input));
         const operation = this.shared.queue.then(async () => {
@@ -143,8 +216,15 @@ class JsonlHistoryStore {
                 this.shared.knownEventIds = null;
                 this.shared.cachedEvents = null;
                 this.shared.diskSignature = null;
+                this.shared.revision = null;
                 throw error;
             }
+            const currentRevision = this.shared.revision || historyRevision(existing);
+            this.shared.revision = currentRevision;
+            if (expectedRevision !== null && currentRevision !== expectedRevision) {
+                return Object.freeze({ committed: false, revision: currentRevision, results: Object.freeze([]) });
+            }
+            if (transaction.beforeAppend) await transaction.beforeAppend(existing, currentRevision);
             const batchIds = new Set();
             /** @type {Readonly<Record<string, any>>[]} */
             const additions = [];
@@ -155,7 +235,9 @@ class JsonlHistoryStore {
                 return { appended, event };
             });
             if (additions.length === 0) {
-                return Object.freeze(results.map(result => Object.freeze(result)));
+                if (transaction.afterAppend) await transaction.afterAppend();
+                return Object.freeze({ committed: true, revision: currentRevision,
+                    results: Object.freeze(results.map(result => Object.freeze(result))) });
             }
 
             await Fs.promises.mkdir(this.directory, { recursive: true });
@@ -192,10 +274,13 @@ class JsonlHistoryStore {
                 this.shared.knownEventIds = null;
                 this.shared.cachedEvents = null;
                 this.shared.diskSignature = null;
+                this.shared.revision = null;
                 throw error;
             }
             additions.forEach(event => this.shared.knownEventIds.add(event.eventId));
             this.shared.cachedEvents = mergeInShardOrder(existing, additions);
+            const committedRevision = historyRevision(this.shared.cachedEvents);
+            this.shared.revision = committedRevision;
             try {
                 const names = await shardNames(this.directory);
                 this.shared.diskSignature = await diskSignature(this.directory, names);
@@ -203,8 +288,32 @@ class JsonlHistoryStore {
             catch {
                 this.shared.cachedEvents = null;
                 this.shared.diskSignature = null;
+                this.shared.revision = null;
             }
-            return Object.freeze(results.map(result => Object.freeze(result)));
+            if (transaction.afterAppend) await transaction.afterAppend();
+            return Object.freeze({ committed: true, revision: committedRevision,
+                results: Object.freeze(results.map(result => Object.freeze(result))) });
+        });
+        this.shared.queue = operation.then(() => undefined, () => undefined);
+        return operation;
+    }
+
+    /** @returns {Promise<Readonly<{events:readonly Readonly<Record<string,any>>[],revision:string}>>} */
+    readSnapshot() {
+        const operation = this.shared.queue.then(async () => {
+            try {
+                const events = await loadCachedEvents(this.shared, this.directory);
+                const revision = this.shared.revision || historyRevision(events);
+                this.shared.revision = revision;
+                return Object.freeze({ events, revision });
+            }
+            catch (error) {
+                this.shared.knownEventIds = null;
+                this.shared.cachedEvents = null;
+                this.shared.diskSignature = null;
+                this.shared.revision = null;
+                throw error;
+            }
         });
         this.shared.queue = operation.then(() => undefined, () => undefined);
         return operation;
@@ -220,6 +329,7 @@ class JsonlHistoryStore {
                 this.shared.knownEventIds = null;
                 this.shared.cachedEvents = null;
                 this.shared.diskSignature = null;
+                this.shared.revision = null;
                 throw error;
             }
         });

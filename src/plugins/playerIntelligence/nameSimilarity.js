@@ -7,10 +7,23 @@ const DEFAULT_PROVISIONAL_SCORE = 0.55;
 const MAX_ALTERNATIVES = 3;
 const MAX_FUZZY_GROUPS_PER_NAME = 64;
 const MIN_FUZZY_GROUPS_PER_NAME = 12;
+const SEGMENTER = typeof Intl.Segmenter === 'function' ?
+    new Intl.Segmenter('und', { granularity: 'grapheme' }) : null;
+const SCRIPT_EXPRESSIONS = Object.freeze({
+    Arabic: /\p{Script=Arabic}/u,
+    Cyrillic: /\p{Script=Cyrillic}/u,
+    Han: /\p{Script=Han}/u,
+    Hangul: /\p{Script=Hangul}/u,
+    Hiragana: /\p{Script=Hiragana}/u,
+    Katakana: /\p{Script=Katakana}/u,
+    Latin: /\p{Script=Latin}/u
+});
 
 /** @typedef {{name:string,steamId:string|null,battlemetricsPlayerId:string|null,caseFidelity:boolean,
  * corroborated:boolean,contextPriority:boolean,memberIndexes:readonly number[]|null,visualScore:number|null}} Candidate */
 /** @typedef {{key:string,aliases:readonly Candidate[]}} CandidateGroup */
+/** @typedef {{resolve:(observedNames:readonly string[], options?:any,
+ * excludedIdentityKeys?:ReadonlySet<string>) => readonly any[]}} PreparedRosterResolver */
 
 /** @param {unknown} value */
 function clean(value) {
@@ -19,9 +32,8 @@ function clean(value) {
 
 /** @param {string} value */
 function graphemes(value) {
-    if (typeof Intl.Segmenter === 'function') {
-        const segmenter = new Intl.Segmenter('und', { granularity: 'grapheme' });
-        return [...segmenter.segment(value)].map(item => item.segment);
+    if (SEGMENTER !== null) {
+        return [...SEGMENTER.segment(value)].map(item => item.segment);
     }
     return Array.from(value);
 }
@@ -61,17 +73,8 @@ function retrievalBigrams(value) {
 /** @param {string} value */
 function scripts(value) {
     const result = new Set();
-    const expressions = Object.freeze({
-        Arabic: /\p{Script=Arabic}/u,
-        Cyrillic: /\p{Script=Cyrillic}/u,
-        Han: /\p{Script=Han}/u,
-        Hangul: /\p{Script=Hangul}/u,
-        Hiragana: /\p{Script=Hiragana}/u,
-        Katakana: /\p{Script=Katakana}/u,
-        Latin: /\p{Script=Latin}/u
-    });
     for (const character of value) {
-        for (const [name, expression] of Object.entries(expressions)) {
+        for (const [name, expression] of Object.entries(SCRIPT_EXPRESSIONS)) {
             if (expression.test(character)) result.add(name);
         }
     }
@@ -153,9 +156,15 @@ function similarity(observed, candidate) {
     return Math.max(0, Math.min(1, score));
 }
 
-/** @param {readonly any[]} candidates */
-function groupCandidates(candidates) {
-    /** @type {Candidate[]} */
+/**
+ * Builds the immutable public groups and, when requested, keeps the caller-owned identity key out of
+ * those public candidates. The latter lets replay callers exclude an already present person without
+ * rebuilding every name index for every historical snapshot.
+ * @param {readonly any[]} candidates
+ * @param {((candidate:any) => string|null)|null} [identityKeyFor]
+ */
+function buildCandidateGroups(candidates, identityKeyFor = null) {
+    /** @type {(Candidate & {identityKey:string|null})[]} */
     const valid = [];
     /** @type {Map<string, Set<string>>} */
     const battlemetricsSteamGroups = new Map();
@@ -170,9 +179,11 @@ function groupCandidates(candidates) {
             Object.freeze([raw.targetMemberIndex]) : null;
         const visualScore = memberIndexes !== null && typeof raw.visualScore === 'number' &&
             Number.isFinite(raw.visualScore) && raw.visualScore >= 0 && raw.visualScore <= 1 ? raw.visualScore : null;
+        const rawIdentityKey = identityKeyFor === null ? null : identityKeyFor(raw);
+        const identityKey = typeof rawIdentityKey === 'string' && rawIdentityKey ? rawIdentityKey : null;
         valid.push({ name, steamId, battlemetricsPlayerId, caseFidelity: raw.caseFidelity !== false,
             corroborated: raw.corroborated === true, contextPriority: raw.contextPriority === true,
-            memberIndexes, visualScore });
+            memberIndexes, visualScore, identityKey });
         if (steamId && battlemetricsPlayerId) {
             const keys = battlemetricsSteamGroups.get(battlemetricsPlayerId) || new Set();
             keys.add(`steam:${steamId}`);
@@ -180,7 +191,8 @@ function groupCandidates(candidates) {
         }
     }
 
-    /** @type {Map<string, {key:string,aliases:Candidate[],steamIds:Set<string>,battlemetricsIds:Set<string>}>} */
+    /** @type {Map<string, {key:string,aliases:Candidate[],steamIds:Set<string>,battlemetricsIds:Set<string>,
+     * identityKeys:Set<string>}>} */
     const groups = new Map();
     for (const candidate of valid) {
         const linkedSteamGroups = candidate.battlemetricsPlayerId ?
@@ -190,10 +202,11 @@ function groupCandidates(candidates) {
                 candidate.battlemetricsPlayerId ? `battlemetrics:${candidate.battlemetricsPlayerId}` :
                     `name:${lower(candidate.name)}`;
         const group = groups.get(key) || {
-            key, aliases: [], steamIds: new Set(), battlemetricsIds: new Set()
+            key, aliases: [], steamIds: new Set(), battlemetricsIds: new Set(), identityKeys: new Set()
         };
         if (candidate.steamId) group.steamIds.add(candidate.steamId);
         if (candidate.battlemetricsPlayerId) group.battlemetricsIds.add(candidate.battlemetricsPlayerId);
+        if (candidate.identityKey) group.identityKeys.add(candidate.identityKey);
         const existing = group.aliases.find(alias => alias.name === candidate.name &&
             alias.steamId === candidate.steamId &&
             alias.battlemetricsPlayerId === candidate.battlemetricsPlayerId &&
@@ -207,8 +220,8 @@ function groupCandidates(candidates) {
         }
         groups.set(key, group);
     }
-    /** @type {CandidateGroup[]} */
-    const result = [...groups.values()].map(group => {
+    const sortedGroups = [...groups.values()].sort((left, right) => left.key.localeCompare(right.key));
+    const result = sortedGroups.map(group => {
         const steamId = group.steamIds.size === 1 ? [...group.steamIds][0] : null;
         const battlemetricsPlayerId = group.battlemetricsIds.size === 1 ? [...group.battlemetricsIds][0] : null;
         const contextPriority = group.aliases.some(alias => alias.contextPriority);
@@ -237,11 +250,19 @@ function groupCandidates(candidates) {
                 Number(right.caseFidelity) - Number(left.caseFidelity) || left.name.localeCompare(right.name)))
         });
     });
-    return Object.freeze(result.sort((left, right) => left.key.localeCompare(right.key)));
+    return Object.freeze({
+        groups: Object.freeze(result),
+        identityKeys: Object.freeze(sortedGroups.map(group => Object.freeze([...group.identityKeys].sort())))
+    });
 }
 
-/** @param {readonly string[]} observed @param {readonly CandidateGroup[]} groups */
-function retrieveGroups(observed, groups) {
+/** @param {readonly any[]} candidates */
+function groupCandidates(candidates) {
+    return buildCandidateGroups(candidates).groups;
+}
+
+/** @param {readonly CandidateGroup[]} groups */
+function buildRetrievalCatalog(groups) {
     /** @type {Record<'exact'|'alnum'|'accentless', Map<string, Set<number>>>} */
     const indexes = {
         exact: new Map(),
@@ -267,17 +288,28 @@ function retrieveGroups(observed, groups) {
         }
     });
 
-    const selected = new Set();
+    const targeted = new Set();
     groups.forEach((group, groupIndex) => {
-        if (group.aliases.some(alias => alias.memberIndexes !== null)) selected.add(groupIndex);
+        if (group.aliases.some(alias => alias.memberIndexes !== null)) targeted.add(groupIndex);
     });
+    return Object.freeze({ groups, indexes: Object.freeze(indexes), pairIndex, targeted });
+}
+
+/**
+ * @param {readonly string[]} observed
+ * @param {ReturnType<typeof buildRetrievalCatalog>} catalog
+ * @param {ReadonlySet<number>} excluded
+ */
+function retrieveGroups(observed, catalog, excluded) {
+    const { groups, indexes, pairIndex, targeted } = catalog;
+    const selected = new Set([...targeted].filter(groupIndex => !excluded.has(groupIndex)));
     for (const name of observed) {
         const keys = strongRetrievalKey(name);
         const strong = new Set([
             ...(indexes.exact.get(keys.exact) || []),
             ...(indexes.alnum.get(keys.alnum) || []),
             ...(indexes.accentless.get(keys.accentless) || [])
-        ]);
+        ].filter(groupIndex => !excluded.has(groupIndex)));
         if (strong.size > 0) {
             for (const groupIndex of strong) selected.add(groupIndex);
             continue;
@@ -285,9 +317,10 @@ function retrieveGroups(observed, groups) {
         const fuzzy = new Set();
         const postings = retrievalBigrams(name).map(pair => ({
             pair,
-            values: pairIndex.get(pair) || new Set()
-        })).filter(posting => posting.values.size > 0)
-            .sort((left, right) => left.values.size - right.values.size || left.pair.localeCompare(right.pair));
+            values: [...(pairIndex.get(pair) || [])].filter(groupIndex => !excluded.has(groupIndex))
+        })).filter(posting => posting.values.length > 0)
+            .sort((left, right) => left.values.length - right.values.length ||
+                left.pair.localeCompare(right.pair));
         for (const posting of postings) {
             const additions = [...posting.values].filter(groupIndex => !fuzzy.has(groupIndex));
             if (fuzzy.size + additions.length > MAX_FUZZY_GROUPS_PER_NAME) continue;
@@ -364,8 +397,13 @@ function threshold(value, fallback, label) {
     return value;
 }
 
-/** @param {readonly string[]} observedNames @param {readonly any[]} candidates @param {any} options */
-function resolveRoster(observedNames, candidates, options = {}) {
+/**
+ * @param {readonly string[]} observedNames
+ * @param {ReturnType<typeof buildRetrievalCatalog>} catalog
+ * @param {any} options
+ * @param {ReadonlySet<number>} excludedGroups
+ */
+function resolveWithCatalog(observedNames, catalog, options, excludedGroups) {
     if (!Array.isArray(observedNames)) throw new TypeError('Observed roster names must be an array.');
     if (options.exactOnly !== undefined && typeof options.exactOnly !== 'boolean') {
         throw new TypeError('exactOnly must be a boolean.');
@@ -375,7 +413,7 @@ function resolveRoster(observedNames, candidates, options = {}) {
     if (observed.some(name => !name || name.length > 128)) {
         throw new TypeError('Observed roster names must be non-empty bounded strings.');
     }
-    const groups = retrieveGroups(observed, groupCandidates(candidates));
+    const groups = retrieveGroups(observed, catalog, excludedGroups);
     const aliases = observed.map((name, memberIndex) => groups.map(group => group.aliases.map(
         (/** @type {Candidate} */ alias) => {
             const eligible = alias.memberIndexes === null || alias.memberIndexes.includes(memberIndex);
@@ -448,11 +486,75 @@ function resolveRoster(observedNames, candidates, options = {}) {
     }));
 }
 
+/**
+ * Prepares immutable candidate grouping and retrieval indexes once for repeated historical roster replays.
+ * `identityKeyFor` is deliberately private metadata: it is never returned in candidate evidence.
+ * @param {readonly any[]} candidates
+ * @param {((candidate:any) => string|null)|null} [identityKeyFor]
+ * @returns {Readonly<PreparedRosterResolver>}
+ */
+function prepareRosterResolver(candidates, identityKeyFor = null) {
+    if (identityKeyFor !== null && typeof identityKeyFor !== 'function') {
+        throw new TypeError('identityKeyFor must be a function.');
+    }
+    const source = Array.isArray(candidates) ? candidates : [];
+    const grouped = buildCandidateGroups(source, identityKeyFor);
+    const catalog = buildRetrievalCatalog(grouped.groups);
+    /** @type {Map<string, number[]>} */
+    const groupIndexesByIdentityKey = new Map();
+    grouped.identityKeys.forEach((identityKeys, groupIndex) => {
+        for (const identityKey of identityKeys) {
+            const indexes = groupIndexesByIdentityKey.get(identityKey) || [];
+            indexes.push(groupIndex);
+            groupIndexesByIdentityKey.set(identityKey, indexes);
+        }
+    });
+    return Object.freeze({
+        /**
+         * @param {readonly string[]} observedNames
+         * @param {any} [options]
+         * @param {ReadonlySet<string>} [excludedIdentityKeys]
+         * @returns {readonly any[]}
+         */
+        resolve(observedNames, options = {}, excludedIdentityKeys = new Set()) {
+            const excludedKeys = excludedIdentityKeys instanceof Set ? excludedIdentityKeys : new Set();
+            const excludedGroups = new Set();
+            let needsExactFallback = false;
+            const excludedCountByGroup = new Map();
+            for (const excludedKey of excludedKeys) {
+                for (const groupIndex of groupIndexesByIdentityKey.get(excludedKey) || []) {
+                    excludedCountByGroup.set(groupIndex, (excludedCountByGroup.get(groupIndex) || 0) + 1);
+                }
+            }
+            for (const [groupIndex, excludedCount] of excludedCountByGroup) {
+                const identityKeys = grouped.identityKeys[groupIndex];
+                if (excludedCount === identityKeys.length) excludedGroups.add(groupIndex);
+                else if (excludedCount > 0) needsExactFallback = true;
+            }
+            if (needsExactFallback && identityKeyFor !== null) {
+                return resolveRoster(observedNames, source.filter(candidate => {
+                    if (!candidate || typeof candidate !== 'object') return true;
+                    const key = identityKeyFor(candidate);
+                    return typeof key !== 'string' || !excludedKeys.has(key);
+                }), options);
+            }
+            return resolveWithCatalog(observedNames, catalog, options, excludedGroups);
+        }
+    });
+}
+
+/** @param {readonly string[]} observedNames @param {readonly any[]} candidates @param {any} options
+ * @returns {readonly any[]} */
+function resolveRoster(observedNames, candidates, options = {}) {
+    return prepareRosterResolver(candidates).resolve(observedNames, options);
+}
+
 module.exports = Object.freeze({
     DEFAULT_PROVISIONAL_SCORE,
     DEFAULT_RESOLVED_MARGIN,
     DEFAULT_RESOLVED_SCORE,
     groupCandidates,
+    prepareRosterResolver,
     resolveRoster,
     similarity
 });

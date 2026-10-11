@@ -7,7 +7,8 @@ const { deepFreeze } = require('./contracts.js');
 function projectPresence(events, identities) {
     /** @type {Map<string, {personId: string, serverKey: string, source: string, events: any[]}>} */
     const groups = new Map();
-    for (const event of events.filter(item => item.kind === 'presence_observed')) {
+    for (const event of events) {
+        if (event.kind !== 'presence_observed') continue;
         const resolution = identities.resolveSubject(event.subject);
         const key = `${resolution.personId}\u0000${event.scope.serverKey}\u0000${event.provenance.source}`;
         if (!groups.has(key)) groups.set(key, {

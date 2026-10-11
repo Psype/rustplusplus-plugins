@@ -3,7 +3,7 @@
 
 const { deepFreeze } = require('./contracts.js');
 const { nameKey } = require('./identityProjector.js');
-const { resolveRoster } = require('./nameSimilarity.js');
+const { prepareRosterResolver } = require('./nameSimilarity.js');
 
 const COUNTED_CONFIDENCE = new Set(['authoritative', 'verified']);
 const ROLE_WEIGHT = Object.freeze({ leader: 3, moderator: 2, member: 1, unknown: 0 });
@@ -49,13 +49,13 @@ function projectClans(events, identities) {
     const known = new Map();
     const playedByPerson = new Map();
     const tags = new Map();
-    /** @type {(Readonly<Record<string, any>> & {personId:string})[]|null} */
-    let candidates = null;
+    /** @type {ReturnType<typeof prepareRosterResolver>|null} */
+    let rosterResolver = null;
 
-    /** @returns {readonly (Readonly<Record<string, any>> & {personId:string})[]} */
-    function indexedCandidates() {
-        if (candidates !== null) return candidates;
-        candidates = identityCandidates(events, identities).map(candidate => Object.freeze({
+    /** @returns {ReturnType<typeof prepareRosterResolver>} */
+    function preparedRosterResolver() {
+        if (rosterResolver !== null) return rosterResolver;
+        const candidates = identityCandidates(events, identities).map(candidate => Object.freeze({
             ...candidate,
             personId: identities.resolveSubject({
                 steamId: candidate.steamId,
@@ -63,7 +63,8 @@ function projectClans(events, identities) {
                 exactName: candidate.name
             }).personId
         }));
-        return candidates;
+        rosterResolver = prepareRosterResolver(candidates, candidate => candidate.personId);
+        return rosterResolver;
     }
 
     for (const event of events.filter(item => item.kind === 'clan_snapshot').slice().sort((left, right) =>
@@ -102,9 +103,9 @@ function projectClans(events, identities) {
 
         const persistedUnresolved = /** @type {any[]} */ (Array.isArray(event.payload.unresolvedMembers) ?
             event.payload.unresolvedMembers : []);
-        const matches = persistedUnresolved.length > 0 ? resolveRoster(
+        const matches = persistedUnresolved.length > 0 ? preparedRosterResolver().resolve(
             persistedUnresolved.map(member => member.observedText),
-            indexedCandidates().filter(candidate => !members.has(candidate.personId))) : [];
+            {}, new Set(members.keys())) : [];
         const unresolvedMembers = [];
         for (let index = 0; index < persistedUnresolved.length; index += 1) {
             const unresolved = persistedUnresolved[index];

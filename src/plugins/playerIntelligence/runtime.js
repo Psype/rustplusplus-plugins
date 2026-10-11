@@ -204,7 +204,14 @@ function playerScanOptions(context, scope, store, dependencies) {
         store,
         directory: typeof store.directory === 'string' ? store.directory : getDataDirectory(context, scope),
         dependencies: Object.freeze(scanDependencies),
-        warBanditsProvider: dependencies.warBanditsProvider || null
+        warBanditsProvider: dependencies.warBanditsProvider || null,
+        // The global worker FIFO can outlive a wipe boundary. Re-evaluate the canonical runtime scope
+        // when the job is dispatched and again before its parent-side commit.
+        resolveCurrentScope: getScope,
+        // A configured store/daemon is a test or integration seam and stays deterministic in-process.
+        // The standard file-backed production scan is planned in a disposable read-only child process.
+        isolateProcess: !dependencies.store && !dependencies.playerScanDaemon &&
+            dependencies.playerScanIsolation !== false
     });
 }
 
@@ -561,7 +568,9 @@ async function onBattlemetricsUpdated(context) {
         return;
     }
     const existing = await store.readAll();
-    const projection = Core.rebuild(existing);
+    // This hook runs on the main Discord/Rust+ process. Yield between the fixed projector stages so unrelated
+    // gateway and socket work can progress even when a large journal needs a cold rebuild.
+    const projection = await Core.rebuildAsync(existing);
     const recordedAt = nowIso(dependencies);
     const observedAt = canonicalIso(scope.battlemetrics.updatedAt) || recordedAt;
     const common = { guildId: context.guildId, observedAt, recordedAt, source: 'battlemetrics',

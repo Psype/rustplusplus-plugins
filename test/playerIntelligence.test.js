@@ -143,6 +143,74 @@ Test('JSONL history serializes concurrent appends, deduplicates and detects corr
     await Assert.rejects(() => firstStore.append(identity()), PlayerIntelligence.HistoryCorruptionError);
 });
 
+Test('JSONL revisions provide stable compare-and-append semantics across stores and shards', async t => {
+    const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-player-intelligence-revision-'));
+    t.after(() => Fs.rmSync(directory, { recursive: true, force: true }));
+    const firstStore = new PlayerIntelligence.JsonlHistoryStore({ directory });
+    const secondStore = new PlayerIntelligence.JsonlHistoryStore({ directory });
+
+    const emptyFirst = await firstStore.readSnapshot();
+    const emptySecond = await secondStore.readSnapshot();
+    Assert.equal(emptySecond.revision, emptyFirst.revision);
+    const recent = identity({ observedAt: '2026-10-03T12:00:00.000Z' });
+    Assert.equal((await firstStore.append(recent)).appended, true);
+    const afterAppend = await secondStore.readSnapshot();
+    Assert.notEqual(afterAppend.revision, emptyFirst.revision);
+    Assert.equal((await secondStore.append(recent)).appended, false);
+    Assert.equal((await firstStore.readSnapshot()).revision, afterAppend.revision);
+
+    const left = identity({ observedAt: '2026-10-03T12:01:00.000Z' });
+    const right = identity({ observedAt: '2026-10-03T12:02:00.000Z' });
+    const competing = await Promise.all([
+        firstStore.appendManyIfRevision([left], afterAppend.revision),
+        secondStore.appendManyIfRevision([right], afterAppend.revision)
+    ]);
+    Assert.equal(competing.filter(commit => commit.committed).length, 1);
+    Assert.equal((await firstStore.readAll()).length, 2);
+
+    const staleEmpty = await secondStore.appendManyIfRevision([], afterAppend.revision);
+    Assert.equal(staleEmpty.committed, false);
+    Assert.equal((await firstStore.readAll()).length, 2);
+
+    const beforeOldShard = await firstStore.readSnapshot();
+    const old = identity({ observedAt: '2025-01-02T03:04:05.000Z' });
+    const oldCommit = await secondStore.appendManyIfRevision([old], beforeOldShard.revision);
+    Assert.equal(oldCommit.committed, true);
+    Assert.notEqual(oldCommit.revision, beforeOldShard.revision);
+    Assert.equal(Fs.existsSync(Path.join(directory, '2025-01.jsonl')), true);
+    Assert.equal((await new PlayerIntelligence.JsonlHistoryStore({ directory }).readSnapshot()).revision,
+        oldCommit.revision);
+});
+
+Test('JSONL guarded transactions never advance a checkpoint before durable journal evidence', async t => {
+    const directory = Fs.mkdtempSync(Path.join(Os.tmpdir(), 'rpp-player-intelligence-transaction-'));
+    t.after(() => Fs.rmSync(directory, { recursive: true, force: true }));
+    const store = new PlayerIntelligence.JsonlHistoryStore({ directory });
+    const rejectedBeforeWrite = identity({ observedAt: '2026-10-03T12:03:00.000Z' });
+    await Assert.rejects(() => store.appendManyIfRevision([rejectedBeforeWrite], null, {
+        beforeAppend: () => { throw new Error('checkpoint compare failed'); }
+    }), /checkpoint compare failed/u);
+    Assert.equal((await store.readAll()).some(item => item.eventId === rejectedBeforeWrite.eventId), false);
+
+    const durableBeforeCheckpoint = identity({ observedAt: '2026-10-03T12:04:00.000Z' });
+    const before = await store.readSnapshot();
+    await Assert.rejects(() => store.appendManyIfRevision([durableBeforeCheckpoint], null, {
+        afterAppend: () => { throw new Error('checkpoint write failed'); }
+    }), /checkpoint write failed/u);
+    const afterFailure = await store.readSnapshot();
+    Assert.notEqual(afterFailure.revision, before.revision);
+    Assert.equal(afterFailure.events.some(item => item.eventId === durableBeforeCheckpoint.eventId), true);
+
+    let retryCheckpointWrites = 0;
+    const retry = await store.appendManyIfRevision([durableBeforeCheckpoint], null, {
+        afterAppend: () => { retryCheckpointWrites += 1; }
+    });
+    Assert.equal(retry.committed, true);
+    Assert.equal(retry.results[0].appended, false);
+    Assert.equal(retryCheckpointWrites, 1);
+    Assert.equal((await store.readAll()).filter(item => item.eventId === durableBeforeCheckpoint.eventId).length, 1);
+});
+
 Test('identity projection joins stable IDs and keeps name-only links reversible', () => {
     const base = [
         identity({

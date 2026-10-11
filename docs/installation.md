@@ -40,6 +40,23 @@ Production translations and Tesseract calls run in supervised child processes. T
 and are restarted on the next request after a crash or timeout; their failure must not restart the core bot. They are
 still children of `rustplusplus.service`, so a hard per-worker RSS limit requires separate systemd units if needed.
 
+The heavy player-intelligence scan also runs in a disposable child process. It reads a revisioned journal snapshot and
+returns a bounded plan; only the parent process may validate and append that plan. Unrelated concurrent observations
+are rebased. A changed checkpoint/scope, manual link/revocation/supersession, stable-ID conflict, or observation that
+touches the SteamID, BattleMetrics ID or exact name used by the plan makes only that plan stale and schedules a bounded
+retry. At most one scan worker runs at once and pending servers use a bounded, coalesced FIFO. Deferred manual rescans
+remain forced, and shutdown waits for an active parent commit. `RPP_PLAYER_SCAN_WORKER_HEAP_MIB` sets its V8 heap limit between 512 and
+2048 MiB (1536 by default). Lower it only after checking real `/runtime` failures: this limit contains the child heap,
+but the child still shares the systemd service cgroup and host RAM with the core bot.
+Run only one RustPlusPlus parent against a given `data/player-intelligence` directory; the revision guard serializes
+writers inside that parent and is not a cross-process file lock.
+
+Journal evidence is fsynced before the scan checkpoint is replaced. Those two files are deliberately ordered but not
+an atomic cross-file transaction: a crash during parent commit may leave durable journal events with an older
+checkpoint, never a checkpoint ahead of evidence. A later cycle safely resumes. Deterministic event IDs deduplicate
+unchanged work; an observation reconstructed with a new timestamp may repeat, but existing evidence is never deleted
+and the checkpoint remains recoverably behind it.
+
 `Tesseract OCR unavailable: spawn tesseract ENOENT` means the service cannot find that executable. Verify
 `command -v tesseract` and `tesseract --list-langs` under the deployment environment; `eng` must be listed. An import
 rejected for this reason commits nothing and can be submitted again after installation.

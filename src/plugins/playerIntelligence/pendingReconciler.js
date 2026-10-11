@@ -8,6 +8,12 @@ const IdentityAdministration = require('./identityAdministration.js');
 const MAX_CHECKED = 200000;
 const MAX_RETRIES = 10000;
 const FRESH_BURST_LIMIT = 2;
+const CHECKPOINT_FIELDS = Object.freeze([
+    'active', 'startedAt', 'completedAt', 'checkedBattlemetricsIds', 'battlemetricsRetries',
+    'battlemetricsFreshStreak', 'battlemetricsRetryAt', 'battlemetricsFailures',
+    'checkedWarBanditsKeys', 'warBanditsRetries', 'warBanditsFreshStreak', 'warBanditsRetryAt',
+    'warBanditsFailures', 'linked', 'noMatch', 'conflicts'
+]);
 
 /** @param {unknown} value */
 function normalize(value) {
@@ -60,7 +66,10 @@ function validateRetries(value, idField, validId, label) {
     const ids = new Set();
     for (const retry of value) {
         const id = retry && typeof retry === 'object' ? `${retry[idField] || ''}` : '';
-        if (!validId(id) || ids.has(id) || !Number.isSafeInteger(retry.failures) || retry.failures < 1 ||
+        const keys = retry && typeof retry === 'object' ? Object.keys(retry) : [];
+        if (keys.length !== 3 || !keys.includes(idField) || !keys.includes('failures') ||
+            !keys.includes('nextAttemptAt') || !validId(id) || ids.has(id) ||
+            !Number.isSafeInteger(retry.failures) || retry.failures < 1 ||
             retry.failures > 1000 || typeof retry.nextAttemptAt !== 'string' ||
             Number.isNaN(Date.parse(retry.nextAttemptAt))) {
             throw new TypeError(`pending reconciliation ${label} entry is invalid`);
@@ -75,6 +84,10 @@ function validateCheckpoint(value) {
         throw new TypeError('pending reconciliation checkpoint is invalid');
     }
     const checkpoint = /** @type {any} */ (value);
+    const keys = Object.keys(checkpoint);
+    if (keys.length !== CHECKPOINT_FIELDS.length || keys.some(key => !CHECKPOINT_FIELDS.includes(key))) {
+        throw new TypeError('pending reconciliation checkpoint fields are invalid');
+    }
     if (typeof checkpoint.active !== 'boolean') throw new TypeError('pending reconciliation state is invalid');
     validTimestamp(checkpoint.startedAt, 'start time');
     validTimestamp(checkpoint.completedAt, 'completion time');

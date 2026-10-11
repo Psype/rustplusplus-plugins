@@ -284,12 +284,16 @@ Critères : nombre maximal de jobs et de pixels connu, nettoyage testé, sémant
 
 ### Lot 11 — Journal et projecteurs
 
-Statut : partiellement réalisé en `1.22.43`.
+Statut : optimisation transparente réalisée en `1.22.44`; snapshots durables reportés faute de besoin mesuré.
 
 Le produit cartésien alias × BattleMetrics IDs de `projectionCandidates` a été remplacé par une représentation
-linéaire `B + 2A`. Le benchmark de régression pathologique passe de 6 250 000 à 7 500 candidats pour 2 500 alias et
-2 500 IDs, avec tests différentiels garantissant la même consolidation métier. Le cycle de vie du snapshot partagé
-reste à mesurer et optimiser séparément.
+linéaire `B + 2A`. En `1.22.44`, le replay historique des membres non résolus partage un catalogue Unicode préparé,
+la lecture JSONL évite le tableau de toutes les lignes, la fusion du cache suit les shards, les métriques choisissent
+leur maximum en un passage et les résolutions d'identité répétées sont mémoïsées avec un plafond strict.
+
+Sur le corpus synthétique de 2 700 personnes, le replay 120 captures × 4 slots passe d'environ 23,25 s à 0,33–0,37 s
+et 1 200 captures prennent environ 1,70 s. Les projecteurs identité/métriques/présence traitent 81 000 événements en
+environ 0,39 s et 324 000 en environ 1,24 s. Leur poids ne justifie donc pas encore un snapshot dérivé persistant.
 
 1. Mesurer le coût de `readAll` et des reconstructions par commande.
 2. Réutiliser une projection immuable tant que le journal n’a pas changé.
@@ -300,7 +304,8 @@ Critères : journal JSONL toujours source de vérité, replay complet détermini
 
 ### Lot 12 — Runtime de production
 
-Statut : partiellement réalisé en `1.22.43`, validation serveur encore requise.
+Statut : runtime natif validé sur la fenêtre fournie en `1.22.43`; isolation du scan réalisée en `1.22.44`, validation
+serveur encore requise.
 
 1. Lancer Node directement via `index.js` plutôt que conserver `ts-node` en continu — réalisé ; la validation
    TypeScript reste exécutée avant release.
@@ -311,14 +316,19 @@ Statut : partiellement réalisé en `1.22.43`, validation serveur encore requise
 Critères : démarrage reproductible, mémoire stable sur plusieurs wipes et rollback sans toucher aux données persistantes.
 
 Une sonde locale de chargement mesure environ 47,7 MiB de heap avec Node natif contre 1 067 MiB avec `ts-node`.
-La production doit encore confirmer la stabilité au-delà de l'ancienne OOM reproductible à 376–378 secondes avant
-tout ajout de `MemoryMax`.
+L'extrait de production `1.22.43` a franchi l'ancienne OOM reproductible à 376–378 secondes, mais a révélé des scans de
+44–48 secondes bloquant le cœur 40–42 secondes. `1.22.44` déplace leur planification dans un child one-shot, conserve
+le parent comme writer unique avec checkpoint/scope exacts et guards ciblés Steam/BM/nom. Les appends indépendants
+sont rebasés ; corrections, conflits et supersessions rendent le plan stale avec un seul retry immédiat. Une FIFO
+bornée/coalescée conserve les reruns manuels, rafraîchit le wipe au dispatch et l'arrêt attend le commit parent. Le
+journal est fsync avant le checkpoint : une panne peut laisser le checkpoint en retard, jamais en avance. La
+production doit maintenant confirmer la disparition des stalls avant tout ajout de `MemoryMax`.
 
-## Vérifications de production des lots 1 à 5
+## Vérifications de production restantes
 
 Après `git pull` et redémarrage :
 
-1. vérifier `RUSTPLUS v1.22.41 OPERATIONAL` ;
+1. vérifier `RUSTPLUS v1.22.44 OPERATIONAL` ;
 2. noter RSS, `heapUsed` et temps de réponse avant l’import ;
 3. rejouer le lot de 11 SteamID, puis un lot de 100 ID si disponible ;
 4. exiger un aperçu rapide, les noms locaux déjà vérifiés et aucun dialogue Replace/Keep pour le lot identique ;

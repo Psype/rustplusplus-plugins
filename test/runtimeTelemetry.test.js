@@ -65,7 +65,8 @@ Test('runtime telemetry emits one immutable bounded 60-second aggregate without 
             imports: () => ({ active: 1, previewsPending: 2, decisionsClaimed: 3, decisionQueues: 4,
                 message: sentinel }),
             ocr: () => ({ active: 1, queued: 2, queuedBytes: 3 * 1024 * 1024, steamId: sentinel }),
-            scans: () => ({ active: 1, forcedRerunsQueued: 1, path: sentinel }),
+            scans: () => ({ active: 1, forcedRerunsQueued: 1, workerActive: 1, workerQueued: 2,
+                workerCompleted: 12, workerFailures: 3, workerStalePlans: 4, path: sentinel }),
             translations: () => ({ active: 2, queued: 0, token: sentinel })
         }
     }), true);
@@ -106,6 +107,15 @@ Test('runtime telemetry emits one immutable bounded 60-second aggregate without 
     Assert.equal(snapshot.collectorFailures, 0);
     Assert.deepEqual(Object.keys(snapshot.sources.imports),
         ['active', 'previewsPending', 'decisionsClaimed', 'decisionQueues']);
+    Assert.deepEqual(snapshot.sources.scans, {
+        active: 1,
+        forcedRerunsQueued: 1,
+        workerActive: 1,
+        workerQueued: 2,
+        workerCompleted: 12,
+        workerFailures: 3,
+        workerStalePlans: 4
+    });
     Assert.equal(Object.isFrozen(snapshot), true);
     Assert.equal(Object.isFrozen(snapshot.operations.translation), true);
     Assert.equal(value.telemetry.getLastSnapshot(), snapshot);
@@ -119,6 +129,8 @@ Test('runtime telemetry emits one immutable bounded 60-second aggregate without 
         /translation_started=1 translation_completed=1 .*translation_skipped=0 .*translation_p95Ms=5000/);
     Assert.match(value.logs.find(log => log.title === 'RUNTIME_WORK').message,
         /ocr_queue_wait_started=0 .*ocr_queue_wait_maxMs=0/);
+    Assert.match(value.logs.find(log => log.title === 'RUNTIME').message,
+        /scanWorkersActive=1 scanWorkersQueued=2 scanWorkersCompleted=12 scanWorkerFailures=3 scanWorkerStalePlans=4/);
 
     value.telemetry.stop();
     Assert.equal(value.cleared(), true);

@@ -35,8 +35,32 @@ const WARBANDITS_PENDING_SOURCE = 'warbandits-pending-reconciliation-daemon';
 const BATTLEMETRICS_IDENTIFIER_SOURCE = 'battlemetrics-identifier-daemon';
 const STEAM_CURRENT_SOURCE = 'steam-profile-current';
 const STEAM_ALIAS_SOURCE = 'steam-profile-alias-history';
+const PLAN_IDENTITY_SOURCES = new Set([
+    ONLINE_SOURCE, WARBANDITS_SOURCE, WARBANDITS_LOOKUP_SOURCE, WARBANDITS_PENDING_SOURCE,
+    BATTLEMETRICS_IDENTIFIER_SOURCE, STEAM_CURRENT_SOURCE, STEAM_ALIAS_SOURCE
+]);
+const PLAN_METRIC_SOURCES = new Set([
+    WARBANDITS_SOURCE, WARBANDITS_LOOKUP_SOURCE, WARBANDITS_PENDING_SOURCE
+]);
+const PLAN_PROTOCOL_VERSION = 3;
+const MAX_IDENTITY_GUARDS = 512;
+const PLAN_FIELDS = Object.freeze([
+    'protocolVersion', 'baseRevision', 'baseControlRevision', 'baseStateRevision',
+    'identityGuards', 'result', 'events', 'state'
+]);
+const IDENTITY_CONTROL_REVISION_KINDS = new Set([
+    'identity_linked', 'identity_link_revoked', 'events_superseded'
+]);
+const STATE_FIELDS = Object.freeze([
+    'schemaVersion', 'guildId', 'serverKey', 'wipeId', 'nextWarBanditsPage', 'warBanditsResumeAt',
+    'warBanditsSweeps', 'seenWarBanditsSteamIds', 'targetedLookupSteamIds', 'targetedLookupRetries',
+    'targetedFreshStreak', 'refreshedSteamIds', 'profiledSteamIds', 'steamProfileRetries',
+    'steamProfileFreshStreak', 'pendingReconciliation', 'warBanditsRetryAt', 'warBanditsFailures', 'updatedAt'
+]);
 const inFlight = new Map();
 const forcedReruns = new Map();
+const staleRetryCounts = new Map();
+const MAX_IMMEDIATE_STALE_RETRIES = 1;
 const manualTriggerTimes = BoundedTtlCache.createBoundedTtlCache({
     maxEntries: MANUAL_TRIGGER_MAX_ENTRIES, defaultTtlMs: MANUAL_RESCAN_COOLDOWN_MS
 });
@@ -55,6 +79,17 @@ class ScanDaemonStateError extends Error {
     }
 }
 
+class StaleScanPlanError extends Error {
+    /** @param {'journal'|'checkpoint'|'scope'} [component] */
+    constructor(component = 'journal') {
+        super(`Player scan ${component} changed while the worker was planning; a fresh cycle was queued.`);
+        this.name = 'StaleScanPlanError';
+        this.code = 'STALE_SCAN_PLAN';
+        this.component = component;
+        this.retryable = true;
+    }
+}
+
 /** @param {unknown} value */
 function sanitize(value) {
     return `${value || ''}`.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim();
@@ -69,6 +104,24 @@ function normalize(value) {
 function canonicalIso(value) {
     const date = value instanceof Date ? value : new Date(/** @type {any} */ (value));
     return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+/** @param {any} options */
+function assertMatchingStoreDirectory(options) {
+    if (options && options.store && typeof options.store.directory === 'string' &&
+        Path.resolve(options.store.directory) !== Path.resolve(options.directory)) {
+        throw new TypeError('Player scan journal and checkpoint directories must match.');
+    }
+}
+
+/** @param {any} options */
+function assertCurrentScope(options) {
+    if (!options || typeof options.resolveCurrentScope !== 'function') return;
+    let current;
+    try { current = options.resolveCurrentScope(options.context); }
+    catch (_error) { throw new StaleScanPlanError('scope'); }
+    if (!current || !current.wipeId || current.serverKey !== options.scope.serverKey ||
+        current.wipeId !== options.scope.wipeId) throw new StaleScanPlanError('scope');
 }
 
 /** @param {any} dependencies */
@@ -92,6 +145,158 @@ function shortToken(value) {
 /** @param {string} directory */
 function statePath(directory) {
     return Path.join(directory, STATE_FILE);
+}
+
+/** @param {string|null} text */
+function stateRevision(text) {
+    if (text === null) return 'pi-scan-state:absent';
+    return `pi-scan-state:${Crypto.createHash('sha256').update(text, 'utf8').digest('hex')}`;
+}
+
+/**
+ * Hashes non-monotonic identity controls. Ordinary immutable observations may be rebased and are checked
+ * semantically below, but a manual link/revocation or supersession must force a fresh plan so stale work cannot
+ * restore evidence an operator just corrected.
+ * @param {readonly Readonly<Record<string, any>>[]} events
+ */
+function controlRevision(events) {
+    const hash = Crypto.createHash('sha256');
+    let count = 0;
+    hash.update('player-intelligence-identity-control-revision-v1\u0000', 'utf8');
+    for (const event of events) {
+        if (!IDENTITY_CONTROL_REVISION_KINDS.has(event.kind)) continue;
+        const encoded = JSON.stringify(event);
+        hash.update(`${Buffer.byteLength(encoded)}:`, 'utf8').update(encoded, 'utf8');
+        count += 1;
+    }
+    hash.update(`:${count}`, 'utf8');
+    return `pi-control-revision:${hash.digest('hex')}`;
+}
+
+/**
+ * Derives the journal read-set behind every new Steam/BattleMetrics pair. Names emitted for the same SteamID are
+ * included because pending and online reconciliation may have selected a BattleMetrics identity by exact name.
+ * @param {readonly Readonly<Record<string, any>>[]} events
+ */
+function plannedIdentityGuardDescriptors(events) {
+    const namesBySteamId = new Map();
+    for (const event of events) {
+        if (event.kind !== 'identity_observed' || !event.subject.steamId || !event.subject.exactName) continue;
+        const names = namesBySteamId.get(event.subject.steamId) || new Set();
+        names.add(normalize(event.subject.exactName));
+        namesBySteamId.set(event.subject.steamId, names);
+    }
+    const pairs = new Map();
+    for (const event of events) {
+        if (event.kind !== 'identity_observed' || !event.subject.steamId ||
+            !event.subject.battlemetricsPlayerId) continue;
+        const key = `${event.subject.steamId}\u0000${event.subject.battlemetricsPlayerId}`;
+        if (!pairs.has(key)) pairs.set(key, {
+            steamId: event.subject.steamId,
+            battlemetricsPlayerId: event.subject.battlemetricsPlayerId,
+            names: [...(namesBySteamId.get(event.subject.steamId) || [])].sort()
+        });
+    }
+    const pairedSteamIds = new Set([...pairs.values()].map(pair => pair.steamId));
+    for (const event of events) {
+        if (event.kind !== 'identity_observed' || event.provenance.source !== WARBANDITS_PENDING_SOURCE ||
+            !event.subject.steamId || !event.subject.exactName || pairedSteamIds.has(event.subject.steamId)) continue;
+        const key = `${event.subject.steamId}\u0000`;
+        if (!pairs.has(key)) pairs.set(key, {
+            steamId: event.subject.steamId,
+            battlemetricsPlayerId: null,
+            names: [...(namesBySteamId.get(event.subject.steamId) || [])].sort()
+        });
+    }
+    return [...pairs.values()].sort((left, right) =>
+        `${left.steamId}\u0000${left.battlemetricsPlayerId || ''}`.localeCompare(
+            `${right.steamId}\u0000${right.battlemetricsPlayerId || ''}`));
+}
+
+/**
+ * Computes all guard digests in one journal pass. An unrelated login therefore remains rebasable, while a new
+ * observation sharing a selected SteamID, BattleMetrics ID or decision name invalidates the stale inference.
+ * @param {readonly Readonly<Record<string, any>>[]} events
+ * @param {readonly {steamId:string,battlemetricsPlayerId:string|null,names:readonly string[]}[]} descriptors
+ */
+function identityGuardRevisions(events, descriptors) {
+    if (descriptors.length === 0) return [];
+    const steamIndexes = new Map();
+    const battlemetricsIndexes = new Map();
+    const nameIndexes = new Map();
+    const hashes = descriptors.map(descriptor => Crypto.createHash('sha256')
+        .update('player-intelligence-identity-guard-v1\u0000', 'utf8')
+        .update(JSON.stringify([descriptor.steamId, descriptor.battlemetricsPlayerId, descriptor.names]), 'utf8')
+        .update('\u0000', 'utf8'));
+    const counts = descriptors.map(() => 0);
+    /** @param {Map<string,Set<number>>} index @param {string} key @param {number} position */
+    function add(index, key, position) {
+        const positions = index.get(key) || new Set();
+        positions.add(position);
+        index.set(key, positions);
+    }
+    descriptors.forEach((descriptor, position) => {
+        add(steamIndexes, descriptor.steamId, position);
+        if (descriptor.battlemetricsPlayerId) {
+            add(battlemetricsIndexes, descriptor.battlemetricsPlayerId, position);
+        }
+        for (const name of descriptor.names) add(nameIndexes, name, position);
+    });
+    for (const event of events) {
+        if (event.kind !== 'identity_observed') continue;
+        const positions = new Set();
+        if (event.subject.steamId) {
+            for (const position of steamIndexes.get(event.subject.steamId) || []) positions.add(position);
+        }
+        if (event.subject.battlemetricsPlayerId) {
+            for (const position of battlemetricsIndexes.get(event.subject.battlemetricsPlayerId) || []) {
+                positions.add(position);
+            }
+        }
+        if (event.subject.exactName) {
+            for (const position of nameIndexes.get(normalize(event.subject.exactName)) || []) positions.add(position);
+        }
+        if (positions.size === 0) continue;
+        const encoded = JSON.stringify(event);
+        const prefix = `${Buffer.byteLength(encoded)}:`;
+        for (const position of positions) {
+            hashes[position].update(prefix, 'utf8').update(encoded, 'utf8');
+            counts[position] += 1;
+        }
+    }
+    return hashes.map((hash, position) => {
+        hash.update(`:${counts[position]}`, 'utf8');
+        return `pi-identity-guard-revision:${hash.digest('hex')}`;
+    });
+}
+
+/** @param {readonly Readonly<Record<string, any>>[]} existing @param {readonly any[]} planned */
+function plannedIdentityGuards(existing, planned) {
+    const descriptors = plannedIdentityGuardDescriptors(planned);
+    if (descriptors.length > MAX_IDENTITY_GUARDS) {
+        throw new TypeError('Player scan plan produced too many identity guards.');
+    }
+    const revisions = identityGuardRevisions(existing, descriptors);
+    return descriptors.map((descriptor, index) => Object.freeze({
+        ...descriptor, names: Object.freeze([...descriptor.names]), revision: revisions[index]
+    }));
+}
+
+/** @param {any} state @param {string} revision */
+function attachStateRevision(state, revision) {
+    Object.defineProperty(state, 'baseStateRevision', { value: revision, enumerable: false });
+    return state;
+}
+
+/** @param {string} directory */
+async function currentStateRevision(directory) {
+    try {
+        return stateRevision(await Fs.promises.readFile(statePath(directory), 'utf8'));
+    }
+    catch (error) {
+        if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT') return stateRevision(null);
+        throw error;
+    }
 }
 
 /** @param {any} options @param {Date} now */
@@ -170,7 +375,9 @@ function validateState(value, options) {
         ['Steam profile', steamProfileRetries]]) {
         const retryIds = new Set();
         for (const retry of /** @type {any[]} */ (retries)) {
-            if (!retry || typeof retry !== 'object' || !/^7656119\d{10}$/u.test(`${retry.steamId}`) ||
+            if (!retry || typeof retry !== 'object' || Object.keys(retry).length !== 3 ||
+                !Object.hasOwn(retry, 'steamId') || !Object.hasOwn(retry, 'failures') ||
+                !Object.hasOwn(retry, 'nextAttemptAt') || !/^7656119\d{10}$/u.test(`${retry.steamId}`) ||
                 !Number.isSafeInteger(retry.failures) || retry.failures < 1 || retry.failures > 1000 ||
                 typeof retry.nextAttemptAt !== 'string' || Number.isNaN(Date.parse(retry.nextAttemptAt)) ||
                 retryIds.has(`${retry.steamId}`)) {
@@ -252,26 +459,29 @@ async function readState(options, now) {
         text = await Fs.promises.readFile(file, 'utf8');
     }
     catch (error) {
-        if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT') return emptyState(options, now);
+        if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT') {
+            return attachStateRevision(emptyState(options, now), stateRevision(null));
+        }
         throw error;
     }
+    const revision = stateRevision(text);
     try {
         const raw = JSON.parse(text);
         const parsed = validateState(raw, options);
         if (parsed.serverKey !== options.scope.serverKey) {
-            return emptyState(options, now);
+            return attachStateRevision(emptyState(options, now), revision);
         }
         if (parsed.wipeId !== options.scope.wipeId) {
             const reset = emptyState(options, now);
             reset.pendingReconciliation = parsed.pendingReconciliation;
             Object.defineProperty(reset, 'needsMigrationWrite', { value: true, enumerable: false });
-            return reset;
+            return attachStateRevision(reset, revision);
         }
         Object.defineProperty(parsed, 'needsMigrationWrite', {
             value: raw.schemaVersion !== STATE_SCHEMA_VERSION,
             enumerable: false
         });
-        return parsed;
+        return attachStateRevision(parsed, revision);
     }
     catch (error) {
         throw new ScanDaemonStateError(file, error);
@@ -449,11 +659,12 @@ function recoverSetsFromJournal(events, scope, seen, refreshed) {
 /**
  * Runs one bounded unit of work. The caller supplies the already-selected current server scope.
  * @param {{context:any,scope:any,store:any,directory:string,dependencies?:any,warBanditsProvider?:any,
- * forceWarBanditsRescan?:boolean}} options
+ * forceWarBanditsRescan?:boolean,planOnly?:boolean,isolateProcess?:boolean}} options
  */
 async function runCycle(options) {
     if (!options || !options.scope || !options.scope.wipeId || !options.store ||
         typeof options.directory !== 'string') return Object.freeze({ skipped: true });
+    assertMatchingStoreDirectory(options);
     const dependencies = options.dependencies || {};
     const current = nowDate(dependencies);
     const recordedAt = current.toISOString();
@@ -479,7 +690,19 @@ async function runCycle(options) {
     const profiled = new Set(state.profiledSteamIds);
     const steamProfileRetries = new Map(state.steamProfileRetries.map((/** @type {any} */ retry) =>
         [`${retry.steamId}`, { ...retry, steamId: `${retry.steamId}` }]));
-    const existing = await options.store.readAll();
+    let baseRevision = null;
+    let baseControlRevision = null;
+    let existing;
+    if (options.planOnly === true) {
+        if (typeof options.store.readSnapshot !== 'function') {
+            throw new TypeError('Read-only player scan planning requires a revisioned journal snapshot.');
+        }
+        const snapshot = await options.store.readSnapshot();
+        existing = snapshot.events;
+        baseRevision = snapshot.revision;
+        baseControlRevision = controlRevision(existing);
+    }
+    else existing = await options.store.readAll();
     recoverSetsFromJournal(existing, options.scope, seen, refreshed);
     const projection = Core.rebuild(existing);
     const provider = options.warBanditsProvider;
@@ -1071,7 +1294,6 @@ async function runCycle(options) {
         }
     }
 
-    if (events.length > 0) await options.store.appendMany(events);
     newlySeen.forEach(value => seen.add(value));
     newlyRefreshed.forEach(value => refreshed.add(value));
     let changed = forcedRescan || state.needsMigrationWrite === true || retryChanged || reconciliationChanged ||
@@ -1108,10 +1330,9 @@ async function runCycle(options) {
     reconciliation.warBanditsRetries = [...pendingWarBanditsRetries.values()].sort((left, right) =>
         left.key.localeCompare(right.key));
     state.updatedAt = recordedAt;
-    if (changed || !Fs.existsSync(statePath(options.directory))) {
-        await writeStateAtomic(statePath(options.directory), validateState(state, options));
-    }
-    return Object.freeze({
+    const shouldWriteState = changed || !Fs.existsSync(statePath(options.directory));
+    const validatedState = shouldWriteState ? validateState(state, options) : null;
+    const result = Object.freeze({
         skipped: false,
         appended: events.length,
         onlineRefreshed: newlyRefreshed.size,
@@ -1132,6 +1353,236 @@ async function runCycle(options) {
         warBanditsResumeAt: state.warBanditsResumeAt,
         warBanditsRetryAt: state.warBanditsRetryAt
     });
+    if (options.planOnly === true) {
+        return Object.freeze({
+            protocolVersion: PLAN_PROTOCOL_VERSION,
+            baseRevision,
+            baseControlRevision,
+            baseStateRevision: state.baseStateRevision,
+            identityGuards: Object.freeze(plannedIdentityGuards(existing, events)),
+            result,
+            events: Object.freeze([...events]),
+            state: validatedState
+        });
+    }
+    if (events.length > 0) await options.store.appendMany(events);
+    if (validatedState) await writeStateAtomic(statePath(options.directory), validatedState);
+    return result;
+}
+
+/**
+ * Applies a worker-created plan. Only the parent process calls this function, preserving the journal's
+ * single-writer boundary. Events are canonicalized again and constrained to the requested guild/server/wipe.
+ * @param {Parameters<typeof runCycle>[0]} options @param {unknown} input
+ */
+async function commitPlan(options, input) {
+    if (!options || !options.scope || !options.scope.wipeId || !options.store ||
+        typeof options.directory !== 'string') throw new TypeError('Player scan commit options are invalid.');
+    assertMatchingStoreDirectory(options);
+    assertCurrentScope(options);
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        throw new TypeError('Player scan plan is invalid.');
+    }
+    const plan = /** @type {any} */ (input);
+    const planKeys = Object.keys(plan);
+    if (planKeys.length !== PLAN_FIELDS.length || planKeys.some(key => !PLAN_FIELDS.includes(key)) ||
+        plan.protocolVersion !== PLAN_PROTOCOL_VERSION ||
+        typeof plan.baseRevision !== 'string' || !/^pi-revision:[a-f0-9]{64}$/u.test(plan.baseRevision) ||
+        typeof plan.baseControlRevision !== 'string' ||
+        !/^pi-control-revision:[a-f0-9]{64}$/u.test(plan.baseControlRevision) ||
+        typeof plan.baseStateRevision !== 'string' ||
+        !/^pi-scan-state:(?:absent|[a-f0-9]{64})$/u.test(plan.baseStateRevision) ||
+        !plan.result || typeof plan.result !== 'object' ||
+        Array.isArray(plan.result) ||
+        !Array.isArray(plan.events) || plan.events.length > 5000 ||
+        !Array.isArray(plan.identityGuards) || plan.identityGuards.length > MAX_IDENTITY_GUARDS ||
+        (plan.state !== null && (!plan.state || typeof plan.state !== 'object' || Array.isArray(plan.state)))) {
+        throw new TypeError('Player scan plan protocol is invalid.');
+    }
+    // Capture all worker-controlled scalars before the first await. IPC normally clones the object, but this also
+    // makes direct/injected runners immune to a caller mutating a previously validated plan during commit.
+    const baseRevision = plan.baseRevision;
+    const baseControlRevision = plan.baseControlRevision;
+    const baseStateRevision = plan.baseStateRevision;
+    const expectedScope = {
+        guildId: `${options.context.guildId}`,
+        serverKey: `${options.scope.serverKey}`,
+        wipeId: `${options.scope.wipeId}`
+    };
+    const events = plan.events.map((/** @type {unknown} */ event, /** @type {number} */ index) => {
+        const canonical = Core.createEvent(event);
+        if (canonical.scope.guildId !== expectedScope.guildId ||
+            canonical.scope.serverKey !== expectedScope.serverKey ||
+            canonical.scope.wipeId !== expectedScope.wipeId) {
+            throw new TypeError(`Player scan plan event ${index} escaped its requested scope.`);
+        }
+        const sources = canonical.kind === 'identity_observed' ? PLAN_IDENTITY_SOURCES :
+            canonical.kind === 'player_metric_observed' ? PLAN_METRIC_SOURCES : null;
+        if (!sources || !sources.has(canonical.provenance.source) ||
+            canonical.provenance.collectorVersion !== COLLECTOR_VERSION || canonical.evidence !== null) {
+            throw new TypeError(`Player scan plan event ${index} is outside the daemon event capability.`);
+        }
+        return canonical;
+    });
+    const plannedSteamByBattlemetrics = new Map();
+    const plannedBattlemetricsBySteam = new Map();
+    for (const event of events) {
+        if (event.kind !== 'identity_observed' || !event.subject.steamId ||
+            !event.subject.battlemetricsPlayerId) continue;
+        const steamId = event.subject.steamId;
+        const battlemetricsPlayerId = event.subject.battlemetricsPlayerId;
+        const knownSteamId = plannedSteamByBattlemetrics.get(battlemetricsPlayerId);
+        const knownBattlemetricsId = plannedBattlemetricsBySteam.get(steamId);
+        if ((knownSteamId && knownSteamId !== steamId) ||
+            (knownBattlemetricsId && knownBattlemetricsId !== battlemetricsPlayerId)) {
+            throw new TypeError('Player scan plan contains conflicting stable identity pairs.');
+        }
+        plannedSteamByBattlemetrics.set(battlemetricsPlayerId, steamId);
+        plannedBattlemetricsBySteam.set(steamId, battlemetricsPlayerId);
+    }
+    const expectedGuardDescriptors = plannedIdentityGuardDescriptors(events);
+    if (plan.identityGuards.length !== expectedGuardDescriptors.length) {
+        throw new TypeError('Player scan plan identity guards are invalid.');
+    }
+    const identityGuards = plan.identityGuards.map((/** @type {any} */ guard,
+        /** @type {number} */ index) => {
+        const expected = expectedGuardDescriptors[index];
+        if (!guard || typeof guard !== 'object' || Array.isArray(guard) || Object.keys(guard).length !== 4 ||
+            !Object.hasOwn(guard, 'steamId') || !Object.hasOwn(guard, 'battlemetricsPlayerId') ||
+            !Object.hasOwn(guard, 'names') || !Object.hasOwn(guard, 'revision') ||
+            guard.steamId !== expected.steamId || guard.battlemetricsPlayerId !== expected.battlemetricsPlayerId ||
+            !Array.isArray(guard.names) || guard.names.length !== expected.names.length ||
+            guard.names.some((/** @type {unknown} */ name,
+                /** @type {number} */ nameIndex) => name !== expected.names[nameIndex]) ||
+            typeof guard.revision !== 'string' ||
+            !/^pi-identity-guard-revision:[a-f0-9]{64}$/u.test(guard.revision)) {
+            throw new TypeError('Player scan plan identity guards are invalid.');
+        }
+        return Object.freeze({ steamId: expected.steamId,
+            battlemetricsPlayerId: expected.battlemetricsPlayerId,
+            names: Object.freeze([...expected.names]), revision: guard.revision });
+    });
+    const validatedState = plan.state === null ? null : validateState(plan.state, options);
+    if (validatedState && (validatedState.guildId !== expectedScope.guildId ||
+        validatedState.serverKey !== expectedScope.serverKey || validatedState.wipeId !== expectedScope.wipeId)) {
+        throw new TypeError('Player scan plan state escaped its requested scope.');
+    }
+    // Reconstruct instead of spreading worker input so unknown fields never reach durable state.
+    const state = validatedState === null ? null : JSON.parse(JSON.stringify(Object.fromEntries(
+        STATE_FIELDS.map(field => [field, validatedState[field]]))));
+    if (events.length > 0 && state === null) {
+        throw new TypeError('Player scan plan omitted state for its pending events.');
+    }
+    const counterFields = [
+        'onlineRefreshed', 'warBanditsSeen', 'targetedLookups', 'targetedLookupFailures',
+        'warBanditsPageFailures', 'metricsObserved', 'steamProfileAttempts', 'steamProfileFailures',
+        'steamProfilesRefreshed', 'pendingBattlemetricsAttempts', 'pendingWarBanditsAttempts',
+        'pendingIdentitiesLinked'
+    ];
+    const resultFields = ['skipped', 'appended', ...counterFields, 'pendingReconciliationActive',
+        'pendingReconciliationCompleted', 'nextWarBanditsPage', 'warBanditsResumeAt', 'warBanditsRetryAt'];
+    if (Object.keys(plan.result).length !== resultFields.length ||
+        Object.keys(plan.result).some(key => !resultFields.includes(key)) || plan.result.skipped !== false ||
+        plan.result.appended !== events.length || counterFields.some(field =>
+            !Number.isSafeInteger(plan.result[field]) || plan.result[field] < 0 || plan.result[field] > 5000) ||
+        typeof plan.result.pendingReconciliationActive !== 'boolean' ||
+        typeof plan.result.pendingReconciliationCompleted !== 'boolean' ||
+        !Number.isSafeInteger(plan.result.nextWarBanditsPage) || plan.result.nextWarBanditsPage < 1 ||
+        plan.result.nextWarBanditsPage > 1000000 ||
+        [plan.result.warBanditsResumeAt, plan.result.warBanditsRetryAt].some(value =>
+            value !== null && (typeof value !== 'string' || Number.isNaN(Date.parse(value))))) {
+        throw new TypeError('Player scan plan result is invalid.');
+    }
+    if (state && (state.nextWarBanditsPage !== plan.result.nextWarBanditsPage ||
+        state.warBanditsResumeAt !== plan.result.warBanditsResumeAt ||
+        state.warBanditsRetryAt !== plan.result.warBanditsRetryAt ||
+        state.pendingReconciliation.active !== plan.result.pendingReconciliationActive ||
+        (plan.result.pendingReconciliationCompleted === true &&
+            (state.pendingReconciliation.active === true ||
+                state.pendingReconciliation.completedAt === null)))) {
+        throw new TypeError('Player scan plan result does not match its durable state.');
+    }
+    const result = Object.freeze(Object.fromEntries(resultFields.map(field =>
+        [field, field === 'appended' ? events.length : plan.result[field]])));
+    if (typeof options.store.appendManyIfRevision !== 'function') {
+        throw new TypeError('Player scan commit requires a revision-aware journal store.');
+    }
+    let rebased = false;
+    const commit = await options.store.appendManyIfRevision(events, null, {
+        beforeAppend: async (/** @type {readonly any[]} */ currentEvents,
+            /** @type {string} */ currentRevision) => {
+            if (await currentStateRevision(options.directory) !== baseStateRevision) {
+                throw new StaleScanPlanError('checkpoint');
+            }
+            // Scope is mutable outside the journal queue; check it at the last parent-side gate before
+            // any worker event or checkpoint can become durable.
+            assertCurrentScope(options);
+            if (currentRevision !== baseRevision) {
+                rebased = true;
+                if (controlRevision(currentEvents) !== baseControlRevision) {
+                    throw new StaleScanPlanError('journal');
+                }
+                const currentGuardRevisions = identityGuardRevisions(currentEvents, identityGuards);
+                if (identityGuards.some((/** @type {any} */ guard,
+                    /** @type {number} */ index) => guard.revision !== currentGuardRevisions[index])) {
+                    throw new StaleScanPlanError('journal');
+                }
+                // Journal entries are immutable observations, so unrelated BattleMetrics/Discord appends
+                // can safely coexist with a planned provider result. The scan checkpoint is the exclusive
+                // cursor and remains exact-CAS protected above. If the old projection thought a manual
+                // reconciliation was complete, keep it active so aliases appended during the RPC are not
+                // missed by that campaign.
+                const plannedPairs = events.filter((/** @type {Readonly<Record<string, any>>} */ event) =>
+                    event.kind === 'identity_observed' &&
+                    event.subject.steamId && event.subject.battlemetricsPlayerId);
+                let currentProjection = null;
+                if (plannedPairs.length > 0 || (state && result.pendingReconciliationCompleted === true)) {
+                    currentProjection = Core.rebuild(currentEvents);
+                }
+                for (const event of plannedPairs) {
+                    const consolidation = Core.consolidateProjection(currentProjection, {
+                        steamId: event.subject.steamId,
+                        battlemetricsPlayerId: event.subject.battlemetricsPlayerId,
+                        name: event.subject.exactName,
+                        caseFidelity: event.payload.caseFidelity,
+                        allowExactName: false
+                    });
+                    if (consolidation.status === 'conflict') throw new StaleScanPlanError('journal');
+                }
+                if (state && result.pendingReconciliationCompleted === true) {
+                    const checkpoint = state.pendingReconciliation;
+                    const dependencies = options.dependencies || {};
+                    const battlemetricsEnabled = Boolean(dependencies.battlemetricsProvider &&
+                        typeof dependencies.battlemetricsProvider.resolveSteamId === 'function');
+                    const provider = options.warBanditsProvider;
+                    const warBanditsEnabled = Boolean(provider &&
+                        (typeof provider.resolvePlayerRecent === 'function' ||
+                            typeof provider.resolvePlayer === 'function'));
+                    const rows = PendingReconciler.pendingRows(currentProjection);
+                    const checkedBattlemetricsIds = new Set(checkpoint.checkedBattlemetricsIds);
+                    const hasBattlemetricsWork = battlemetricsEnabled &&
+                        PendingReconciler.battlemetricsCandidates(currentProjection, rows)
+                            .some(candidate => !checkedBattlemetricsIds.has(candidate.battlemetricsPlayerId));
+                    const checkedWarBanditsKeys = new Set(checkpoint.checkedWarBanditsKeys);
+                    const hasWarBanditsWork = warBanditsEnabled && PendingReconciler.warBanditsCandidates(
+                        currentProjection, checkedBattlemetricsIds, battlemetricsEnabled, rows)
+                        .some(candidate => !checkedWarBanditsKeys.has(candidate.key));
+                    if (hasBattlemetricsWork || hasWarBanditsWork) {
+                        checkpoint.active = true;
+                        checkpoint.completedAt = null;
+                    }
+                }
+            }
+        },
+        afterAppend: state ? async () => writeStateAtomic(statePath(options.directory), state) : undefined
+    });
+    if (!commit || commit.committed !== true) throw new StaleScanPlanError('journal');
+    if (rebased && state && state.pendingReconciliation.active === true &&
+        result.pendingReconciliationCompleted === true) {
+        return Object.freeze({ ...result, pendingReconciliationActive: true,
+            pendingReconciliationCompleted: false });
+    }
+    return result;
 }
 
 /** @param {Parameters<typeof runCycle>[0]} options */
@@ -1139,21 +1590,60 @@ function schedule(options) {
     if (!options || typeof options.directory !== 'string' || !options.scope || !options.scope.wipeId) return false;
     const key = Path.resolve(options.directory);
     if (inFlight.has(key)) return false;
+    // A previously admitted rerun may have missed the bounded global worker queue. Preserve it and let
+    // the next scheduler tick start that exact request before ordinary background work.
+    const queuedRerun = forcedReruns.get(key);
+    const runOptions = queuedRerun || options;
     const span = RuntimeTelemetry.startSpan('scan_cycle');
-    const promise = Promise.resolve().then(() => runCycle(options)).then(result => {
+    const runner = runOptions.isolateProcess === true ?
+        ((runOptions.dependencies && runOptions.dependencies.isolatedScanRunner) ||
+            // Lazy loading avoids a scan-daemon/worker-supervisor module cycle.
+            require('./isolatedScanDaemon.js').runCycle) : runCycle;
+    let execution;
+    try {
+        execution = runner(runOptions);
+    }
+    catch (error) {
+        span.finish('failure');
+        const reason = error instanceof Error ? error.message : `${error}`;
+        logWarningOnce(runOptions.context, key,
+            `Background player scan paused safely: ${reason}.`);
+        return false;
+    }
+    if (forcedReruns.get(key) === runOptions) forcedReruns.delete(key);
+    const promise = Promise.resolve(execution).then(result => {
+        staleRetryCounts.delete(key);
         span.finish('success');
         return result;
     }).catch(error => {
         span.finish('failure');
-        logWarningOnce(options.context, key,
+        if (error && error.code === 'STALE_SCAN_PLAN') {
+            // A manual !scanplayers request can already be queued behind this cycle. Keep its
+            // forced flag, current scope and providers, and give that distinct request its own
+            // bounded stale retry instead of replacing it with the failed background options.
+            if (forcedReruns.has(key)) staleRetryCounts.delete(key);
+            else {
+                const attempts = staleRetryCounts.get(key) || 0;
+                if (attempts < MAX_IMMEDIATE_STALE_RETRIES) {
+                    staleRetryCounts.set(key, attempts + 1);
+                    forcedReruns.set(key, runOptions);
+                }
+                else staleRetryCounts.delete(key);
+            }
+        }
+        else staleRetryCounts.delete(key);
+        logWarningOnce(runOptions.context, key,
             `Background player scan paused safely: ${error && error.message ? error.message : error}.`);
         return null;
     }).finally(() => {
         inFlight.delete(key);
         const rerun = forcedReruns.get(key);
         if (rerun) {
-            forcedReruns.delete(key);
-            schedule(rerun);
+            const started = schedule(rerun);
+            // Admission can fail synchronously when the global worker FIFO is full or stopping. Keep
+            // the request for a future tick, but refund the manual cooldown so the user is not locked
+            // out after a command that could not actually restart.
+            if (!started && rerun.forceWarBanditsRescan === true) manualTriggerTimes.delete(key);
         }
     });
     inFlight.set(key, promise);
@@ -1173,13 +1663,14 @@ function requestRescan(options) {
         return Object.freeze({ accepted: false, state: 'cooldown',
             retryAfterSeconds: Math.ceil(retryAfter / 1000) });
     }
-    manualTriggerTimes.set(key, current, MANUAL_RESCAN_COOLDOWN_MS, current);
     const forced = Object.freeze({ ...options, forceWarBanditsRescan: true });
     if (inFlight.has(key)) {
+        manualTriggerTimes.set(key, current, MANUAL_RESCAN_COOLDOWN_MS, current);
         forcedReruns.set(key, forced);
         return Object.freeze({ accepted: true, state: 'queued', retryAfterSeconds: 0 });
     }
     const started = schedule(forced);
+    if (started) manualTriggerTimes.set(key, current, MANUAL_RESCAN_COOLDOWN_MS, current);
     return Object.freeze({ accepted: started, state: started ? 'started' : 'unavailable', retryAfterSeconds: 0 });
 }
 
@@ -1209,7 +1700,21 @@ async function getPendingReconciliationStatus(options, projection) {
 }
 
 function getRuntimeStatus() {
-    return Object.freeze({ active: inFlight.size, forcedRerunsQueued: forcedReruns.size });
+    const worker = require('./isolatedScanDaemon.js').getRuntimeStatus();
+    return Object.freeze({
+        active: inFlight.size,
+        forcedRerunsQueued: forcedReruns.size,
+        workerActive: worker.active,
+        workerQueued: worker.queued,
+        workerCompleted: worker.completed,
+        workerFailures: worker.failures,
+        workerStalePlans: worker.stalePlans
+    });
+}
+
+function shutdown() {
+    // Keep this dependency lazy: the isolated runner requires commitPlan from this module after planning.
+    return require('./isolatedScanDaemon.js').shutdown();
 }
 
 function getRuntimeCacheStatus(nowMs = Date.now()) {
@@ -1232,15 +1737,19 @@ module.exports = Object.freeze({
     PENDING_BATTLEMETRICS_BATCH_SIZE,
     PENDING_RECONCILIATION_BUDGET_MS,
     PENDING_WARBANDITS_BATCH_SIZE,
+    PLAN_PROTOCOL_VERSION,
     ScanDaemonStateError,
+    StaleScanPlanError,
     WARBANDITS_SOURCE,
     WARBANDITS_LOOKUP_SOURCE,
     getRuntimeCacheStatus,
     getRuntimeStatus,
     getPendingReconciliationStatus,
+    commitPlan,
     requestRescan,
     resetRuntimeCachesForTests,
     runCycle,
     schedule,
+    shutdown,
     waitForIdle
 });

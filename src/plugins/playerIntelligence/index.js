@@ -9,6 +9,7 @@ const { projectClans } = require('./clanProjector.js');
 const { projectPresence } = require('./presenceProjector.js');
 const { projectWipes } = require('./wipeProjector.js');
 const IdentityConsolidator = require('./identityConsolidator.js');
+const RuntimeTelemetry = require('../../util/runtimeTelemetry.js');
 
 /** @typedef {Readonly<{
  * identities:ReturnType<typeof projectIdentities>,
@@ -21,6 +22,54 @@ const IdentityConsolidator = require('./identityConsolidator.js');
 const rebuildCache = new WeakMap();
 /** @type {WeakMap<readonly Readonly<Record<string, any>>[], readonly Readonly<Record<string, any>>[]>} */
 const effectiveEventsCache = new WeakMap();
+
+/**
+ * Keep projection timings on a fixed, private-data-free dimension set. Bypassing spans while telemetry is disabled
+ * also keeps this isolated core allocation-free in the normal test and library paths.
+ * @template T
+ * @param {'pi_rebuild_identities'|'pi_rebuild_metrics'|'pi_rebuild_clans'|'pi_rebuild_presence'|
+ * 'pi_rebuild_wipes'|'pi_rebuild_total'} operation
+ * @param {()=>T} action
+ * @returns {T}
+ */
+function measured(operation, action) {
+    if (!RuntimeTelemetry.isEnabled()) return action();
+    const span = RuntimeTelemetry.startSpan(operation);
+    try {
+        const value = action();
+        span.finish('success');
+        return value;
+    }
+    catch (error) {
+        span.finish('failure');
+        throw error;
+    }
+}
+
+/**
+ * @template T
+ * @param {'pi_rebuild_total'} operation
+ * @param {()=>Promise<T>} action
+ * @returns {Promise<T>}
+ */
+async function measuredAsync(operation, action) {
+    if (!RuntimeTelemetry.isEnabled()) return action();
+    const span = RuntimeTelemetry.startSpan(operation);
+    try {
+        const value = await action();
+        span.finish('success');
+        return value;
+    }
+    catch (error) {
+        span.finish('failure');
+        throw error;
+    }
+}
+
+/** @returns {Promise<void>} */
+function yieldToEventLoop() {
+    return new Promise(resolve => setImmediate(resolve));
+}
 
 /** @param {readonly Readonly<Record<string, any>>[]} events */
 function effectiveEvents(events) {
@@ -57,17 +106,51 @@ function rebuild(events) {
     if (Object.isFrozen(events) && rebuildCache.has(events)) {
         return /** @type {Projection} */ (rebuildCache.get(events));
     }
-    const canonical = effectiveEvents(events);
-    const identities = projectIdentities(canonical);
-    const projection = Contracts.deepFreeze({
-        identities,
-        metrics: projectMetrics(canonical, identities),
-        clans: projectClans(canonical, identities),
-        presence: projectPresence(canonical, identities),
-        wipes: projectWipes(canonical)
+    return measured('pi_rebuild_total', () => {
+        const canonical = effectiveEvents(events);
+        const identities = measured('pi_rebuild_identities', () => projectIdentities(canonical));
+        const projection = Contracts.deepFreeze({
+            identities,
+            metrics: measured('pi_rebuild_metrics', () => projectMetrics(canonical, identities)),
+            clans: measured('pi_rebuild_clans', () => projectClans(canonical, identities)),
+            presence: measured('pi_rebuild_presence', () => projectPresence(canonical, identities)),
+            wipes: measured('pi_rebuild_wipes', () => projectWipes(canonical))
+        });
+        if (Object.isFrozen(events)) rebuildCache.set(events, projection);
+        return projection;
     });
-    if (Object.isFrozen(events)) rebuildCache.set(events, projection);
-    return projection;
+}
+
+/**
+ * Cooperative variant for main-process callers. Each projector remains synchronous, but Discord/network work can run
+ * between the fixed projection stages. A worker is still preferable if telemetry shows one individual stage blocking.
+ * @param {readonly Readonly<Record<string, any>>[]} events
+ * @param {{yieldControl?:()=>void|Promise<void>}} [options]
+ * @returns {Promise<Projection>}
+ */
+async function rebuildAsync(events, options = {}) {
+    if (Object.isFrozen(events) && rebuildCache.has(events)) {
+        return /** @type {Projection} */ (rebuildCache.get(events));
+    }
+    const yieldControl = options.yieldControl || yieldToEventLoop;
+    if (typeof yieldControl !== 'function') throw new TypeError('Rebuild yieldControl must be a function.');
+    return measuredAsync('pi_rebuild_total', async () => {
+        const canonical = effectiveEvents(events);
+        await yieldControl();
+        const identities = measured('pi_rebuild_identities', () => projectIdentities(canonical));
+        await yieldControl();
+        const metrics = measured('pi_rebuild_metrics', () => projectMetrics(canonical, identities));
+        await yieldControl();
+        const clans = measured('pi_rebuild_clans', () => projectClans(canonical, identities));
+        await yieldControl();
+        const presence = measured('pi_rebuild_presence', () => projectPresence(canonical, identities));
+        await yieldControl();
+        const wipes = measured('pi_rebuild_wipes', () => projectWipes(canonical));
+        await yieldControl();
+        const projection = Contracts.deepFreeze({ identities, metrics, clans, presence, wipes });
+        if (Object.isFrozen(events)) rebuildCache.set(events, projection);
+        return projection;
+    });
 }
 
 module.exports = Object.freeze({
@@ -75,5 +158,6 @@ module.exports = Object.freeze({
     ...HistoryStore,
     ...IdentityConsolidator,
     effectiveEvents,
-    rebuild
+    rebuild,
+    rebuildAsync
 });

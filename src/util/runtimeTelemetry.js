@@ -17,7 +17,13 @@ const OPERATIONS = Object.freeze([
     'ocr_run',
     'import_prepare',
     'import_decision',
-    'scan_cycle'
+    'scan_cycle',
+    'pi_rebuild_identities',
+    'pi_rebuild_metrics',
+    'pi_rebuild_clans',
+    'pi_rebuild_presence',
+    'pi_rebuild_wipes',
+    'pi_rebuild_total'
 ]);
 const OUTCOMES = Object.freeze(['success', 'failure', 'timeout', 'skipped', 'dropped']);
 const SLOW_THRESHOLDS_MS = Object.freeze({
@@ -26,12 +32,21 @@ const SLOW_THRESHOLDS_MS = Object.freeze({
     ocr_run: 30000,
     import_prepare: 30000,
     import_decision: 5000,
-    scan_cycle: 30000
+    scan_cycle: 30000,
+    pi_rebuild_identities: 1000,
+    pi_rebuild_metrics: 1000,
+    pi_rebuild_clans: 1000,
+    pi_rebuild_presence: 1000,
+    pi_rebuild_wipes: 1000,
+    pi_rebuild_total: 2000
 });
 const SOURCE_FIELDS = Object.freeze({
     imports: Object.freeze(['active', 'previewsPending', 'decisionsClaimed', 'decisionQueues']),
     ocr: Object.freeze(['active', 'queued', 'queuedBytes']),
-    scans: Object.freeze(['active', 'forcedRerunsQueued']),
+    scans: Object.freeze([
+        'active', 'forcedRerunsQueued', 'workerActive', 'workerQueued', 'workerCompleted', 'workerFailures',
+        'workerStalePlans'
+    ]),
     translations: Object.freeze(['active', 'queued']),
     services: Object.freeze(['active', 'queued', 'running', 'restarts', 'failures', 'circuitOpen']),
     loops: Object.freeze(['active', 'running', 'scheduled', 'failures'])
@@ -187,7 +202,10 @@ function formatRuntime(snapshot) {
         `previewsPending=${imports.previewsPending} decisionsClaimed=${imports.decisionsClaimed} ` +
         `decisionQueues=${imports.decisionQueues} ocrActive=${ocr.active} ocrQueued=${ocr.queued} ` +
         `ocrQueuedMiB=${mebibytes(ocr.queuedBytes)} scansActive=${scans.active} ` +
-        `scansQueued=${scans.forcedRerunsQueued} translationsActive=${translations.active} ` +
+        `scansQueued=${scans.forcedRerunsQueued} scanWorkersActive=${scans.workerActive} ` +
+        `scanWorkersQueued=${scans.workerQueued} scanWorkersCompleted=${scans.workerCompleted} ` +
+        `scanWorkerFailures=${scans.workerFailures} scanWorkerStalePlans=${scans.workerStalePlans} ` +
+        `translationsActive=${translations.active} ` +
         `translationsQueued=${translations.queued} loopsActive=${loops.active} loopsRunning=${loops.running} ` +
         `loopsScheduled=${loops.scheduled} loopFailures=${loops.failures} ` +
         `servicesActive=${services.active} servicesQueued=${services.queued} servicesRunning=${services.running} ` +

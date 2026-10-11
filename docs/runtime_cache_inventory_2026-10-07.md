@@ -45,15 +45,15 @@ Les empreintes de hook ne retiennent plus la concaténation de tous les joueurs 
 SHA-256 de longueur fixe. Le TTL du hook est renouvelé sur le chemin calme afin de représenter l'inactivité ; le TTL
 interne du cache reste non glissant. Une sélection player-tracker consommée retire à la fois ses candidats et son avis.
 
-## Structures reportées parce qu'elles ne sont pas des caches ordinaires
+## Structures qui ne sont pas des caches ordinaires
 
-### Lot 10 — OCR et previews
+### Lot 10 — OCR et previews (réalisé en 1.22.42)
 
 `importWorkflow.pending` contient jusqu'à la décision des interprétations, features visuelles et aperçus qui ne sont
-pas encore des preuves. Son TTL de 30 minutes n'est actuellement purgé que lors d'une interaction sur le token. La
-file Tesseract retient le base64 des jobs en attente et n'a pas encore de plafond d'admission. Le lot 10 ajoutera une
-expiration active, des limites globales/par utilisateur et des plafonds de jobs/octets, avec refus explicite en
-surcharge.
+pas encore des preuves. Son TTL reste de 30 minutes ; les chemins de préparation, interaction et télémétrie purgent
+les entrées expirées, et la table est plafonnée à 256 en supprimant d'abord les plus anciennes. La file OCR locale
+admet au plus quatre reconnaissances et 24 MiB ; le superviseur Tesseract de production ajoute une file IPC de deux
+demandes, avec requête 16 MiB et réponse 4 MiB maximum. Une surcharge est refusée explicitement sans commit.
 
 ### Lot 11 — journal et projections
 
@@ -63,6 +63,14 @@ autoriser des appends concurrents. Les projections et consolidateurs sont dériv
 snapshot courant l'est. Le lot 11 mesurera séparément leur poids et introduira un cycle de vie sûr sans changer le
 journal JSONL, qui reste la source de vérité.
 
-La release `1.22.43` a déjà supprimé une rétention transitoire majeure : `projectionCandidates` ne matérialise plus le
-produit cartésien alias × BattleMetrics IDs et reste linéaire en entrée. Cela ne change pas la durée de vie du snapshot
-partagé, qui demeure le prochain sujet distinct de ce lot.
+La release `1.22.43` a supprimé une rétention transitoire majeure : `projectionCandidates` ne matérialise plus le
+produit cartésien alias × BattleMetrics IDs et reste linéaire en entrée. En `1.22.44`, les index de réconciliation des
+rosters sont construits une fois à l'intérieur d'une projection clans puis libérés avec elle ; ils ne forment aucune
+racine globale. Le cache de résolution public d'une projection identité est plafonné à 20 000 clés. La lecture JSONL
+et la fusion par shard réduisent les copies transitoires, sans évincer ni réécrire une preuve persistante.
+
+Les benchmarks jusqu'à 324 000 événements situent les projecteurs identité/métriques/présence autour de 1,24 s au
+total. Le snapshot partagé demeure nécessaire à l'exclusion mutuelle des appends. Le worker de scan est read-only :
+le parent rebase les ajouts sans rapport, mais refuse avant append un checkpoint/scope modifié, un contrôle d'identité
+modifié ou un read-set Steam/BM/nom devenu stale, sans introduire un second writer. Une politique d'archivage des
+transitions/sessions historiques resterait une décision métier distincte et n'est pas appliquée automatiquement.

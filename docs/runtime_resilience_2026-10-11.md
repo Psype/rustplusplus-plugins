@@ -1,6 +1,6 @@
 # Fiabilisation runtime et isolation des services — 11 octobre 2026
 
-Cette note décrit les releases `1.22.42` et `1.22.43`. Elle ne prétend pas rendre un programme « bug-proof » au sens absolu : elle
+Cette note décrit les releases `1.22.42` à `1.22.44`. Elle ne prétend pas rendre un programme « bug-proof » au sens absolu : elle
 réduit les causes connues de reboot, borne les charges reconstructibles et limite le rayon d'impact des fournisseurs
 externes et des traitements lourds.
 
@@ -49,9 +49,12 @@ La limite V8 ne borne pas à elle seule les buffers natifs. Les limites d'image 
 traitement série restent donc nécessaires. Une limite RSS dure nécessite à terme des unités systemd séparées avec
 `MemoryMax`; les workers enfants de cette release partagent encore le cgroup de `rustplusplus.service`.
 
-Les workers ne lisent ni n'écrivent le journal `data/player-intelligence`. Ils renvoient un résultat au cœur, qui reste
-le seul propriétaire du commit append-only. Le daemon de consolidation ne doit pas être déplacé avant d'avoir séparé
-un plan read-only de son commit par le writer unique.
+Les workers de traduction et OCR ne lisent ni n'écrivent le journal `data/player-intelligence`. Depuis `1.22.44`, le
+worker de scan peut lire un snapshot du journal, mais il reste strictement incapable de l'écrire : il renvoie un plan
+versionné que le processus parent recanonicalise, borne et contraint au triplet guilde/serveur/wipe. Le parent compare
+exactement checkpoint et scope dans la file d'append, rebase les ajouts indépendants, puis rejette seulement un plan
+touché par un contrôle global ou un guard Steam/BM/nom devenu stale. Il reste donc l'unique writer des événements
+canoniques et du checkpoint de scan.
 
 ## Hotfix mémoire 1.22.43
 
@@ -72,6 +75,48 @@ existe plusieurs BattleMetrics IDs : chaque ID stable reste représenté et deux
 préservent le refus automatique des ambiguïtés. Le cas 2 500 × 2 500 tombe ainsi à 7 500 lignes. Des tests différentiels
 vérifient le résultat métier contre l'ancien produit cartésien sur les projections ordinaires.
 
+Le déploiement observé de `1.22.43` a franchi l'ancienne frontière de crash : démarrage opérationnel en environ sept
+secondes, puis plus de huit minutes quarante sans OOM dans l'extrait fourni. Après GC, le heap se situait environ entre
+547 et 630 MiB et le RSS entre 760 et 870 MiB. Cette observation valide le correctif OOM sur cette fenêtre, pas une
+stabilité illimitée. Elle a aussi révélé un problème distinct : les cycles de scan duraient 44 à 48 secondes et
+bloquaient la boucle principale environ 40 à 42 secondes, avec CPU/ELU proche de 100 %, pendant que Rust+ expirait.
+
+## Projection indexée et scan isolé 1.22.44
+
+- Le replay des membres `/cinfo` non résolus prépare une fois les groupes, index Unicode et index de recherche, puis
+  les réutilise pour toutes les captures historiques. Les exclusions par personne évitent de reconstruire tout le
+  catalogue pour chaque snapshot ; une collision inter-identités repasse par le chemin exact conservateur.
+- Les projecteurs identité, métriques et présence évitent plusieurs tris/copies globaux. La lecture JSONL ne crée plus
+  un tableau contenant toutes les lignes et le cache mensuel fusionne les ajouts sans recopies intermédiaires.
+- `Core.rebuildAsync` cède la boucle entre ses étapes fixes sur le hook BattleMetrics. Six métriques bornées
+  `pi_rebuild_*` exposent total, identités, métriques, clans, présence et wipes sans nom ni identifiant joueur.
+- Le scan lourd est planifié dans un processus enfant one-shot. Steam, BattleMetrics et WarBandits restent appelés par
+  RPC dans le parent, où leurs caches/circuits demeurent uniques. Une panne, un timeout ou un OOM du worker avant la
+  réception et la validation d'un plan complet ne modifie ni journal ni checkpoint ; après livraison, seul le commit
+  parent validé peut continuer.
+- Le plan protocole v3 a des clés, tailles, compteurs, sources et kinds stricts ; le child ne peut proposer que les
+  observations identité/métrique propres au daemon. Le parent recanonicalise tout et reste l'unique writer durable.
+- Le checkpoint et le scope utilisent une comparaison exacte. Les appends sans rapport sont rebasés pour ne pas
+  affamer un scan sur un serveur actif. Une révision de contrôle globale couvre les liens/révocations/supersessions,
+  et des guards bornés couvrent seulement les SteamID, BattleMetrics ID et noms exacts ayant fondé une décision : une
+  correction ou collision pertinente rend le plan stale avant toute écriture et déclenche au plus un replan immédiat.
+- Une file FIFO globale, bornée et coalescée par répertoire donne accès à un seul worker à la fois sans perdre un
+  `!scanplayers` concurrent. Un job différé recalcule son wipe au dispatch, un rerun manuel reste forcé si l'admission
+  échoue, et son cooldown est remboursé si la file le refuse. Le protocole borne requête, tables BattleMetrics, appels
+  fournisseur, réponses, guards et plan. L'arrêt tue/récolte les enfants puis attend la fin d'un éventuel commit parent.
+
+Le compare-and-append suppose un seul processus parent écrivain, comme le service systemd prévu. Deux instances du bot
+pointant simultanément vers le même répertoire nécessiteraient un verrou inter-processus qui n'est pas fourni. Une
+panne entre deux shards d'un même batch, ou après le `fsync` du journal mais avant le remplacement du checkpoint, peut
+laisser un préfixe d'observations durable avec un checkpoint en retard. Le checkpoint n'avance jamais avant la preuve.
+Le passage suivant déduplique les événements dont l'ID est déterministe ; une observation reconstruite avec un nouvel
+horodatage peut être répétée, mais aucune preuve existante n'est supprimée et le replay reste récupérable.
+
+Mesures synthétiques locales : avec 2 700 identités, 120 snapshots × 4 membres non résolus passent d'environ 23,25 s
+sur l'ancien replay à environ 0,33–0,37 s ; 1 200 snapshots passent en environ 1,70 s. Identités, métriques et présence
+traitent ensemble 81 000 événements en environ 0,39 s. Ces chiffres isolent le coût algorithmique et ne constituent
+pas une mesure de la machine Linux de production.
+
 ## Services externes et mode dégradé
 
 | Défaillance | Comportement attendu |
@@ -88,19 +133,20 @@ vérifient le résultat métier contre l'ancien produit cartésien sur les proje
 ## Observabilité et validation
 
 `/runtime` expose désormais les boucles série et les services isolés : actifs, en attente, processus en marche,
-redémarrages, échecs et circuit ouvert. Les logs `RUNTIME` gardent uniquement des compteurs bornés, sans message joueur,
-SteamID ou token.
+redémarrages, échecs, plans stale et circuit ouvert. Il affiche aussi completed/p95/max des six étapes de projection.
+Les logs `RUNTIME` gardent uniquement des compteurs bornés, sans message joueur, SteamID ou token.
 
-Validation locale de release : `npm.cmd test`, puis `git diff --check`. Cela couvre les rejets d'événements, le
-non-chevauchement, la sérialisation, le crash et le timeout d'un vrai worker enfant. Cela ne prouve ni les fournisseurs
-réels, ni Tesseract Linux, ni systemd, ni la mémoire en production.
+Validation locale `1.22.44` : `363/363` tests avec `npm.cmd test`, puis `git diff --check`. Cela couvre les rejets
+d'événements/capacités, les courses journal/checkpoint/scope, guards d'identité, rebase sans rapport, ordre durable
+journal puis checkpoint, files/reruns bornés, shutdown pendant commit, crash et timeout d'un vrai worker enfant. Cela
+ne prouve ni les fournisseurs réels, ni Tesseract Linux, ni systemd, ni la mémoire en production.
 
 Après `git pull` et redémarrage sur Linux :
 
-1. vérifier `RUSTPLUS v1.22.43 OPERATIONAL` et l'absence de boucle de restart pendant au moins 15 minutes, donc
-   largement au-delà de l'ancienne frontière OOM de 376–378 secondes ;
+1. vérifier `RUSTPLUS v1.22.44 OPERATIONAL` et l'absence de boucle de restart pendant au moins 15 minutes ;
 2. observer `systemctl status rustplusplus`, `journalctl -u rustplusplus` et `/runtime` pendant plusieurs cycles BM,
-   puis comparer RSS et heap avant/après un `!scanplayers` ;
+   puis comparer RSS/heap et `pi_rebuild_*` avant/après un `!scanplayers`; la boucle principale ne doit plus subir les
+   blocages de 40–42 secondes observés sous `1.22.43` ;
 3. provoquer une traduction puis un import OCR et vérifier que les workers apparaissent sans hausse durable du heap
    principal ;
 4. tester une commande locale quand Steam/BattleMetrics sont indisponibles et vérifier `unknown/pending`, jamais un

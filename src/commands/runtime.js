@@ -35,6 +35,8 @@ function render(snapshot) {
         `${value.started} started, ${value.completed} completed (${value.success} ok, ${value.failure} failed, ` +
         `${value.timeout} timeout, ${value.skipped} skipped, ${value.dropped} dropped), ` +
         `p95 ${value.p95Ms} ms, max ${value.maxMs} ms`;
+    const rebuild = (/** @type {any} */ value) =>
+        `${number(value && value.completed)}/${number(value && value.p95Ms)}/${number(value && value.maxMs)}`;
     return [
         `Runtime — last completed ${number(snapshot.windowMs / 1000).toFixed(1)} s window`,
         '',
@@ -45,7 +47,11 @@ function render(snapshot) {
         `Event loop: p95 ${loop.p95Ms} ms | p99 ${loop.p99Ms} ms | max ${loop.maxMs} ms`,
         `Work: imports ${imports.active} active, ${imports.previewsPending} previews | ` +
             `OCR ${ocr.active} active, ${ocr.queued} queued | scans ${scans.active} active, ` +
-            `${scans.forcedRerunsQueued} queued | translations ${translations.active} active, ` +
+            `${scans.forcedRerunsQueued} queued, worker ${number(scans.workerActive)} active, ` +
+            `${number(scans.workerQueued)} queued, ` +
+            `${number(scans.workerCompleted)} completed, ${number(scans.workerFailures)} failed, ` +
+            `${number(scans.workerStalePlans)} stale | ` +
+            `translations ${translations.active} active, ` +
             `${translations.queued} queued`,
         `Serial loops: ${loops.active} active, ${loops.running} running, ${loops.scheduled} scheduled, ` +
             `${loops.failures} failures`,
@@ -55,6 +61,10 @@ function render(snapshot) {
         `OCR: run ${operation(operations.ocr_run)} | queue ${operation(operations.ocr_queue_wait)}`,
         `Imports: prepare ${operation(operations.import_prepare)} | decision ${operation(operations.import_decision)}`,
         `Scans: ${operation(operations.scan_cycle)}`,
+        `PI rebuild completed/p95/max ms: total ${rebuild(operations.pi_rebuild_total)} | ` +
+            `identities ${rebuild(operations.pi_rebuild_identities)} | ` +
+            `metrics ${rebuild(operations.pi_rebuild_metrics)} | clans ${rebuild(operations.pi_rebuild_clans)} | ` +
+            `presence ${rebuild(operations.pi_rebuild_presence)} | wipes ${rebuild(operations.pi_rebuild_wipes)}`,
         `Health: ${health.length === 0 ? 'healthy' : `degraded — ${health.join(', ')}`}`
     ].join('\n').slice(0, 1950);
 }

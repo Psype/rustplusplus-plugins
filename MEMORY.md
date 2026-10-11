@@ -52,14 +52,20 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   production entry point is native `node .`, not `ts-node`, so the TypeScript compiler is no longer retained in the
   bot process. Identity consolidation now represents an over-merged person's alias/BattleMetrics evidence in
   `O(aliases + IDs)` rows instead of their Cartesian product while preserving fail-closed conflicts and ambiguities.
-  `1.22.43` is the current release. Only `master` plus the useful
+  The provided `1.22.43` production excerpt crossed the former 376–378-second OOM boundary and settled around
+  547–630 MiB heap / 760–870 MiB RSS, but exposed a separate 40–42-second main-loop stall inside 44–48-second scans.
+  Release `1.22.44` prepares and reuses Unicode roster indexes, streamlines the remaining projectors/JSONL cache,
+  yields between measured rebuild stages, and plans each heavy scan in a disposable child. The parent remains the
+  only journal writer: it validates a strict bounded plan, keeps checkpoint/scope comparisons exact, rebases unrelated
+  journal appends, and rejects only corrections or identity read-sets that changed during provider work. One stale
+  retry and manual reruns survive the bounded coalesced FIFO; shutdown waits for any parent commit. `1.22.44` is the
+  current release. Only `master` plus the useful
   `origin/master`/`upstream/master` remote-tracking references remained. Do not reset, overwrite, reimplement or
   discard these changes. Re-audit `git status --short` and `git diff` if the observed state differs.
-- Canonical package version is `1.22.43`. The complete local validation on 2026-10-11 passed `328/328` unit tests and
-  `tsc --noEmit`; `git diff --check` was clean. Architecture and production checks are documented in
-  `docs/runtime_resilience_2026-10-11.md`. This is local deterministic evidence only. Deployment/restart and a
-  stable production run beyond the former 376-second crash boundary, a new Discord import of the reported KIRK
-  screenshot and `/runtime` production metrics remain unconfirmed, so do not claim production success.
+- Canonical package version is `1.22.44`. Architecture, synthetic benchmarks and production checks are documented in
+  `docs/runtime_resilience_2026-10-11.md`. Local deterministic evidence does not prove Linux/systemd behavior.
+  Deployment of `1.22.44`, disappearance of the scan stalls, a new Discord import of the reported KIRK screenshot and
+  `/runtime` projection metrics remain unconfirmed, so do not claim production success.
 - Primary unresolved production fact: raid and **Pair with Server** notifications were observed on the Rust+ phone but not on the bot. The 2026-09-23/24 journal showed accepted MCS logins and quick reconnects but no inbound notification. Phone receipt proves Facepunch delivery to the phone only; MCS login proves Google accepted the bot's GCM identity only. Facepunch delivery to the bot's virtual device still requires a live capture. Canonical transport audit: `docs/fcm_transport_audit_2026-09-23.md`.
 - Implemented receiver path: `src/util/reliableFcmReceiver.js` owns accepted-login readiness, stream position, heartbeat/ack, inactivity detection, ports 5228/443 and capped reconnect; `fcmAlarmRouter.js` routes Host/Lite `alarm`; `src/plugins/raidAlarm/` performs immediate authoritative Rust-chat delivery and five-second duplicate suppression. Current Facepunch/Liam/RustPlusApi evidence still uses GCM/FCM/MCS and `appData.channelId=alarm`; no schema migration was found.
 - `!alarmstatus` reports MCS, generic push proof, matching server-pair age, alarm age, Host/account match, output/mute, raw logging and up to five alarms. An operational Rust+ connection with a saved `playerToken` reports `pair active` and **does not** arm a re-pair watcher. Only an unpaired/non-operational server arms one guild-scoped 120-second watcher; repeating the command does not add another timer. Entity-pair or another server/account cannot satisfy it. `!raidtest` validates outbound Rust chat only.
@@ -487,6 +493,15 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   `git diff --check` is clean. Coverage proves observed async failures, non-overlapping schedulers and containment of a
   real child-process crash/timeout. Production providers, Linux Tesseract and systemd resource behavior remain live
   checks, not local-test claims.
+- Superseding QA for release `1.22.43` on 2026-10-11: `npm.cmd test` passes 328/328 including `tsc --noEmit`, and
+  `git diff --check` is clean. Production then crossed the old 376–378-second OOM boundary on the supplied observation
+  window, while exposing a separate 40–42-second scan stall.
+- Superseding QA for release `1.22.44` on 2026-10-11: `npm.cmd test` passes 363/363 including `tsc --noEmit`, and
+  `git diff --check` is clean. Coverage includes revision-stable JSONL compare-and-append, ordered journal/checkpoint
+  failure recovery, strict plan capabilities/keys/state, targeted identity read-set guards, manual revocation and
+  exact-name races, unrelated concurrent rebases, one bounded stale retry, FIFO/coalescing across servers, payload
+  bounds, parent-commit shutdown, child crash/reaping, fixed private telemetry, prepared roster equivalence and
+  projector ordering. Production deployment and stall removal remain live checks.
 - Performance check for `1.22.3`: the dedicated glyph benchmark recalls the target among 2,000 aliases with 104 stored
   glyph variants and eight graphemes in a 20.797 ms median. The existing 200-player pipeline measured before/after at
   41.702/39.357 ms initial load, 0.044/0.030 ms quiet-poll mean and 51.356/50.742 ms for ten transitions; no measured

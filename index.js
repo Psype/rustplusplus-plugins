@@ -76,10 +76,32 @@ RuntimeTelemetry.start({
     }
 });
 client.build();
-process.once('exit', () => {
-    AutoTranslate.shutdown();
-    TesseractOcr.shutdown();
-});
+/** @type {Promise<void>|null} */
+let shutdownPromise = null;
+function shutdownIsolatedServices() {
+    if (shutdownPromise) return shutdownPromise;
+    /** @param {()=>unknown} callback */
+    const stop = callback => {
+        try { return Promise.resolve(callback()); }
+        catch (_error) { return Promise.resolve(); }
+    };
+    shutdownPromise = Promise.allSettled([
+        stop(AutoTranslate.shutdown),
+        stop(PlayerScanDaemon.shutdown),
+        stop(TesseractOcr.shutdown)
+    ]).then(() => undefined);
+    return shutdownPromise;
+}
+process.once('exit', () => { void shutdownIsolatedServices(); });
+for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.once(signal, () => {
+        const forcedExit = setTimeout(() => process.exit(0), 5000);
+        void shutdownIsolatedServices().finally(() => {
+            clearTimeout(forcedExit);
+            process.exit(0);
+        });
+    });
+}
 
 function createMissingDirectories() {
     if (!Fs.existsSync(Path.join(__dirname, 'logs'))) {

@@ -14,13 +14,17 @@ function snapshot() {
         sources: {
             imports: { active: 1, previewsPending: 2, decisionsClaimed: 0, decisionQueues: 1 },
             ocr: { active: 1, queued: 2, queuedBytes: 1000 },
-            scans: { active: 1, forcedRerunsQueued: 0 },
+            scans: { active: 1, forcedRerunsQueued: 0, workerActive: 1, workerQueued: 2,
+                workerCompleted: 12, workerFailures: 3, workerStalePlans: 4 },
             translations: { active: 0, queued: 0 }
         },
         sourceFailures: 0,
         collectorFailures: 0,
         operations: { translation: operation, ocr_queue_wait: operation, ocr_run: operation,
-            import_prepare: operation, import_decision: operation, scan_cycle: operation }
+            import_prepare: operation, import_decision: operation, scan_cycle: operation,
+            pi_rebuild_identities: operation, pi_rebuild_metrics: operation,
+            pi_rebuild_clans: operation, pi_rebuild_presence: operation,
+            pi_rebuild_wipes: operation, pi_rebuild_total: operation }
     });
 }
 
@@ -59,6 +63,12 @@ Test('/runtime defers first, is ephemeral and renders only aggregate admin telem
     Assert.match(value.edits[0].content, /heap 3200\/3300 MiB \(limit 4096 MiB\)/);
     Assert.match(value.edits[0].content, /OCR: run 2 started, 2 completed .*p95 25 ms.*queue .*p95 25 ms/);
     Assert.match(value.edits[0].content, /Imports: prepare .*decision/);
+    Assert.match(value.edits[0].content,
+        /scans 1 active, 0 queued, worker 1 active, 2 queued, 12 completed, 3 failed, 4 stale/);
+    Assert.match(value.edits[0].content,
+        /PI rebuild completed\/p95\/max ms: total 2\/25\/20 \| identities 2\/25\/20 .*wipes 2\/25\/20/);
+    Assert.match(value.edits[0].content, /Health: degraded/);
+    Assert.equal(value.edits[0].content.length <= 1950, true);
     Assert.equal(value.edits[0].content.includes(sentinel), false);
     Assert.deepEqual(value.edits[0].allowedMentions, { parse: [] });
 });

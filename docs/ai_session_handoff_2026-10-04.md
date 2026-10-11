@@ -27,6 +27,10 @@ services Steam/BattleMetrics/WarBandits et voix dégradent vers pending/unknown 
 La release 1.22.43 corrige l'OOM reproductible du cœur : `npm start` lance maintenant Node directement, sans conserver
 le compilateur `ts-node`, et les candidats du consolidateur restent linéaires même lorsqu'une identité projetée porte
 de nombreux alias et BattleMetrics IDs.
+La release 1.22.44 supprime le replay quadratique des membres `/cinfo` historiques, mesure chaque étape de projection
+et déplace le plan du scan dans un child one-shot. Le parent reste le seul writer : checkpoint et scope gardent une
+CAS exacte, les appends indépendants sont rebasés, tandis que les corrections ou read-sets Steam/BM/nom réellement
+modifiés rendent le plan stale. Les serveurs restent sérialisés dans une FIFO bornée/coalescée.
 Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; `a308c0a` ajoute la
 1.22.27. La release suivante 1.22.28 groupe les alias pending par identité BattleMetrics et ajoute le fallback
 WarBandits courant -> intervalle historique pertinent -> all-time. La release 1.22.29 centralise toute consolidation
@@ -62,8 +66,9 @@ uniquement dans l’ancre et garde une date illisible éditable avec Confirm dé
 réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
 d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La suivante borne les délais de réponse
 Discord/traduction et la dernière fiabilise la sémantique des identités connues et des wipes WarBandits. La dernière
-validation complète de la release 1.22.43 a passé 328/328 tests et tsc --noEmit ; le déploiement et la
-nouvelle capture Discord restent à valider réellement.
+validation complète de la release 1.22.44 a passé 363/363 tests et `tsc --noEmit`. Le déploiement 1.22.43 a confirmé
+le correctif OOM sur la fenêtre fournie mais pas celui des stalls ; le déploiement 1.22.44 et la nouvelle capture
+Discord restent à valider réellement.
 
 Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
 la date de capture Discord est ignorée ; ce calendrier mardi/vendredi 14:00 GMT ne vaut que pour WarBandits EU 5x
@@ -81,8 +86,8 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 - Dépôt : `rustplusplus-plugins`.
 - Branche au moment de la passation : `master`.
-- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur `09dc37a`, release `1.22.42`, avant la release courante.
-- Version canonique du worktree : `1.22.43` dans `package.json` et `package-lock.json`.
+- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur `229810f`, release `1.22.43`, avant la release courante.
+- Version canonique du worktree : `1.22.44` dans `package.json` et `package-lock.json`.
 - Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
   métrique d’heures WarBandits.
 - Le commit utilisateur `d327e7d` regroupe les releases `1.22.24` à `1.22.26`, notamment dans :
@@ -198,7 +203,32 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
 
-## Dernière correction : release 1.22.43
+## Dernière correction : release 1.22.44
+
+Le déploiement `1.22.43` fourni a démarré en environ sept secondes et franchi l'ancienne frontière OOM, avec un heap
+revenu vers 547–630 MiB et un RSS vers 760–870 MiB sur la fenêtre observée. Il a en revanche rendu visible un second
+défaut : chaque scan de 44–48 secondes immobilisait la boucle principale environ 40–42 secondes et provoquait des
+timeouts Rust+.
+
+Le replay clans prépare désormais une fois les groupes et index Unicode pour toutes les captures. Le benchmark local
+2 700 joueurs / 120 snapshots × 4 slots passe d'environ 23,25 s à 0,33–0,37 s ; 1 200 snapshots prennent environ
+1,70 s. Les autres projecteurs et la lecture JSONL évitent leurs tris/copies transitoires principaux. Six opérations
+`pi_rebuild_*` et `/runtime` permettent d'isoler total, identités, métriques, clans, présence et wipes.
+
+Le daemon de scan calcule son plan dans un processus enfant jetable à heap borné. Les fournisseurs sont appelés par
+RPC dans le parent ; un crash/OOM/timeout enfant ne modifie rien. Le parent recanonicalise le plan, vérifie son scope et
+sa taille/capacité, puis commit dans la même file que les appends. Le checkpoint et le scope sont comparés exactement.
+Un append sans rapport est rebasé ; une correction, révocation, supersession, paire Steam/BM conflictuelle ou nouvelle
+observation touchant le SteamID, le BattleMetrics ID ou le nom ayant fondé la décision rejette le plan avant écriture.
+Le scheduler tente au plus un replan immédiat. Une FIFO globale bornée/coalescée conserve les reruns manuels, rafraîchit
+le scope d'un job différé et évite d'affamer un autre serveur. L'arrêt attend aussi la fin du commit parent.
+
+Le journal est `fsync` avant le checkpoint : ces deux fichiers sont ordonnés mais ne forment pas une transaction
+atomique inter-fichiers. Une panne pendant le commit peut donc laisser un préfixe d'observations durable avec un
+checkpoint en retard, jamais l'inverse. La reprise déduplique les IDs déterministes quand ils le restent ; une
+observation reconstruite avec un nouvel horodatage peut être répétée, sans suppression de preuve existante.
+
+### Correction précédente : release 1.22.43
 
 Les journaux de production du 11 octobre montrent quatre OOM identiques du processus principal, environ 376 à
 378 secondes après chaque démarrage, au voisinage de la limite V8 de 2 042 MiB. Deux amplificateurs se cumulaient :
@@ -209,8 +239,8 @@ et `projectionCandidates` matérialisait le produit cartésien alias × BattleMe
 existants. Pour une projection pathologique de 2 500 alias et 2 500 IDs, le consolidateur émet 7 500 candidats au
 lieu de 6 250 000, tout en conservant chaque identifiant stable et deux associations distinctes par alias afin que
 l'ambiguïté reste fermée. Des tests différentiels comparent ce comportement à l'ancien produit cartésien sur les
-cas non pathologiques. Cette validation locale ne prouve pas encore la stabilité RSS du serveur : le déploiement doit
-franchir largement l'ancienne frontière de 378 secondes.
+cas non pathologiques. Le déploiement observé a franchi l'ancienne frontière de 378 secondes ; cette fenêtre ne prouve
+pas encore la stabilité illimitée ni le comportement de `1.22.44`.
 
 ### Correction précédente : release 1.22.42
 
@@ -480,9 +510,9 @@ inventer ni commiter silencieusement.
 
 ## Validation déjà effectuée
 
-Le 11 octobre 2026, après la release 1.22.43 :
+Le 11 octobre 2026, après la release 1.22.44 :
 
-- `npm.cmd test` : `328/328` tests unitaires réussis ;
+- `npm.cmd test` : `363/363` tests unitaires réussis ;
 - `tsc --noEmit -p .` : réussi dans la même commande ;
 - `git diff --check` : aucune erreur ;
 - `npm.cmd run test:autotranslate:live` : réussi en 8,9 s pour six scénarios cumulés ; Bing a atteint sa borne de deux
@@ -498,7 +528,12 @@ Le 11 octobre 2026, après la release 1.22.43 :
   expiration absolue/LRU et plafonds des caches Steam, BattleMetrics, WarBandits/OCR, des hooks, du daemon et des
   sélecteurs player-tracker, reprise WarBandits avec curseur épinglé sur erreur, migration schema 5 -> 6, retries
   Steam automatiques/backoff, alias de profils partiels, équité bornée sous arrivées continues, activation manuelle de
-  la campagne pending, liaison BM→Steam, repli WarBandits exact, cooldown global et reprise après changement de wipe.
+  la campagne pending, liaison BM→Steam, repli WarBandits exact, cooldown global et reprise après changement de wipe,
+  replay roster préparé, ordre des projecteurs, CAS JSONL concurrent, ordre durable journal puis checkpoint, échecs
+  avant/après append, conflits checkpoint/scope, plans forgés/capacités/champs stricts, guards ciblés Steam/BM/nom,
+  révocation et propriétaire de nom concurrents, rebase d'une identité sans rapport, replanification stale bornée,
+  conservation des reruns manuels, FIFO/coalescing multi-serveur, bornes du payload, attente du commit parent au
+  shutdown, crash/reaping du child et télémétrie sans donnée privée.
 
 Ces résultats ne prouvent ni le comportement du binaire Tesseract installé sur Linux, ni le téléchargement Discord, ni
 les fournisseurs externes, ni le processus de déploiement.
@@ -532,14 +567,16 @@ les fournisseurs externes, ni le processus de déploiement.
 
 ### Journal, requêtes et daemon
 
-- `src/plugins/playerIntelligence/historyStore.js` : journal JSONL mensuel, append sérialisé, corruption bloquante.
+- `src/plugins/playerIntelligence/historyStore.js` : journal JSONL mensuel, append sérialisé, corruption bloquante et
+  compare-and-append par révision forte dans la queue du writer unique.
 - `src/plugins/playerIntelligence/identityConsolidator.js` : frontière unique SteamID/BattleMetrics/pseudo exact vers
   une identité locale enrichie, préparée/indexée une fois par projection immuable ; aucune correspondance floue ne
   peut muter le journal.
 - `src/plugins/playerIntelligence/runtime.js` et les projecteurs : reconstruction
   identité/clan/activité/présence/métriques.
-- `src/plugins/playerIntelligence/scanDaemon.js` : une page WarBandits bornée par tick BattleMetrics existant, état
-  reprenable, aucune seconde boucle de présence.
+- `src/plugins/playerIntelligence/scanDaemon.js`, `isolatedScanDaemon.js` et `src/workers/playerScanWorker.js` : une
+  page WarBandits bornée par tick BattleMetrics, état reprenable, plan child read-only, CAS exacte du checkpoint/scope,
+  rebase sémantique gardé des appends concurrents et FIFO globale ; aucune seconde boucle de présence.
 - `src/util/runtimeTelemetry.js` et `src/commands/runtime.js` : agrégats runtime bornés, logs sans contenu privé et
   consultation administrateur éphémère du dernier snapshot terminé.
 - `!intel` est la vue complète ; `!steamid` est son alias exact ; `!who` expose les alias ; `!record` ajoute une liaison
@@ -581,11 +618,11 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
 
 ## Vérifications de production encore ouvertes
 
-1. Déployer/redémarrer `1.22.43`, vérifier le message `RUSTPLUS v1.22.43 OPERATIONAL`, puis laisser le cœur tourner au
-   moins 15 minutes afin de franchir largement l'ancienne frontière OOM de 376–378 secondes. Mesurer RSS et heap avant
-   puis après un `!scanplayers`; aucun redémarrage ne doit survenir. Rejouer ensuite le lot de 11 SteamID, mesurer son
-   temps de réponse et exiger les noms locaux connus sans Replace/Keep.
-   Après une fenêtre, contrôler `/runtime`, `RUNTIME`, `RUNTIME_WORK` et les éventuels `RUNTIME_SLOW`, sans donnée joueur.
+1. Déployer/redémarrer `1.22.44`, vérifier le message `RUSTPLUS v1.22.44 OPERATIONAL`, puis laisser le cœur tourner au
+   moins 15 minutes. Mesurer RSS/heap avant et après `!scanplayers`, vérifier la présence du worker/FIFO dans `/runtime`
+   et l'absence des stalls principaux de 40–42 secondes vus sous `1.22.43`. Les `pi_rebuild_*` doivent permettre
+   d'attribuer tout nouveau délai sans donnée joueur. Rejouer ensuite le lot de 11 SteamID, mesurer son temps de réponse
+   et exiger les noms locaux connus sans Replace/Keep.
 2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent
    des boîtes déterministes et ne remplacent pas ce contrôle.
 3. Réimporter l’image KIRK originale dans le canal d’intelligence et exiger `U Got Kirkified` plus un `Established`

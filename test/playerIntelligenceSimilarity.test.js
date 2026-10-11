@@ -173,3 +173,53 @@ Test('partial cinfo resolves exact names but never strips adjacent Marley glyphs
     Assert.deepEqual(result.resolvedMembers.map(member => member.name), ['Rw']);
     Assert.equal(result.unresolvedMembers[0].observedText, '] Swizzy ]');
 });
+
+Test('prepared historical resolver is differential-equivalent to filtering and rebuilding candidates', () => {
+    const candidates = [];
+    for (let index = 0; index < 80; index += 1) {
+        const identityKey = `person:${index}`;
+        const steamId = (76561197900001000n + BigInt(index)).toString();
+        const battlemetricsPlayerId = `${50000 + index}`;
+        candidates.push({
+            name: `Player ${`${index}`.padStart(3, '0')} Alpha`, steamId, battlemetricsPlayerId,
+            personId: identityKey, corroborated: index % 3 === 0
+        }, {
+            name: `P${`${index}`.padStart(3, '0')}-Legacy`, steamId: null, battlemetricsPlayerId,
+            personId: identityKey, caseFidelity: index % 2 === 0
+        });
+    }
+    candidates.push(
+        { name: '☜★CRYTEK★☞', steamId: STEAM_A, battlemetricsPlayerId: '90001', personId: 'special:a' },
+        { name: 'CRYTEK old', steamId: null, battlemetricsPlayerId: '90001', personId: 'special:a' },
+        { name: 'Alice', steamId: STEAM_B, battlemetricsPlayerId: '90002', personId: 'special:b' },
+        { name: 'Alice', steamId: '76561197900009999', battlemetricsPlayerId: '90003',
+            personId: 'special:c' }
+    );
+    const prepared = Similarity.prepareRosterResolver(candidates, candidate => candidate.personId);
+    const cases = [
+        { observed: ['Player 007 Alpha', 'P011-Legacy'], excluded: new Set() },
+        { observed: ['Player 007 Alpha', 'P011-Legacy'], excluded: new Set(['person:7']) },
+        { observed: ['CRYTEK', 'ALICE'], excluded: new Set(['person:1', 'special:c']) },
+        { observed: ['Player 021 Alphx', 'Player 022 Alpha'], excluded: new Set(['person:3']),
+            options: { resolvedScore: 0.8, resolvedMargin: 0.05 } },
+        { observed: ['CRYTEK'], excluded: new Set(), options: { exactOnly: true } }
+    ];
+    for (const value of cases) {
+        const filtered = candidates.filter(candidate => !value.excluded.has(candidate.personId));
+        Assert.deepEqual(
+            prepared.resolve(value.observed, value.options || {}, value.excluded),
+            Similarity.resolveRoster(value.observed, filtered, value.options || {})
+        );
+    }
+
+    // A malformed cross-person stable-ID collision takes the exact slow fallback instead of changing evidence.
+    const collision = [
+        { name: 'Collision A', steamId: STEAM_A, battlemetricsPlayerId: null, personId: 'collision:a' },
+        { name: 'Collision B', steamId: STEAM_A, battlemetricsPlayerId: null, personId: 'collision:b' }
+    ];
+    const collisionResolver = Similarity.prepareRosterResolver(collision, candidate => candidate.personId);
+    Assert.deepEqual(
+        collisionResolver.resolve(['Collision B'], {}, new Set(['collision:a'])),
+        Similarity.resolveRoster(['Collision B'], collision.filter(candidate => candidate.personId !== 'collision:a'))
+    );
+});

@@ -4,6 +4,7 @@
 const Crypto = require('node:crypto');
 
 const { deepFreeze } = require('./contracts.js');
+const MAX_RESOLUTION_CACHE_ENTRIES = 20000;
 
 const VERIFIED_NAME_SOURCES = new Set([
     'battlemetrics',
@@ -35,14 +36,14 @@ function namePersonId(key) {
 function targetPersonId(target, bmToSteam) {
     if (target.steamId !== null) return `steam:${target.steamId}`;
     const steamIds = bmToSteam.get(/** @type {string} */ (target.battlemetricsPlayerId));
-    if (steamIds && steamIds.size === 1) return `steam:${[...steamIds][0]}`;
+    if (steamIds && steamIds.size === 1) return `steam:${steamIds.values().next().value}`;
     return `battlemetrics:${target.battlemetricsPlayerId}`;
 }
 
 /** @param {readonly Readonly<Record<string, any>>[]} events */
 function projectIdentities(events) {
     const ordered = events.filter(event => ['identity_observed', 'identity_linked',
-        'identity_link_revoked'].includes(event.kind)).slice().sort((left, right) =>
+        'identity_link_revoked'].includes(event.kind)).sort((left, right) =>
         left.recordedAt.localeCompare(right.recordedAt) || left.eventId.localeCompare(right.eventId));
     const bmToSteam = new Map();
     const observedNameTargets = new Map();
@@ -81,14 +82,23 @@ function projectIdentities(events) {
         }
     }
 
+    const stableSubjectCache = new Map();
     /** @param {{steamId: string|null, battlemetricsPlayerId: string|null}} subject */
     function resolveStableSubject(subject) {
-        if (subject.steamId !== null) return `steam:${subject.steamId}`;
+        const cacheKey = subject.steamId !== null ? `s:${subject.steamId}` :
+            subject.battlemetricsPlayerId !== null ? `b:${subject.battlemetricsPlayerId}` : null;
+        if (cacheKey !== null && stableSubjectCache.has(cacheKey)) return stableSubjectCache.get(cacheKey);
+        let personId;
+        if (subject.steamId !== null) personId = `steam:${subject.steamId}`;
         if (subject.battlemetricsPlayerId !== null) {
             const explicit = explicitBattlemetricsTargets.get(subject.battlemetricsPlayerId);
-            if (explicit && explicit.size === 1) return [...explicit][0];
+            if (personId === undefined && explicit && explicit.size === 1) {
+                personId = explicit.values().next().value;
+            }
         }
-        return targetPersonId(subject, bmToSteam);
+        if (personId === undefined) personId = targetPersonId(subject, bmToSteam);
+        if (cacheKey !== null) stableSubjectCache.set(cacheKey, personId);
+        return personId;
     }
 
     for (const event of ordered) {
@@ -100,48 +110,61 @@ function projectIdentities(events) {
         observedNameTargets.set(key, values);
     }
 
+    const resolutionCache = new Map();
     /** @param {{steamId: string|null, battlemetricsPlayerId: string|null, exactName: string|null}} subject */
     function resolveSubject(subject) {
-        if (subject.steamId !== null) return deepFreeze({
+        const key = subject.steamId !== null ? `s:${subject.steamId}` :
+            subject.battlemetricsPlayerId !== null ? `b:${subject.battlemetricsPlayerId}` :
+                `n:${nameKey(/** @type {string} */ (subject.exactName))}`;
+        const cached = resolutionCache.get(key);
+        if (cached) return cached;
+        let resolution;
+        if (subject.steamId !== null) resolution = deepFreeze({
             personId: `steam:${subject.steamId}`, confidence: 'authoritative', ambiguous: false
         });
         if (subject.battlemetricsPlayerId !== null) {
             const explicit = explicitBattlemetricsTargets.get(subject.battlemetricsPlayerId);
-            if (explicit && explicit.size === 1) return deepFreeze({
-                personId: [...explicit][0], confidence: 'verified', ambiguous: false
+            if (resolution === undefined && explicit && explicit.size === 1) resolution = deepFreeze({
+                personId: explicit.values().next().value, confidence: 'verified', ambiguous: false
             });
-            if (explicit && explicit.size > 1) return deepFreeze({
+            else if (resolution === undefined && explicit && explicit.size > 1) resolution = deepFreeze({
                 personId: `battlemetrics:${subject.battlemetricsPlayerId}`,
                 confidence: 'ambiguous', ambiguous: true
             });
             const steamIds = bmToSteam.get(subject.battlemetricsPlayerId);
-            if (steamIds && steamIds.size === 1) return deepFreeze({
-                personId: `steam:${[...steamIds][0]}`, confidence: 'verified', ambiguous: false
+            if (resolution === undefined && steamIds && steamIds.size === 1) resolution = deepFreeze({
+                personId: `steam:${steamIds.values().next().value}`, confidence: 'verified', ambiguous: false
             });
-            return deepFreeze({
+            else if (resolution === undefined) resolution = deepFreeze({
                 personId: `battlemetrics:${subject.battlemetricsPlayerId}`,
                 confidence: steamIds && steamIds.size > 1 ? 'ambiguous' : 'verified',
                 ambiguous: Boolean(steamIds && steamIds.size > 1)
             });
         }
-
-        const key = nameKey(/** @type {string} */ (subject.exactName));
-        const explicit = explicitNameTargets.get(key);
-        if (explicit && explicit.size === 1) return deepFreeze({
-            personId: [...explicit][0], confidence: 'verified', ambiguous: false
-        });
-        if (explicit && explicit.size > 1) return deepFreeze({
-            personId: namePersonId(key), confidence: 'ambiguous', ambiguous: true
-        });
-        const inferred = new Set(observedNameTargets.get(key) || []);
-        if (inferred.size === 1) return deepFreeze({
-            personId: [...inferred][0], confidence: 'probable', ambiguous: false
-        });
-        return deepFreeze({
-            personId: namePersonId(key),
-            confidence: inferred.size > 1 ? 'ambiguous' : 'probable',
-            ambiguous: inferred.size > 1
-        });
+        if (resolution === undefined) {
+            const name = key.slice(2);
+            const explicit = explicitNameTargets.get(name);
+            if (explicit && explicit.size === 1) resolution = deepFreeze({
+                personId: explicit.values().next().value, confidence: 'verified', ambiguous: false
+            });
+            else if (explicit && explicit.size > 1) resolution = deepFreeze({
+                personId: namePersonId(name), confidence: 'ambiguous', ambiguous: true
+            });
+            else {
+                const inferred = observedNameTargets.get(name);
+                resolution = inferred && inferred.size === 1 ? deepFreeze({
+                    personId: inferred.values().next().value, confidence: 'probable', ambiguous: false
+                }) : deepFreeze({
+                    personId: namePersonId(name),
+                    confidence: inferred && inferred.size > 1 ? 'ambiguous' : 'probable',
+                    ambiguous: Boolean(inferred && inferred.size > 1)
+                });
+            }
+        }
+        // resolveSubject is part of the public projection API; bound memoization so arbitrary command input
+        // cannot turn a rebuild optimization into an unbounded, long-lived cache.
+        if (resolutionCache.size < MAX_RESOLUTION_CACHE_ENTRIES) resolutionCache.set(key, resolution);
+        return resolution;
     }
 
     const people = new Map();
