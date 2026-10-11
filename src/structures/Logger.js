@@ -23,19 +23,32 @@ const Winston = require("winston");
 
 const Config = require('../../config');
 const LoggingSettings = require('../util/loggingSettings.js');
+const AsyncEventBoundary = require('../util/asyncEventBoundary.js');
 
 const SERVER_LOG_LABEL = '[server]';
 
 class Logger {
     constructor(logFilePath, type) {
-        this.logger = Winston.createLogger({
-            transports: [new Winston.transports.File({
-                filename: logFilePath,
-                maxsize: 10000000,
-                maxFiles: 2,
-                tailable: true
-            })],
+        const fileTransport = new Winston.transports.File({
+            filename: logFilePath,
+            maxsize: 10000000,
+            maxFiles: 2,
+            tailable: true
         });
+        this.logger = Winston.createLogger({
+            transports: [fileTransport],
+        });
+        this.fileLoggingHealthy = true;
+        const reportLoggingFailure = error => {
+            if (!this.fileLoggingHealthy) return;
+            this.fileLoggingHealthy = false;
+            try { this.logger.remove(fileTransport); }
+            catch (_removeError) { /* The fallback below must still be attempted. */ }
+            try { console.error(`LOGGER: file logging disabled or degraded: ${AsyncEventBoundary.formatError(error)}`); }
+            catch (_error) { /* A logger failure must not terminate the bot. */ }
+        };
+        fileTransport.on('error', reportLoggingFailure);
+        this.logger.on('error', reportLoggingFailure);
 
         this.type = type;
         this.guildId = null;
@@ -65,7 +78,7 @@ class Logger {
         switch (this.type) {
             case 'default': {
                 text = `${title}: ${text}`;
-                if (LoggingSettings.isEnabled()) {
+                if (LoggingSettings.isEnabled() && this.fileLoggingHealthy) {
                     this.logger.log({
                         level: level,
                         message: `${time} | ${text}`
@@ -79,7 +92,7 @@ class Logger {
 
                 if (level === 'error' && Config.general.showCallStackError) {
                     for (let line of (new Error().stack.split(/\r?\n/))) {
-                        if (LoggingSettings.isEnabled()) {
+                        if (LoggingSettings.isEnabled() && this.fileLoggingHealthy) {
                             this.logger.log({ level: level, message: `${time} | ${line}` });
                         }
                         console.log(Colors.green(`${time} `) + Colors.red(line));
@@ -90,7 +103,7 @@ class Logger {
             case 'guild': {
                 text = `${title}: ${text}`;
 
-                if (LoggingSettings.isEnabled()) {
+                if (LoggingSettings.isEnabled() && this.fileLoggingHealthy) {
                     this.logger.log({
                         level: level,
                         message: `${time} | ${this.guildId} | ${SERVER_LOG_LABEL} | ${text}`
@@ -106,7 +119,7 @@ class Logger {
 
                 if (level === 'error' && Config.general.showCallStackError) {
                     for (let line of (new Error().stack.split(/\r?\n/))) {
-                        if (LoggingSettings.isEnabled()) {
+                        if (LoggingSettings.isEnabled() && this.fileLoggingHealthy) {
                             this.logger.log({
                                 level: level,
                                 message: `${time} | ${this.guildId} | ${SERVER_LOG_LABEL} | ${line}`

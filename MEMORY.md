@@ -42,13 +42,18 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
   BattleMetrics resolutions plus one exact WarBandits fallback per polling tick, with a 20-second admission budget;
   confirmed non-duplicate clan sightings determine priority before recency. Release `1.22.41` makes pending progress
   observable, rearms every still-unresolved identity on each explicit `!scanplayers`, and raises the exact WarBandits
-  lane to four candidates under a 45-second admission budget. At the latest completed release audit, `master`,
-  `origin/master` and `origin/HEAD` were aligned on `1.22.40` (`c08b200`) immediately before this release;
-  `1.22.41` is the current release. Only `master` plus the useful
+  lane to four candidates under a 45-second admission budget. Before release `1.22.42`, `master`, `origin/master` and
+  `origin/HEAD` were aligned on `1.22.41` (`3e078f0`) with a clean worktree.
+  Release `1.22.42` contains the 2026-10-11 runtime-hardening session: fatal Discord exits were removed, async event
+  and timer boundaries were added, Rust+/BattleMetrics loops became non-overlapping, queues and raw logs were bounded,
+  configuration writes became atomic, and translation plus production Tesseract now run in supervised child
+  processes. BattleMetrics/voice are bounded optional enrichments, and FCM server pairing persists before BM lookup.
+  `1.22.42` is the current release. Only `master` plus the useful
   `origin/master`/`upstream/master` remote-tracking references remained. Do not reset, overwrite, reimplement or
   discard these changes. Re-audit `git status --short` and `git diff` if the observed state differs.
-- Canonical package version is `1.22.41`. The complete local validation on 2026-10-08 passed `319/319` unit tests and
-  `tsc --noEmit`; `git diff --check` was clean. This is local deterministic evidence only. Deployment/restart and a
+- Canonical package version is `1.22.42`. The complete local validation on 2026-10-11 passed `325/325` unit tests and
+  `tsc --noEmit`; `git diff --check` was clean. Architecture and production checks are documented in
+  `docs/runtime_resilience_2026-10-11.md`. This is local deterministic evidence only. Deployment/restart and a
   new Discord import of the reported KIRK screenshot, the SteamID latency/memory improvement and `/runtime` production
   metrics remain unconfirmed, so do not claim production success.
 - Primary unresolved production fact: raid and **Pair with Server** notifications were observed on the Rust+ phone but not on the bot. The 2026-09-23/24 journal showed accepted MCS logins and quick reconnects but no inbound notification. Phone receipt proves Facepunch delivery to the phone only; MCS login proves Google accepted the bot's GCM identity only. Facepunch delivery to the bot's virtual device still requires a live capture. Canonical transport audit: `docs/fcm_transport_audit_2026-09-23.md`.
@@ -474,6 +479,10 @@ This file is the cross-session memory for this Rust+ / Discord bot fork. Keep it
 - Superseding QA for release `1.22.41` on 2026-10-08: `npm.cmd test` passes 319/319 including `tsc --noEmit`, and
   `git diff --check` is clean. Coverage proves status classification, a four-candidate WarBandits batch, the monotone
   45-second admission bound, and explicit-pass rearming without deleting history or inferring presence.
+- Superseding QA for release `1.22.42` on 2026-10-11: `npm.cmd test` passes 325/325 including `tsc --noEmit`, and
+  `git diff --check` is clean. Coverage proves observed async failures, non-overlapping schedulers and containment of a
+  real child-process crash/timeout. Production providers, Linux Tesseract and systemd resource behavior remain live
+  checks, not local-test claims.
 - Performance check for `1.22.3`: the dedicated glyph benchmark recalls the target among 2,000 aliases with 104 stored
   glyph variants and eight graphemes in a 20.797 ms median. The existing 200-player pipeline measured before/after at
   41.702/39.357 ms initial load, 0.044/0.030 ms quiet-poll mean and 51.356/50.742 ms for ten transitions; no measured

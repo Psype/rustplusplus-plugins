@@ -23,6 +23,32 @@ const Path = require('path');
 
 const Client = require('../../index.ts');
 
+let atomicSequence = 0;
+
+function atomicJsonWrite(path, value) {
+    const serialized = JSON.stringify(value, null, 2);
+    JSON.parse(serialized);
+    const temporaryPath = `${path}.${process.pid}.${++atomicSequence}.tmp`;
+    let descriptor = null;
+    try {
+        descriptor = Fs.openSync(temporaryPath, 'wx');
+        Fs.writeFileSync(descriptor, serialized, 'utf8');
+        Fs.fsyncSync(descriptor);
+        Fs.closeSync(descriptor);
+        descriptor = null;
+        Fs.renameSync(temporaryPath, path);
+    }
+    catch (error) {
+        if (descriptor !== null) {
+            try { Fs.closeSync(descriptor); }
+            catch (_closeError) { /* Preserve the original write failure. */ }
+        }
+        try { Fs.unlinkSync(temporaryPath); }
+        catch (_cleanupError) { /* A stale temp file is safer than damaging the destination. */ }
+        throw error;
+    }
+}
+
 module.exports = {
     getSmartDevice: function (guildId, entityId) {
         /* Temporary function till discord modals gets more functional */
@@ -49,7 +75,7 @@ module.exports = {
 
     writeInstanceFile: function (guildId, instance) {
         const path = Path.join(__dirname, '..', '..', 'instances', `${guildId}.json`);
-        Fs.writeFileSync(path, JSON.stringify(instance, null, 2));
+        atomicJsonWrite(path, instance);
     },
 
     readCredentialsFile: function (guildId) {
@@ -59,6 +85,6 @@ module.exports = {
 
     writeCredentialsFile: function (guildId, credentials) {
         const path = Path.join(__dirname, '..', '..', 'credentials', `${guildId}.json`);
-        Fs.writeFileSync(path, JSON.stringify(credentials, null, 2));
+        atomicJsonWrite(path, credentials);
     },
 }

@@ -193,3 +193,23 @@ Test('reports only numeric aggregate runtime translation status', async () => {
     Assert.deepEqual(AutoTranslate.getRuntimeStatus(), { active: 0, queued: 0 });
     Assert.deepEqual(Object.keys(AutoTranslate.getRuntimeStatus()), ['active', 'queued']);
 });
+
+Test('translation bulkhead keeps two active, eight queued and drops excess optional work', async () => {
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const jobs = Array.from({ length: 11 }, (_value, index) => AutoTranslate.translateMessage(rustplus, {
+        steamId: `player-${index}`,
+        message: 'need help now'
+    }, {
+        settings: { enabled: true, targets: ['en', 'zh'] },
+        knownLanguage: 'en',
+        translator: async () => gate
+    }));
+
+    Assert.deepEqual(AutoTranslate.getRuntimeStatus(), { active: 2, queued: 8 });
+    Assert.equal(await jobs[10], null);
+    release('现在需要帮助');
+    const results = await Promise.all(jobs.slice(0, 10));
+    Assert.equal(results.every(result => result && result.target === 'zh'), true);
+    Assert.deepEqual(AutoTranslate.getRuntimeStatus(), { active: 0, queued: 0 });
+});

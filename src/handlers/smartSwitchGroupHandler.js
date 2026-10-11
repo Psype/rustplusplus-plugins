@@ -20,6 +20,7 @@
 
 const DiscordMessages = require('../discordTools/discordMessages.js');
 const Timer = require('../util/timer');
+const AsyncEventBoundary = require('../util/asyncEventBoundary.js');
 
 module.exports = {
     handler: async function (rustplus, client) {
@@ -184,7 +185,8 @@ module.exports = {
             time: time
         });
 
-        rustplus.currentSwitchTimeouts[groupId] = setTimeout(async function () {
+        rustplus.currentSwitchTimeouts[groupId] = setTimeout(AsyncEventBoundary.listener(
+            'smart-switch-group.automatic-revert', async function () {
             const instance = client.getInstance(guildId);
             if (!instance.serverList.hasOwnProperty(serverId) ||
                 !instance.serverList[serverId].switchGroups.hasOwnProperty(groupId)) {
@@ -198,7 +200,7 @@ module.exports = {
             rustplus.sendInGameMessage(str);
 
             await module.exports.TurnOnOffGroup(client, rustplus, guildId, serverId, groupId, !active);
-        }, timeSeconds * 1000);
+        }, (label, error) => rustplus.log('EVENT', `${label}: ${error}`, 'error')), timeSeconds * 1000);
 
         rustplus.sendInGameMessage(str);
         await module.exports.TurnOnOffGroup(client, rustplus, guildId, serverId, groupId, active);

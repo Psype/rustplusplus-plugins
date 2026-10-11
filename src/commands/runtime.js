@@ -18,6 +18,10 @@ function render(snapshot) {
     const ocr = snapshot.sources.ocr;
     const scans = snapshot.sources.scans;
     const translations = snapshot.sources.translations;
+    const services = snapshot.sources.services || {
+        active: 0, queued: 0, running: 0, restarts: 0, failures: 0, circuitOpen: 0
+    };
+    const loops = snapshot.sources.loops || { active: 0, running: 0, scheduled: 0, failures: 0 };
     const operations = snapshot.operations;
     const health = [];
     if (number(loop.p99Ms) >= 250) health.push('event-loop p99');
@@ -41,7 +45,12 @@ function render(snapshot) {
         `Event loop: p95 ${loop.p95Ms} ms | p99 ${loop.p99Ms} ms | max ${loop.maxMs} ms`,
         `Work: imports ${imports.active} active, ${imports.previewsPending} previews | ` +
             `OCR ${ocr.active} active, ${ocr.queued} queued | scans ${scans.active} active, ` +
-            `${scans.forcedRerunsQueued} queued | translations ${translations.active} active`,
+            `${scans.forcedRerunsQueued} queued | translations ${translations.active} active, ` +
+            `${translations.queued} queued`,
+        `Serial loops: ${loops.active} active, ${loops.running} running, ${loops.scheduled} scheduled, ` +
+            `${loops.failures} failures`,
+        `Isolated services: ${services.running} running, ${services.active} active, ${services.queued} queued, ` +
+            `${services.restarts} restarts, ${services.failures} failures, circuit ${services.circuitOpen ? 'open' : 'closed'}`,
         `Translation: ${operation(operations.translation)}`,
         `OCR: run ${operation(operations.ocr_run)} | queue ${operation(operations.ocr_queue_wait)}`,
         `Imports: prepare ${operation(operations.import_prepare)} | decision ${operation(operations.import_decision)}`,

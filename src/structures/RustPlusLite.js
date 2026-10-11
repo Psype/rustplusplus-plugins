@@ -23,6 +23,7 @@ const RustPlusLib = require('@liamcottle/rustplus.js');
 const Client = require('../../index.ts');
 const ApplicationVersion = require('../util/applicationVersion.js');
 const Config = require('../../config');
+const AsyncEventBoundary = require('../util/asyncEventBoundary.js');
 
 class RustPlusLite extends RustPlusLib {
     constructor(guildId, logger, rustplus, serverIp, appPort, steamId, playerToken) {
@@ -39,10 +40,12 @@ class RustPlusLite extends RustPlusLib {
     }
 
     loadRustPlusLiteEvents() {
-        this.on('connected', (...args) => rustPlusLiteConnectedEvent(this, ...args));
-        this.on('connecting', (...args) => rustPlusLiteConnectingEvent(this, ...args));
-        this.on('disconnected', (...args) => rustPlusLiteDisconnectedEvent(this, ...args));
-        this.on('error', (...args) => rustPlusLiteErrorEvent(this, ...args));
+        const register = (name, callback) => this.on(name, AsyncEventBoundary.listener(`rustplus-lite.${name}`,
+            (...args) => callback(this, ...args), (label, error) => this.log('EVENT', `${label}: ${error}`, 'error')));
+        register('connected', rustPlusLiteConnectedEvent);
+        register('connecting', rustPlusLiteConnectingEvent);
+        register('disconnected', rustPlusLiteDisconnectedEvent);
+        register('error', rustPlusLiteErrorEvent);
     }
 
     log(title, text, level = 'info') {

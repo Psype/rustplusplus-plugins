@@ -19,7 +19,7 @@ const { applyRoleHints, parseCinfoWords, parseEstablished, splitCinfoWordBlocks 
 const { parseF7Words } = require('./parseF7.js');
 const { resolveCinfo } = require('./resolveCinfo.js');
 const Runtime = require('./runtime.js');
-const TesseractOcr = require('./tesseractOcr.js');
+const TesseractOcr = require('./isolatedTesseractOcr.js');
 const VisualAliasLibrary = require('./visualAliasLibrary.js');
 const OcrCorrectionMemory = require('./ocrCorrectionMemory.js');
 const WarBandits = require('../warBandits');
@@ -34,6 +34,7 @@ const EDIT_ROSTER_FIELD = 'PIImportRosterNames';
 const TTL_MS = 30 * 60 * 1000;
 const MAX_CORROBORATION_QUERIES = 3;
 const MAX_TEXT_STEAM_IDS = 100;
+const MAX_PENDING_PREVIEWS = 256;
 /** @type {Map<string, any>} */
 const pending = new Map();
 /** @type {Map<string, Promise<any>>} */
@@ -42,6 +43,17 @@ const decisionQueues = new Map();
 const decisionClaims = new Set();
 let activePreparations = 0;
 let activeDecisions = 0;
+
+function prunePending(now = Date.now()) {
+    for (const [token, item] of pending) {
+        if (!item || item.expiresAt < now) pending.delete(token);
+    }
+    while (pending.size >= MAX_PENDING_PREVIEWS) {
+        const oldest = pending.keys().next().value;
+        if (typeof oldest !== 'string') break;
+        pending.delete(oldest);
+    }
+}
 
 /** @param {unknown} value @param {number} limit */
 function truncateCharacters(value, limit) {
@@ -470,6 +482,7 @@ async function prepareSteamIdTextImport(client, source, steamIds, duplicateLineC
     });
     const token = Crypto.randomBytes(12).toString('hex');
     const createdAt = Date.now();
+    prunePending(createdAt);
     pending.set(token, Object.freeze({
         guildId: `${source.guildId}`,
         channelId: `${source.channelId}`,
@@ -1143,6 +1156,7 @@ async function prepareImportsInternal(client, source, requests, requesterUserId,
     }
     const token = Crypto.randomBytes(12).toString('hex');
     const createdAt = Date.now();
+    prunePending(createdAt);
     pending.set(token, Object.freeze({
         guildId: `${source.guildId}`,
         channelId: `${source.channelId}`,
@@ -1793,6 +1807,7 @@ async function handleModal({ client, interaction }) {
 }
 
 function getRuntimeStatus() {
+    prunePending();
     return Object.freeze({
         active: activePreparations + activeDecisions,
         previewsPending: pending.size,

@@ -32,7 +32,9 @@ const SOURCE_FIELDS = Object.freeze({
     imports: Object.freeze(['active', 'previewsPending', 'decisionsClaimed', 'decisionQueues']),
     ocr: Object.freeze(['active', 'queued', 'queuedBytes']),
     scans: Object.freeze(['active', 'forcedRerunsQueued']),
-    translations: Object.freeze(['active', 'queued'])
+    translations: Object.freeze(['active', 'queued']),
+    services: Object.freeze(['active', 'queued', 'running', 'restarts', 'failures', 'circuitOpen']),
+    loops: Object.freeze(['active', 'running', 'scheduled', 'failures'])
 });
 
 /** @returns {any} */
@@ -174,6 +176,8 @@ function formatRuntime(snapshot) {
     const ocr = snapshot.sources.ocr;
     const scans = snapshot.sources.scans;
     const translations = snapshot.sources.translations;
+    const services = snapshot.sources.services;
+    const loops = snapshot.sources.loops;
     return `windowSec=${rounded(snapshot.windowMs / 1000)} rssMiB=${snapshot.process.rssMiB} ` +
         `heapUsedMiB=${snapshot.process.heapUsedMiB} heapTotalMiB=${snapshot.process.heapTotalMiB} ` +
         `heapLimitMiB=${snapshot.process.heapLimitMiB} externalMiB=${snapshot.process.externalMiB} ` +
@@ -184,7 +188,12 @@ function formatRuntime(snapshot) {
         `decisionQueues=${imports.decisionQueues} ocrActive=${ocr.active} ocrQueued=${ocr.queued} ` +
         `ocrQueuedMiB=${mebibytes(ocr.queuedBytes)} scansActive=${scans.active} ` +
         `scansQueued=${scans.forcedRerunsQueued} translationsActive=${translations.active} ` +
-        `translationsQueued=${translations.queued} sourceFailures=${snapshot.sourceFailures} ` +
+        `translationsQueued=${translations.queued} loopsActive=${loops.active} loopsRunning=${loops.running} ` +
+        `loopsScheduled=${loops.scheduled} loopFailures=${loops.failures} ` +
+        `servicesActive=${services.active} servicesQueued=${services.queued} servicesRunning=${services.running} ` +
+        `serviceRestarts=${services.restarts} serviceFailures=${services.failures} ` +
+        `serviceCircuitOpen=${services.circuitOpen} ` +
+        `sourceFailures=${snapshot.sourceFailures} ` +
         `collectorFailures=${snapshot.collectorFailures}`;
 }
 

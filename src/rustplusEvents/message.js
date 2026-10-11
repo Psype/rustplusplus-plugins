@@ -22,6 +22,7 @@ const CommandHandler = require('../handlers/inGameCommandHandler.js');
 const Constants = require('../util/constants.js');
 const DiscordMessages = require('../discordTools/discordMessages.js');
 const EventDebugLogger = require('../util/eventDebugLogger.js');
+const AsyncEventBoundary = require('../util/asyncEventBoundary.js');
 const InGameChatHandler = require('../handlers/inGameChatHandler.js');
 const PluginManager = require('../plugins/pluginManager.js');
 const SmartSwitchGroupHandler = require('../handlers/smartSwitchGroupHandler.js');
@@ -221,7 +222,10 @@ async function messageBroadcastEntityChangedStorageMonitor(rustplus, client, mes
 
     if (server.storageMonitors[entityId].type === 'toolCupboard' ||
         message.broadcast.entityChanged.payload.capacity === Constants.STORAGE_MONITOR_TOOL_CUPBOARD_CAPACITY) {
-        setTimeout(updateToolCupboard.bind(null, rustplus, client, message), 2000);
+        setTimeout(AsyncEventBoundary.listener('storage-monitor.tool-cupboard-refresh',
+            () => updateToolCupboard(rustplus, client, message), (label, error) => {
+                rustplus.log('EVENT', `${label}: ${error}`, 'error');
+            }), 2000);
     }
     else {
         rustplus.storageMonitors[entityId] = {

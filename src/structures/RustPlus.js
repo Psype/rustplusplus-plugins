@@ -40,6 +40,7 @@ const PluginManager = require('../plugins/pluginManager.js');
 const RustPlusLite = require('../structures/RustPlusLite');
 const TeamHandler = require('../handlers/teamHandler.js');
 const Timer = require('../util/timer.js');
+const AsyncEventBoundary = require('../util/asyncEventBoundary.js');
 
 const TOKENS_LIMIT = 24;        /* Per player */
 const TOKENS_REPLENISH = 3;     /* Per second */
@@ -62,6 +63,7 @@ class RustPlus extends RustPlusLib {
 
         /* Interval ids */
         this.pollingTaskId = 0;             /* The id of the main polling mechanism of the rustplus instance. */
+        this.pollingLoop = null;             /* Non-overlapping async polling controller. */
         this.tokensReplenishTaskId = 0;     /* The id of the replenish task for rustplus tokens. */
 
         /* Other variable initializations */
@@ -120,7 +122,10 @@ class RustPlus extends RustPlusLib {
             Path.join(__dirname, '..', 'rustplusEvents')).filter(file => file.endsWith('.js'));
         for (const file of eventFiles) {
             const event = require(`../rustplusEvents/${file}`);
-            this.on(event.name, (...args) => event.execute(this, Client.client, ...args));
+            this.on(event.name, AsyncEventBoundary.listener(`rustplus.${event.name}`,
+                (...args) => event.execute(this, Client.client, ...args), (label, error) => {
+                    if (typeof this.log === 'function') this.log('EVENT', `${label}: ${error}`, 'error');
+                }));
         }
     }
 
@@ -672,7 +677,6 @@ class RustPlus extends RustPlusLib {
         }
         else if (Object.keys(response).length === 0) {
             logInvalidResponse(Client.client.intlGet(null, 'responseIsEmpty'));
-            clearInterval(this.pollingTaskId);
             return false;
         }
         return true;

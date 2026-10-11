@@ -13,6 +13,8 @@ const EVENT_LOG_PATH = Path.join(LOG_DIR, 'rustplusplus-events.log');
 const FCM_RAW_LOG_PATH = Path.join(LOG_DIR, 'rustplusplus-fcm-raw.jsonl');
 const MARKER_HISTORY_PATH = Path.join(LOG_DIR, 'rustplus-markers-history.log');
 const RAW_SOCKET_LOG_PATH = Path.join(LOG_DIR, 'rustplusplus-raw-socket.txt');
+const MAX_DEBUG_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_DEBUG_RECORD_BYTES = 1024 * 1024;
 
 function stringify(value) {
     return JSON.stringify(value, (_key, val) => typeof val === 'bigint' ? val.toString() : val);
@@ -22,13 +24,27 @@ function ensureLogDir(path = LOG_DIR, filesystem = Fs) {
     filesystem.mkdirSync(path, { recursive: true });
 }
 
+function appendBounded(path, content, filesystem = Fs) {
+    const bytes = Buffer.byteLength(content);
+    if (bytes > MAX_DEBUG_RECORD_BYTES) return false;
+    if (typeof filesystem.statSync === 'function') {
+        try {
+            if (filesystem.statSync(path).size + bytes > MAX_DEBUG_FILE_BYTES) return false;
+        }
+        catch (error) {
+            if (!error || error.code !== 'ENOENT') throw error;
+        }
+    }
+    filesystem.appendFileSync(path, content, 'utf8');
+    return true;
+}
+
 function appendJsonLine(path, data, dependencies = {}) {
     const isEnabled = dependencies.isEnabled || LoggingSettings.isEnabled;
     if (!isEnabled()) return false;
     const filesystem = dependencies.filesystem || Fs;
     ensureLogDir(Path.dirname(path), filesystem);
-    filesystem.appendFileSync(path, `${stringify(data)}\n`, 'utf8');
-    return true;
+    return appendBounded(path, `${stringify(data)}\n`, filesystem);
 }
 
 function getRawDataBuffer(data) {
@@ -42,9 +58,7 @@ function appendRawSocketText(rustplus, direction, data) {
     const header = `\n--- ${new Date().toISOString()} ${direction} guild=${rustplus.guildId} ` +
         `server=${rustplus.serverId} bytes=${buffer.length} ---\n`;
     ensureLogDir();
-    Fs.appendFileSync(RAW_SOCKET_LOG_PATH, header);
-    Fs.appendFileSync(RAW_SOCKET_LOG_PATH, buffer.toString('utf8'));
-    Fs.appendFileSync(RAW_SOCKET_LOG_PATH, '\n');
+    appendBounded(RAW_SOCKET_LOG_PATH, `${header}${buffer.toString('utf8')}\n`);
 }
 
 function getBase(rustplus, source) {

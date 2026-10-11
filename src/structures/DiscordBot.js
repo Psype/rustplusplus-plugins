@@ -35,6 +35,7 @@ const PermissionHandler = require('../handlers/permissionHandler.js');
 const PluginManager = require('../plugins/pluginManager.js');
 const RustLabs = require('../structures/RustLabs');
 const RustPlus = require('../structures/RustPlus');
+const AsyncEventBoundary = require('../util/asyncEventBoundary.js');
 
 class DiscordBot extends Discord.Client {
     constructor(props) {
@@ -70,6 +71,7 @@ class DiscordBot extends Discord.Client {
         this.battlemetricsInstances = new Object();
 
         this.battlemetricsIntervalId = null;
+        this.battlemetricsLoop = null;
         this.battlemetricsIntervalCounter = 0;
 
         this.voiceLeaveTimeouts = new Object();
@@ -95,15 +97,19 @@ class DiscordBot extends Discord.Client {
             .filter(file => file.endsWith('.js'));
         for (const file of eventFiles) {
             const event = require(`../discordEvents/${file}`);
+            const listener = AsyncEventBoundary.listener(`discord.${event.name}`,
+                (...args) => event.execute(this, ...args), (label, error) => {
+                    this.log('EVENT', `${label}: ${error}`, 'error');
+                });
 
             if (event.name === 'rateLimited') {
-                this.rest.on(event.name, (...args) => event.execute(this, ...args));
+                this.rest.on(event.name, listener);
             }
             else if (event.once) {
-                this.once(event.name, (...args) => event.execute(this, ...args));
+                this.once(event.name, listener);
             }
             else {
-                this.on(event.name, (...args) => event.execute(this, ...args));
+                this.on(event.name, listener);
             }
         }
     }

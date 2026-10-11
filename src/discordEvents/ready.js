@@ -24,18 +24,23 @@ const Path = require('path');
 const BattlemetricsHandler = require('../handlers/battlemetricsHandler.js');
 const Config = require('../../config');
 const SyncRustplusDiscordState = require('../util/SyncRustplusDiscordState.js');
+const SerialLoop = require('../util/serialLoop.js');
 
 module.exports = {
     name: 'ready',
     once: true,
     async execute(client) {
         for (const guild of client.guilds.cache) {
-            if (!client.getInstance(guild[0])) require('../util/CreateInstanceFile')(client, guild[1]);
-            require('../util/CreateCredentialsFile')(client, guild[1]);
-            client.fcmListenersLite[guild[0]] ??= new Object();
+            try {
+                if (!client.getInstance(guild[0])) require('../util/CreateInstanceFile')(client, guild[1]);
+                require('../util/CreateCredentialsFile')(client, guild[1]);
+                client.fcmListenersLite[guild[0]] ??= new Object();
+                client.loadGuildIntl(guild[0]);
+            }
+            catch (error) {
+                client.log('GUILD STARTUP', `Guild ${guild[0]} local setup failed safely: ${error}`, 'error');
+            }
         }
-
-        client.loadGuildsIntl();
         client.log(client.intlGet(null, 'infoCap'), client.intlGet(null, 'loggedInAs', {
             name: client.user.tag
         }));
@@ -63,26 +68,46 @@ module.exports = {
 
         for (let guildArray of client.guilds.cache) {
             const guild = guildArray[1];
-
             try {
-                await guild.members.me.setNickname(Config.discord.username);
-            }
-            catch (e) {
-                client.log(client.intlGet(null, 'warningCap'), client.intlGet(null, 'ignoreSetNickname'));
-            }
-            await client.syncCredentialsWithUsers(guild);
-            await client.setupGuild(guild);
+                try {
+                    await guild.members.me.setNickname(Config.discord.username);
+                }
+                catch (e) {
+                    client.log(client.intlGet(null, 'warningCap'), client.intlGet(null, 'ignoreSetNickname'));
+                }
+                await client.syncCredentialsWithUsers(guild);
+                await client.setupGuild(guild);
 
-            const rustplus = client.rustplusInstances[guild.id];
-            if (rustplus && rustplus.isOperational) {
-                await SyncRustplusDiscordState.synchronize(client, rustplus);
+                const rustplus = client.rustplusInstances[guild.id];
+                if (rustplus && rustplus.isOperational) {
+                    await SyncRustplusDiscordState.synchronize(client, rustplus);
+                }
+            }
+            catch (error) {
+                client.log('GUILD STARTUP', `Guild ${guild.id} setup failed safely: ${error}`, 'error');
             }
         }
 
         if (Config.battlemetrics.token !== '') {
-            await client.updateBattlemetricsInstances();
-            BattlemetricsHandler.handler(client, true);
-            client.battlemetricsIntervalId = setInterval(BattlemetricsHandler.handler, 60000, client, false);
+            try {
+                await client.updateBattlemetricsInstances();
+                await BattlemetricsHandler.handler(client, true);
+            }
+            catch (error) {
+                client.log('BATTLEMETRICS', `Initial cycle failed safely: ${error}`, 'warn');
+            }
+            if (client.battlemetricsLoop && typeof client.battlemetricsLoop.stop === 'function') {
+                client.battlemetricsLoop.stop();
+            }
+            client.battlemetricsLoop = SerialLoop.create({
+                name: 'battlemetrics',
+                intervalMs: 60000,
+                task: () => BattlemetricsHandler.handler(client, false),
+                onError: error => client.log('BATTLEMETRICS',
+                    `Polling cycle failed safely: ${error.message}`, 'warn')
+            });
+            client.battlemetricsLoop.start(false);
+            client.battlemetricsIntervalId = client.battlemetricsLoop;
         }
 
         client.createRustplusInstancesFromConfig();

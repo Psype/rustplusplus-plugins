@@ -25,6 +25,7 @@ const Info = require('../structures/Info');
 const Map = require('../structures/Map');
 const PollingHandler = require('../handlers/pollingHandler.js');
 const SyncRustplusDiscordState = require('../util/SyncRustplusDiscordState.js');
+const SerialLoop = require('../util/serialLoop.js');
 
 module.exports = {
     name: 'connected',
@@ -84,8 +85,21 @@ module.exports = {
         }
         rustplus.loadMarkers();
 
-        await PollingHandler.pollingHandler(rustplus, client);
-        rustplus.pollingTaskId = setInterval(PollingHandler.pollingHandler, client.pollingIntervalMs, rustplus, client);
+        const initialPollSucceeded = await PollingHandler.pollingHandler(rustplus, client);
+        if (!initialPollSucceeded) {
+            rustplus.log('POLL', 'Initial Rust+ poll failed; reconnecting without entering a partial state.', 'warn');
+            rustplus.disconnect();
+            return;
+        }
+        if (rustplus.pollingLoop && typeof rustplus.pollingLoop.stop === 'function') rustplus.pollingLoop.stop();
+        rustplus.pollingLoop = SerialLoop.create({
+            name: `rustplus-${rustplus.guildId}`,
+            intervalMs: Number(client.pollingIntervalMs),
+            task: () => PollingHandler.pollingHandler(rustplus, client),
+            onError: error => rustplus.log('POLL', `Rust+ polling cycle failed safely: ${error.message}`, 'warn')
+        });
+        rustplus.pollingLoop.start(false);
+        rustplus.pollingTaskId = rustplus.pollingLoop;
         rustplus.isOperational = true;
 
         rustplus.updateLeaderRustPlusLiteInstance();

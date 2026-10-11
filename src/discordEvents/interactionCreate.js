@@ -42,10 +42,10 @@ module.exports = {
         }
 
         if (interaction.isButton()) {
-            require('../handlers/buttonHandler')(client, interaction);
+            await require('../handlers/buttonHandler')(client, interaction);
         }
         else if (interaction.isStringSelectMenu()) {
-            require('../handlers/selectMenuHandler')(client, interaction);
+            await require('../handlers/selectMenuHandler')(client, interaction);
         }
         else if (interaction.type === Discord.InteractionType.ApplicationCommand) {
             const command = interaction.client.commands.get(interaction.commandName);
@@ -65,7 +65,7 @@ module.exports = {
             }
         }
         else if (interaction.type === Discord.InteractionType.ModalSubmit) {
-            require('../handlers/modalHandler')(client, interaction);
+            await require('../handlers/modalHandler')(client, interaction);
         }
         else {
             client.log(client.intlGet(null, 'errorCap'), client.intlGet(null, 'unknownInteraction'), 'error');

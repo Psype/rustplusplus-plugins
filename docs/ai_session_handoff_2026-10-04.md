@@ -17,10 +17,13 @@ Avant toute modification :
 4. ne fais ni reset, ni checkout destructif, ni réécriture globale du worktree ;
 5. ne prétends jamais qu’un comportement fonctionne en production sur la seule base des tests locaux.
 
-État observé avant la release courante : branche master, HEAD/origin/master alignés sur `c08b200`, release 1.22.40,
+État observé avant la release 1.22.42 : branche master, HEAD/origin/master alignés sur `3e078f0`, release 1.22.41,
 et worktree propre. La release 1.22.41 rend la campagne manuelle `!scanplayers` observable, réarme à chaque commande
 les identités encore sans SteamID64 et augmente le lot WarBandits borné, sans déclenchement automatique au wipe ou
 selon un calendrier. La priorité reste fondée sur les captures de clan confirmées/non dupliquées.
+La release 1.22.42 supprime les sorties fatales Discord, sérialise les polls Rust+/BattleMetrics, borne les files et
+isole traduction/Tesseract dans des processus supervisés. Le cœur reste l'unique writer player-intelligence ; les
+services Steam/BattleMetrics/WarBandits et voix dégradent vers pending/unknown ou une sortie absente.
 Le commit d327e7d contient les releases 1.22.24 à 1.22.26 avec leurs documentations/tests ; `a308c0a` ajoute la
 1.22.27. La release suivante 1.22.28 groupe les alias pending par identité BattleMetrics et ajoute le fallback
 WarBandits courant -> intervalle historique pertinent -> all-time. La release 1.22.29 centralise toute consolidation
@@ -56,7 +59,7 @@ uniquement dans l’ancre et garde une date illisible éditable avec Confirm dé
 réconciliation partielle de pseudos partagée et la portée de wipe WarBandits. La troisième ajoute les corrections
 d'identité privées Discord et sépare alias vérifiés/lectures OCR pending. La suivante borne les délais de réponse
 Discord/traduction et la dernière fiabilise la sémantique des identités connues et des wipes WarBandits. La dernière
-validation complète a passé 319/319 tests et tsc --noEmit ; le déploiement et la
+validation complète de la release 1.22.42 a passé 325/325 tests et tsc --noEmit ; le déploiement et la
 nouvelle capture Discord restent à valider réellement.
 
 Respecte les invariants métier : Established et les wipes sont en GMT ; chaque bloc /cinfo déduit son propre wipe ;
@@ -75,8 +78,8 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 - Dépôt : `rustplusplus-plugins`.
 - Branche au moment de la passation : `master`.
-- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur `c08b200`, release `1.22.40`, avant la release courante.
-- Version canonique du worktree : `1.22.41` dans `package.json` et `package-lock.json`.
+- `HEAD`, `origin/master` et `origin/HEAD` étaient alignés sur `3e078f0`, release `1.22.41`, avant la release courante.
+- Version canonique du worktree : `1.22.42` dans `package.json` et `package-lock.json`.
 - Le commit `a3a71a8` contient la release `1.22.23`, notamment l’enrichissement prioritaire des SteamID texte et la
   métrique d’heures WarBandits.
 - Le commit utilisateur `d327e7d` regroupe les releases `1.22.24` à `1.22.26`, notamment dans :
@@ -192,7 +195,15 @@ Commence par résumer l’état réellement observé, puis poursuis la nouvelle 
 
 Ne déduis pas qu’un fichier absent de cette liste peut être écrasé : commence toujours par relire l’état Git réel.
 
-## Dernière correction : release 1.22.41
+## Dernière correction : release 1.22.42
+
+Le lot de fiabilisation du 11 octobre est décrit dans `docs/runtime_resilience_2026-10-11.md`. Il couvre les deux
+`process.exit(1)` du runtime Discord, les rejets EventEmitter/timers, le non-chevauchement Rust+/BattleMetrics, les
+timeouts et validations BattleMetrics/voix, les files mémoire, les écritures JSON atomiques et les workers supervisés
+traduction/Tesseract. Les workers ne committent jamais dans le journal d'identités. Une panne fournisseur garde les
+données locales et rend l'état unknown/pending au lieu d'inventer une absence.
+
+### Correction précédente : release 1.22.41
 
 `/intel pending` distingue maintenant les identités en file BattleMetrics/WarBandits, en retry ou pause fournisseur,
 déjà tentées sans résolution, en attente d'une nouvelle commande ou à examiner manuellement. Le nombre brut peut
@@ -452,9 +463,9 @@ inventer ni commiter silencieusement.
 
 ## Validation déjà effectuée
 
-Le 8 octobre 2026, après la release 1.22.41 :
+Le 11 octobre 2026, après la release 1.22.42 :
 
-- `npm.cmd test` : `319/319` tests unitaires réussis ;
+- `npm.cmd test` : `325/325` tests unitaires réussis ;
 - `tsc --noEmit -p .` : réussi dans la même commande ;
 - `git diff --check` : aucune erreur ;
 - `npm.cmd run test:autotranslate:live` : réussi en 8,9 s pour six scénarios cumulés ; Bing a atteint sa borne de deux
@@ -553,7 +564,7 @@ local Brave dans `node_modules/@liamcottle/rustplus.js/cli/index.js` est non rep
 
 ## Vérifications de production encore ouvertes
 
-1. Déployer/redémarrer `1.22.41`, vérifier le message `RUSTPLUS v1.22.41 OPERATIONAL`, puis rejouer le lot de 11
+1. Déployer/redémarrer `1.22.42`, vérifier le message `RUSTPLUS v1.22.42 OPERATIONAL`, puis rejouer le lot de 11
    SteamID. Mesurer temps de réponse, RSS et heap avant/après ; exiger les noms locaux connus et aucun Replace/Keep.
    Après une fenêtre, contrôler `/runtime`, `RUNTIME`, `RUNTIME_WORK` et les éventuels `RUNTIME_SLOW`, sans donnée joueur.
 2. Sur Linux, vérifier `command -v tesseract` et `tesseract --list-langs`; `eng` doit être présent. Les tests utilisent

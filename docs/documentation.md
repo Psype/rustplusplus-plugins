@@ -15,5 +15,6 @@
 * [**Plugin Architecture**](plugin_architecture.md)
 * [**Runtime Performance & Reliability Plan (2026-10-07)**](runtime_performance_reliability_plan_2026-10-07.md)
 * [**Runtime Cache Inventory (2026-10-07)**](runtime_cache_inventory_2026-10-07.md)
+* [**Runtime Resilience and Service Isolation (2026-10-11)**](runtime_resilience_2026-10-11.md)
 * [**External Server Mod Compatibility**](external_mod_compatibility.md)
 * [**AI Session Handoff (2026-10-04)**](ai_session_handoff_2026-10-04.md)

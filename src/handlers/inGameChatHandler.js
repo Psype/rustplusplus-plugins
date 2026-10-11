@@ -19,6 +19,7 @@
 */
 
 const Constants = require("../util/constants");
+const MAX_QUEUED_MESSAGES = 100;
 
 module.exports = {
     inGameChatHandler: async function (rustplus, client, message = null) {
@@ -39,8 +40,13 @@ module.exports = {
 
                 rustplus.updateBotMessages(messageFromQueue);
 
-                rustplus.sendTeamMessageAsync(messageFromQueue);
-                rustplus.log(client.intlGet(guildId, 'messageCap'), messageFromQueue);
+                try {
+                    await rustplus.sendTeamMessageAsync(messageFromQueue);
+                    rustplus.log(client.intlGet(guildId, 'messageCap'), messageFromQueue);
+                }
+                catch (error) {
+                    rustplus.log('CHAT', `Queued message failed safely: ${error}`, 'warn');
+                }
             }
             else {
                 clearTimeout(rustplus.inGameChatTimeout);
@@ -95,6 +101,7 @@ module.exports = {
 
 function handleMessage(rustplus, message, trademarkString, maxLength) {
     for (const formattedMessage of formatMessages(message, trademarkString, maxLength)) {
+        if (rustplus.inGameChatQueue.length >= MAX_QUEUED_MESSAGES) rustplus.inGameChatQueue.shift();
         rustplus.inGameChatQueue.push(formattedMessage);
     }
 }

@@ -27,8 +27,22 @@ const DiscordBot = require('./src/structures/DiscordBot');
 const AutoTranslate = require('./src/plugins/autoTranslate');
 const PlayerIntelligenceImports = require('./src/plugins/playerIntelligence/importWorkflow.js');
 const PlayerScanDaemon = require('./src/plugins/playerIntelligence/scanDaemon.js');
-const TesseractOcr = require('./src/plugins/playerIntelligence/tesseractOcr.js');
+const TesseractOcr = require('./src/plugins/playerIntelligence/isolatedTesseractOcr.js');
 const RuntimeTelemetry = require('./src/util/runtimeTelemetry.js');
+const AsyncEventBoundary = require('./src/util/asyncEventBoundary.js');
+const SerialLoop = require('./src/util/serialLoop.js');
+
+function getIsolatedServicesStatus() {
+    const services = [AutoTranslate.getServiceRuntimeStatus(), TesseractOcr.getRuntimeStatus()];
+    return Object.freeze({
+        active: services.reduce((total, value) => total + value.active, 0),
+        queued: services.reduce((total, value) => total + value.queued, 0),
+        running: services.reduce((total, value) => total + value.running, 0),
+        restarts: services.reduce((total, value) => total + value.restarts, 0),
+        failures: services.reduce((total, value) => total + value.failures, 0),
+        circuitOpen: services.some(value => value.circuitOpen > 0) ? 1 : 0
+    });
+}
 
 createMissingDirectories();
 
@@ -55,10 +69,16 @@ RuntimeTelemetry.start({
         imports: PlayerIntelligenceImports.getRuntimeStatus,
         ocr: TesseractOcr.getRuntimeStatus,
         scans: PlayerScanDaemon.getRuntimeStatus,
-        translations: AutoTranslate.getRuntimeStatus
+        translations: AutoTranslate.getRuntimeStatus,
+        services: getIsolatedServicesStatus,
+        loops: SerialLoop.getRuntimeStatus
     }
 });
 client.build();
+process.once('exit', () => {
+    AutoTranslate.shutdown();
+    TesseractOcr.shutdown();
+});
 
 function createMissingDirectories() {
     if (!Fs.existsSync(Path.join(__dirname, 'logs'))) {
@@ -79,8 +99,25 @@ function createMissingDirectories() {
 }
 
 process.on('unhandledRejection', error => {
-    client.log(client.intlGet(null, 'errorCap'), client.intlGet(null, 'unhandledRejection', {
-        error: error
-    }), 'error');
-    console.log(error);
+    const formatted = AsyncEventBoundary.formatError(error);
+    try {
+        client.log(client.intlGet(null, 'errorCap'), client.intlGet(null, 'unhandledRejection', {
+            error: formatted
+        }), 'error');
+    }
+    catch (_loggingError) {
+        try { console.error(`Unhandled rejection: ${formatted}`); }
+        catch (_consoleError) { /* Preserve the original process state. */ }
+    }
+});
+
+process.on('uncaughtExceptionMonitor', error => {
+    const formatted = AsyncEventBoundary.formatError(error);
+    try {
+        client.log('FATAL', `Uncaught exception; process supervisor will restart the bot: ${formatted}`, 'error');
+    }
+    catch (_loggingError) {
+        try { console.error(`Uncaught exception: ${formatted}`); }
+        catch (_consoleError) { /* Node will retain its normal fatal behavior. */ }
+    }
 });

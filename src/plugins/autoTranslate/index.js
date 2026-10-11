@@ -5,13 +5,16 @@ const Languages = require('../../util/languages.js');
 const LanguageDetector = require('../../util/languageDetector.js');
 const RuntimeTelemetry = require('../../util/runtimeTelemetry.js');
 const TeammateLanguageDatabase = require('../teammateLanguageDatabase/index.js');
-const Translator = require('./translator.js');
+const Translator = require('./isolatedTranslator.js');
 
 const CONFIG_DIR = Path.join(__dirname, '..', '..', '..', 'config');
 const SETTINGS_PATH = Path.join(CONFIG_DIR, 'autotranslate-settings.json');
 const LEGACY_SETTINGS_PATH = Path.join(__dirname, '..', '..', '..', 'data', 'autotranslate-settings.json');
 const DEFAULT_SETTINGS = Object.freeze({ enabled: false, targets: Object.freeze(['en']) });
+const MAX_ACTIVE_TRANSLATIONS = 2;
+const MAX_QUEUED_TRANSLATIONS = 8;
 let activeTranslations = 0;
+const translationQueue = [];
 
 function getSettings(rustplus) {
     const all = readAll();
@@ -86,9 +89,8 @@ async function translateMessageInternal(rustplus, message, dependencies = {}) {
     return Object.freeze({ source, target, translated });
 }
 
-async function translateMessage(rustplus, message, dependencies = {}) {
+async function runTranslation(rustplus, message, dependencies) {
     const span = RuntimeTelemetry.startSpan('translation');
-    activeTranslations += 1;
     try {
         const result = await translateMessageInternal(rustplus, message, dependencies);
         span.finish(result === null ? 'skipped' : 'success');
@@ -100,13 +102,37 @@ async function translateMessage(rustplus, message, dependencies = {}) {
         span.finish(timedOut ? 'timeout' : 'failure');
         throw error;
     }
-    finally {
+}
+
+function startTranslation(rustplus, message, dependencies) {
+    activeTranslations += 1;
+    return runTranslation(rustplus, message, dependencies).finally(() => {
         activeTranslations = Math.max(0, activeTranslations - 1);
+        drainTranslationQueue();
+    });
+}
+
+function drainTranslationQueue() {
+    while (activeTranslations < MAX_ACTIVE_TRANSLATIONS && translationQueue.length > 0) {
+        const queued = translationQueue.shift();
+        startTranslation(queued.rustplus, queued.message, queued.dependencies).then(queued.resolve, queued.reject);
     }
 }
 
+function translateMessage(rustplus, message, dependencies = {}) {
+    if (activeTranslations < MAX_ACTIVE_TRANSLATIONS) return startTranslation(rustplus, message, dependencies);
+    if (translationQueue.length >= MAX_QUEUED_TRANSLATIONS) {
+        RuntimeTelemetry.startSpan('translation').finish('dropped');
+        logDecision(rustplus, message, 'SKIPPED', 'translation-bulkhead-full', [], '-', [], '-');
+        return Promise.resolve(null);
+    }
+    return new Promise((resolve, reject) => {
+        translationQueue.push({ rustplus, message, dependencies, resolve, reject });
+    });
+}
+
 function getRuntimeStatus() {
-    return Object.freeze({ active: activeTranslations, queued: 0 });
+    return Object.freeze({ active: activeTranslations, queued: translationQueue.length });
 }
 
 function logProviderFallbacks(rustplus, message, failures) {
@@ -194,4 +220,9 @@ function normalizeSettings(settings) {
     });
 }
 
-module.exports = { getRuntimeStatus, getSettings, parseCommand, translateMessage };
+function getServiceRuntimeStatus() {
+    return Translator.getRuntimeStatus();
+}
+
+module.exports = { getRuntimeStatus, getServiceRuntimeStatus, getSettings, parseCommand, translateMessage,
+    shutdown: Translator.shutdown };

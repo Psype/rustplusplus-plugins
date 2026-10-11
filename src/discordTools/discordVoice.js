@@ -19,21 +19,44 @@
 
 */
 const { getVoiceConnection, createAudioPlayer, createAudioResource } = require('@discordjs/voice');
+const { Readable } = require('node:stream');
 const Actors = require('../staticFiles/actors.json');
 const Client = require('../../index.ts');
+
+const VOICE_TIMEOUT_MS = 5000;
+const MAX_VOICE_BYTES = 2 * 1024 * 1024;
 
 module.exports = {
     sendDiscordVoiceMessage: async function (guildId, text) {
         const connection = getVoiceConnection(guildId);
         const voice = await this.getVoice(guildId);
-        const url = `https://api.streamelements.com/kappa/v2/speech?voice=${voice}&text=${encodeURIComponent(text)}`;
+        const safeText = `${text || ''}`.slice(0, 500);
+        const url = `https://api.streamelements.com/kappa/v2/speech?voice=${voice}&text=${encodeURIComponent(safeText)}`;
 
-        if (connection) {
-            let stream = (await (await fetch(url)).blob()).stream()
-            const resource = createAudioResource(stream);
+        if (!connection) return false;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), VOICE_TIMEOUT_MS);
+        try {
+            const response = await fetch(url, { signal: controller.signal });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const announcedLength = Number(response.headers.get('content-length'));
+            if (Number.isFinite(announcedLength) && announcedLength > MAX_VOICE_BYTES) {
+                throw new Error('voice response exceeds the limit');
+            }
+            const bytes = await response.arrayBuffer();
+            if (bytes.byteLength > MAX_VOICE_BYTES) throw new Error('voice response exceeds the limit');
+            const resource = createAudioResource(Readable.from(Buffer.from(bytes)));
             const player = createAudioPlayer();
             connection.subscribe(player);
             player.play(resource);
+            return true;
+        }
+        catch (error) {
+            Client.client.log('VOICE', `Optional speech provider unavailable: ${error}`, 'warn');
+            return false;
+        }
+        finally {
+            clearTimeout(timer);
         }
     },
 

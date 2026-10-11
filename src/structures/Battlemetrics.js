@@ -29,6 +29,18 @@ const SERVER_LOG_SIZE = 1000;
 const CONNECTION_LOG_SIZE = 1000;
 const PLAYER_CONNECTION_LOG_SIZE = 100;
 const NAME_CHANGE_LOG_SIZE = 100;
+const REQUEST_TIMEOUT_MS = 10000;
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+
+function isValidServerPayload(data) {
+    if (!data || typeof data !== 'object' || !data.data || typeof data.data !== 'object') return false;
+    const attributes = data.data.attributes;
+    if (!attributes || typeof attributes !== 'object' || !attributes.details ||
+        typeof attributes.details !== 'object' || !Array.isArray(data.included)) return false;
+    return data.included.every(entity => entity && typeof entity === 'object' &&
+        (entity.type !== 'player' || (entity.id !== undefined && entity.attributes &&
+            typeof entity.attributes.name === 'string' && entity.meta && Array.isArray(entity.meta.metadata))));
+}
 
 class Battlemetrics {
 
@@ -220,6 +232,9 @@ class Battlemetrics {
     async #request(api_call) {
         try {
             return await Axios.get(api_call, {
+                timeout: REQUEST_TIMEOUT_MS,
+                maxContentLength: MAX_RESPONSE_BYTES,
+                maxBodyLength: MAX_RESPONSE_BYTES,
                 headers: {
                     Authorization: `Bearer ${Config.battlemetrics.token}`,
                 }
@@ -388,7 +403,7 @@ class Battlemetrics {
 
         const response = await this.#request(api_call);
 
-        if (response.status !== 200) {
+        if (!response || response.status !== 200 || !response.data) {
             Client.client.log(Client.client.intlGet(null, 'errorCap'),
                 Client.client.intlGet(null, 'battlemetricsApiRequestFailed', { api_call: api_call }), 'error');
             return null;
@@ -414,9 +429,8 @@ class Battlemetrics {
             if (!this.id) return;
         }
 
-        this.updateStreamerMode();
+        await this.updateStreamerMode();
 
-        this.lastUpdateSuccessful = true;
         await this.evaluation(null, true);
     }
 
@@ -447,7 +461,7 @@ class Battlemetrics {
         const search = this.SEARCH_SERVER_NAME_API_CALL(name);
         const response = await this.#request(search);
 
-        if (response.status !== 200) {
+        if (!response || response.status !== 200 || !response.data || !Array.isArray(response.data.data)) {
             Client.client.log(Client.client.intlGet(null, 'errorCap'),
                 Client.client.intlGet(null, 'battlemetricsApiRequestFailed', { api_call: search }), 'error');
             return null;
@@ -487,7 +501,7 @@ class Battlemetrics {
             data = await this.request(this.GET_SERVER_DATA_API_CALL(this.id));
         }
 
-        if (!data) {
+        if (!isValidServerPayload(data)) {
             this.lastUpdateSuccessful = false;
             Client.client.log(Client.client.intlGet(null, 'errorCap'),
                 Client.client.intlGet(null, 'battlemetricsFailedToUpdate', { server: this.id }), 'error');

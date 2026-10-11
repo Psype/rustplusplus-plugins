@@ -21,6 +21,7 @@
 const DiscordMessages = require('../discordTools/discordMessages.js');
 
 const Config = require('../../config');
+const AsyncEventBoundary = require('../util/asyncEventBoundary.js');
 
 module.exports = {
     name: 'disconnected',
@@ -45,7 +46,10 @@ module.exports = {
         }
 
         /* Stop current tasks */
-        clearInterval(rustplus.pollingTaskId);
+        if (rustplus.pollingLoop && typeof rustplus.pollingLoop.stop === 'function') rustplus.pollingLoop.stop();
+        else clearInterval(rustplus.pollingTaskId);
+        rustplus.pollingLoop = null;
+        rustplus.pollingTaskId = 0;
         clearInterval(rustplus.tokensReplenishTaskId);
         clearTimeout(rustplus.inGameChatTimeout);
 
@@ -75,15 +79,11 @@ module.exports = {
                 client.rustplusReconnectTimers[guildId] = null;
             }
 
-            client.rustplusReconnectTimers[guildId] = setTimeout(
-                client.createRustplusInstance.bind(client),
-                Config.general.reconnectIntervalMs,
-                guildId,
-                rustplus.server,
-                rustplus.port,
-                rustplus.playerId,
-                rustplus.playerToken
-            );
+            client.rustplusReconnectTimers[guildId] = setTimeout(AsyncEventBoundary.listener(
+                'rustplus.reconnect', () => client.createRustplusInstance(guildId, rustplus.server,
+                    rustplus.port, rustplus.playerId, rustplus.playerToken), (label, error) => {
+                    client.log('RUSTPLUS', `${label}: ${error}`, 'error');
+                }), Config.general.reconnectIntervalMs);
         }
     },
 };

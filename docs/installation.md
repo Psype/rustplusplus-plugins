@@ -31,6 +31,10 @@ To enable `/intelimport cinfo` and `/intelimport f7`, install
 The bot invokes `tesseract` locally and never downloads a model at runtime. If the executable is elsewhere, set
 `RPP_TESSERACT_PATH` to its absolute path before starting the bot.
 
+Production translations and Tesseract calls run in supervised child processes. They start lazily, have bounded queues
+and are restarted on the next request after a crash or timeout; their failure must not restart the core bot. They are
+still children of `rustplusplus.service`, so a hard per-worker RSS limit requires separate systemd units if needed.
+
 `Tesseract OCR unavailable: spawn tesseract ENOENT` means the service cannot find that executable. Verify
 `command -v tesseract` and `tesseract --list-langs` under the deployment environment; `eng` must be listed. An import
 rejected for this reason commits nothing and can be submitted again after installation.

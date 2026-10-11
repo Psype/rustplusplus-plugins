@@ -31,6 +31,7 @@ const InstanceUtils = require('../util/instanceUtils.js');
 const Map = require('../util/map.js');
 const PluginManager = require('../plugins/pluginManager.js');
 const Scrape = require('../util/scrape.js');
+const AsyncEventBoundary = require('./asyncEventBoundary.js');
 
 module.exports = async (client, guild, steamId) => {
     const credentials = InstanceUtils.readCredentialsFile(guild.id);
@@ -69,10 +70,10 @@ module.exports = async (client, guild, steamId) => {
     client.fcmListenersLite[guild.id][steamId] = receiver;
     const identity = { source: 'FCM LITE', guildId: guild.id, steamId };
     FcmListenerLifecycle.attach(receiver, client, identity);
-    receiver.on('ON_DATA_RECEIVED', async (data) => {
+    receiver.on('ON_DATA_RECEIVED', AsyncEventBoundary.listener('fcm-lite.notification', async (data) => {
         EventDebugLogger.logFcmPayload(client, identity, data);
         FcmListenerLifecycle.markNotification(receiver, client, identity, data);
-        void PluginManager.onFcmNotification({ client, guild, steamId, data, source: identity.source });
+        await PluginManager.onFcmNotification({ client, guild, steamId, data, source: identity.source });
         if (await FcmAlarmRouter.handle(client, guild, steamId, data, { source: 'FCM LITE' })) return;
 
         const appData = FcmAlarmRouter.normalizeAppData(data.appData);
@@ -98,7 +99,11 @@ module.exports = async (client, guild, steamId) => {
             return;
         }
 
-        const body = JSON.parse(bodyCheck.value);
+        const body = parseNotificationBody(bodyCheck.value);
+        if (!body) {
+            client.log('FCM LITE', `GuildID: ${guild.id}, SteamID: ${steamId}, body is invalid JSON.`, 'warn');
+            return;
+        }
 
         if (!body.type && channelId !== 'alarm') {
             client.log('FCM LITE', `GuildID: ${guild.id}, SteamID: ${hoster}, body type could not be found.`)
@@ -110,7 +115,7 @@ module.exports = async (client, guild, steamId) => {
                 switch (body.type) {
                     case 'server': {
                         client.log('FCM LITE', `GuildID: ${guild.id}, SteamID: ${steamId}, pairing: server`);
-                        pairingServer(client, guild, steamId, title, message, body);
+                        await pairingServer(client, guild, steamId, title, message, body);
                     } break;
 
                     case 'entity': {
@@ -118,19 +123,19 @@ module.exports = async (client, guild, steamId) => {
                             case 'Smart Switch': {
                                 client.log('FCM LITE',
                                     `GuildID: ${guild.id}, SteamID: ${steamId}, pairing: entity: Switch`);
-                                pairingEntitySwitch(client, guild, title, message, body);
+                                await pairingEntitySwitch(client, guild, title, message, body);
                             } break;
 
                             case 'Smart Alarm': {
                                 client.log('FCM LITE',
                                     `GuildID: ${guild.id}, SteamID: ${steamId}, pairing: entity: Smart Alarm`);
-                                pairingEntitySmartAlarm(client, guild, title, message, body);
+                                await pairingEntitySmartAlarm(client, guild, title, message, body);
                             } break;
 
                             case 'Storage Monitor': {
                                 client.log('FCM LITE',
                                     `GuildID: ${guild.id}, SteamID: ${steamId}, pairing: entity: Storage Monitor`);
-                                pairingEntityStorageMonitor(client, guild, title, message, body);
+                                await pairingEntityStorageMonitor(client, guild, title, message, body);
                             } break;
 
                             default: {
@@ -150,7 +155,7 @@ module.exports = async (client, guild, steamId) => {
                 switch (body.type) {
                     case 'death': {
                         client.log('FCM LITE', `GuildID: ${guild.id}, SteamID: ${steamId}, player: death`);
-                        playerDeath(client, guild, title, message, body, discordUserId);
+                        await playerDeath(client, guild, title, message, body, discordUserId);
                     } break;
 
                     default: {
@@ -161,7 +166,7 @@ module.exports = async (client, guild, steamId) => {
             default: {
             } break;
         }
-    });
+    }, (label, error) => client.log('FCM LITE', `${label}: ${error}`, 'error')));
 
     try {
         await FcmListenerLifecycle.connect(receiver, client, identity);
@@ -173,6 +178,17 @@ module.exports = async (client, guild, steamId) => {
         throw error;
     }
 };
+
+function parseNotificationBody(value) {
+    if (typeof value !== 'string' || value.length > 1024 * 1024) return null;
+    try {
+        const body = JSON.parse(value);
+        return body && typeof body === 'object' && !Array.isArray(body) ? body : null;
+    }
+    catch (_error) {
+        return null;
+    }
+}
 
 function isValidUrl(url) {
     if (url.startsWith('https') || url.startsWith('http')) return true;

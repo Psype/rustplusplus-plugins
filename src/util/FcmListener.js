@@ -36,6 +36,7 @@ const Map = require('../util/map.js');
 const PluginManager = require('../plugins/pluginManager.js');
 const Scrape = require('../util/scrape.js');
 const Config = require('../../config');
+const AsyncEventBoundary = require('./asyncEventBoundary.js');
 
 module.exports = async (client, guild) => {
     const credentials = InstanceUtils.readCredentialsFile(guild.id);
@@ -73,10 +74,10 @@ module.exports = async (client, guild) => {
     client.fcmListeners[guild.id] = receiver;
     const identity = { source: 'FCM Host', guildId: guild.id, steamId: hoster };
     FcmListenerLifecycle.attach(receiver, client, identity);
-    receiver.on('ON_DATA_RECEIVED', async (data) => {
+    receiver.on('ON_DATA_RECEIVED', AsyncEventBoundary.listener('fcm-host.notification', async (data) => {
         EventDebugLogger.logFcmPayload(client, identity, data);
         FcmListenerLifecycle.markNotification(receiver, client, identity, data);
-        void PluginManager.onFcmNotification({ client, guild, steamId: hoster, data, source: identity.source });
+        await PluginManager.onFcmNotification({ client, guild, steamId: hoster, data, source: identity.source });
         if (await FcmAlarmRouter.handle(client, guild, hoster, data)) return;
 
         const appData = FcmAlarmRouter.normalizeAppData(data.appData);
@@ -102,7 +103,11 @@ module.exports = async (client, guild) => {
             return;
         }
 
-        const body = JSON.parse(bodyCheck.value);
+        const body = parseNotificationBody(bodyCheck.value);
+        if (!body) {
+            client.log('FCM Host', `GuildID: ${guild.id}, SteamID: ${hoster}, body is invalid JSON.`, 'warn');
+            return;
+        }
 
         if (!body.type && channelId !== 'alarm') {
             client.log('FCM Host', `GuildID: ${guild.id}, SteamID: ${hoster}, body type could not be found.`)
@@ -114,7 +119,7 @@ module.exports = async (client, guild) => {
                 switch (body.type) {
                     case 'server': {
                         client.log('FCM Host', `GuildID: ${guild.id}, SteamID: ${hoster}, pairing: server`);
-                        pairingServer(client, guild, title, message, body);
+                        await pairingServer(client, guild, title, message, body);
                     } break;
 
                     case 'entity': {
@@ -122,19 +127,19 @@ module.exports = async (client, guild) => {
                             case 'Smart Switch': {
                                 client.log('FCM Host',
                                     `GuildID: ${guild.id}, SteamID: ${hoster}, pairing: entity: Switch`);
-                                pairingEntitySwitch(client, guild, title, message, body);
+                                await pairingEntitySwitch(client, guild, title, message, body);
                             } break;
 
                             case 'Smart Alarm': {
                                 client.log('FCM Host',
                                     `GuildID: ${guild.id}, SteamID: ${hoster}, pairing: entity: Smart Alarm`);
-                                pairingEntitySmartAlarm(client, guild, title, message, body);
+                                await pairingEntitySmartAlarm(client, guild, title, message, body);
                             } break;
 
                             case 'Storage Monitor': {
                                 client.log('FCM Host',
                                     `GuildID: ${guild.id}, SteamID: ${hoster}, pairing: entity: Storage Monitor`);
-                                pairingEntityStorageMonitor(client, guild, title, message, body);
+                                await pairingEntityStorageMonitor(client, guild, title, message, body);
                             } break;
 
                             default: {
@@ -161,7 +166,7 @@ module.exports = async (client, guild) => {
                 switch (body.type) {
                     case 'alarm': {
                         client.log('FCM Host', `GuildID: ${guild.id}, SteamID: ${hoster}, alarm: alarm`);
-                        alarmAlarm(client, guild, title, message, body);
+                        await alarmAlarm(client, guild, title, message, body);
                     } break;
 
                     default: {
@@ -175,7 +180,7 @@ module.exports = async (client, guild) => {
                 switch (body.type) {
                     case 'death': {
                         client.log('FCM Host', `GuildID: ${guild.id}, SteamID: ${hoster}, player: death`);
-                        playerDeath(client, guild, title, message, body, discordUserId);
+                        await playerDeath(client, guild, title, message, body, discordUserId);
                     } break;
 
                     default: {
@@ -189,7 +194,7 @@ module.exports = async (client, guild) => {
                 switch (body.type) {
                     case 'login': {
                         client.log('FCM Host', `GuildID: ${guild.id}, SteamID: ${hoster}, team: login`);
-                        teamLogin(client, guild, title, message, body);
+                        await teamLogin(client, guild, title, message, body);
                     } break;
 
                     default: {
@@ -217,7 +222,7 @@ module.exports = async (client, guild) => {
                 client.log('FCM Host', `GuildID: ${guild.id}, SteamID: ${hoster}, other\n${JSON.stringify(data)}`);
             } break;
         }
-    });
+    }, (label, error) => client.log('FCM Host', `${label}: ${error}`, 'error')));
 
     try {
         await FcmListenerLifecycle.connect(receiver, client, identity);
@@ -227,6 +232,17 @@ module.exports = async (client, guild) => {
         throw error;
     }
 };
+
+function parseNotificationBody(value) {
+    if (typeof value !== 'string' || value.length > 1024 * 1024) return null;
+    try {
+        const body = JSON.parse(value);
+        return body && typeof body === 'object' && !Array.isArray(body) ? body : null;
+    }
+    catch (_error) {
+        return null;
+    }
+}
 
 function isValidUrl(url) {
     if (url.startsWith('https') || url.startsWith('http')) return true;
@@ -238,41 +254,24 @@ async function pairingServer(client, guild, title, message, body) {
     const serverId = `${body.ip}-${body.port}`;
     const server = instance.serverList[serverId];
 
-    let messageObj = undefined;
-    if (server) messageObj = await DiscordTools.getMessageById(guild.id, instance.channelId.servers, server.messageId);
-
-    let battlemetricsId = server?.battlemetricsId ?? null;
-    let connect = server?.connect ?? null;
-    if (Config.battlemetrics.token !== '') {
-        const bmInstance = new Battlemetrics(null, title);
-        await bmInstance.setup();
-        if (bmInstance.lastUpdateSuccessful) {
-            battlemetricsId = bmInstance.id;
-            connect = `connect ${bmInstance.server_ip}:${bmInstance.server_port}`;
-            if (!client.battlemetricsInstances.hasOwnProperty(bmInstance.id)) {
-                client.battlemetricsInstances[bmInstance.id] = bmInstance;
-            }
-        }
-    }
-
     instance.serverList[serverId] = {
         title: title,
         serverIp: body.ip,
         appPort: body.port,
         steamId: body.playerId,
         playerToken: body.playerToken,
-        description: body.desc.replace(/\\n/g, '\n').replace(/\\t/g, '\t'),
-        img: isValidUrl(body.img) ? body.img.replace(/ /g, '%20') : Constants.DEFAULT_SERVER_IMG,
-        url: isValidUrl(body.url) ? body.url.replace(/ /g, '%20') : Constants.DEFAULT_SERVER_URL,
+        description: `${body.desc || ''}`.replace(/\\n/g, '\n').replace(/\\t/g, '\t'),
+        img: isValidUrl(`${body.img || ''}`) ? body.img.replace(/ /g, '%20') : Constants.DEFAULT_SERVER_IMG,
+        url: isValidUrl(`${body.url || ''}`) ? body.url.replace(/ /g, '%20') : Constants.DEFAULT_SERVER_URL,
         notes: server ? server.notes : {},
         switches: server ? server.switches : {},
         alarms: server ? server.alarms : {},
         storageMonitors: server ? server.storageMonitors : {},
         markers: server ? server.markers : {},
         switchGroups: server ? server.switchGroups : {},
-        messageId: (messageObj !== undefined) ? messageObj.id : null,
-        battlemetricsId: battlemetricsId,
-        connect: connect,
+        messageId: server?.messageId ?? null,
+        battlemetricsId: server?.battlemetricsId ?? null,
+        connect: server?.connect ?? null,
         cargoShipEgressTimeMs: server ? server.cargoShipEgressTimeMs : Constants.DEFAULT_CARGO_SHIP_EGRESS_TIME_MS,
         oilRigLockedCrateUnlockTimeMs: server ? server.oilRigLockedCrateUnlockTimeMs :
             Constants.DEFAULT_OIL_RIG_LOCKED_CRATE_UNLOCK_TIME_MS,
@@ -291,6 +290,22 @@ async function pairingServer(client, guild, title, message, body) {
     client.setInstance(guild.id, instance);
 
     await DiscordMessages.sendServerMessage(guild.id, serverId, null);
+    if (Config.battlemetrics.token !== '') {
+        void AsyncEventBoundary.run('fcm-host.battlemetrics-enrichment', async () => {
+            const bmInstance = new Battlemetrics(null, title);
+            await bmInstance.setup();
+            if (!bmInstance.lastUpdateSuccessful) return;
+            const current = client.getInstance(guild.id);
+            if (!current.serverList[serverId]) return;
+            current.serverList[serverId].battlemetricsId = bmInstance.id;
+            current.serverList[serverId].connect = `connect ${bmInstance.server_ip}:${bmInstance.server_port}`;
+            client.setInstance(guild.id, current);
+            if (!client.battlemetricsInstances.hasOwnProperty(bmInstance.id)) {
+                client.battlemetricsInstances[bmInstance.id] = bmInstance;
+            }
+            await DiscordMessages.sendServerMessage(guild.id, serverId, null);
+        }, (label, error) => client.log('BATTLEMETRICS', `${label}: ${error}`, 'warn'));
+    }
 }
 
 async function pairingEntitySwitch(client, guild, title, message, body) {

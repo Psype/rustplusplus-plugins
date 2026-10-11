@@ -27,6 +27,7 @@ const SmartSwitchGroupHandler = require('./smartSwitchGroupHandler.js');
 const DiscordButtons = require('../discordTools/discordButtons.js');
 const DiscordModals = require('../discordTools/discordModals.js');
 const PluginManager = require('../plugins/pluginManager.js');
+const AsyncEventBoundary = require('../util/asyncEventBoundary.js');
 
 module.exports = async (client, interaction) => {
     const instance = client.getInstance(interaction.guildId);
@@ -919,9 +920,11 @@ module.exports = async (client, interaction) => {
         const message = await DiscordMessages.sendStorageMonitorRecycleMessage(
             guildId, ids.serverId, ids.entityId, items);
 
-        setTimeout(async () => {
-            await DiscordTools.deleteMessageById(guildId, instance.channelId.storageMonitors, message.id);
-        }, 30000);
+        if (message && message.id) {
+            setTimeout(AsyncEventBoundary.listener('storage-monitor.recycle-message-delete', async () => {
+                await DiscordTools.deleteMessageById(guildId, instance.channelId.storageMonitors, message.id);
+            }, (label, error) => client.log('EVENT', `${label}: ${error}`, 'warn')), 30000);
+        }
     }
     else if (interaction.customId.startsWith('StorageMonitorContainerDelete')) {
         const ids = JSON.parse(interaction.customId.replace('StorageMonitorContainerDelete', ''));

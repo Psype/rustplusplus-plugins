@@ -9,6 +9,8 @@ const RuntimeTelemetry = require('../../util/runtimeTelemetry.js');
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const TIMEOUT_MS = 45 * 1000;
 const MAX_USER_WORDS = 1000;
+const MAX_QUEUED_RECOGNITIONS = 4;
+const MAX_QUEUED_BYTES = 24 * 1024 * 1024;
 let queue = Promise.resolve();
 let activeRecognitions = 0;
 let queuedRecognitions = 0;
@@ -156,6 +158,13 @@ function recognize(imageBase64, options = {}) {
     const estimatedBytes = typeof imageBase64 === 'string' ?
         Math.max(0, Math.floor(imageBase64.length * 3 / 4) - padding) : 0;
     const waitSpan = RuntimeTelemetry.startSpan('ocr_queue_wait');
+    if (queuedRecognitions >= MAX_QUEUED_RECOGNITIONS || queuedBytes + estimatedBytes > MAX_QUEUED_BYTES) {
+        waitSpan.finish('dropped');
+        const error = Object.assign(new Error('OCR queue is full; retry this import later.'), {
+            code: 'OCR_QUEUE_FULL'
+        });
+        return Promise.reject(error);
+    }
     queuedRecognitions += 1;
     queuedBytes += estimatedBytes;
     const task = queue.then(async () => {
