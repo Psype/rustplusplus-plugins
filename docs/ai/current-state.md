@@ -5,9 +5,9 @@ Use this after the repository-root [`MEMORY.md`](../../MEMORY.md). It is intenti
 ## Repository state
 
 - Branch: `master`.
-- Current release: `1.22.49`.
-- `1.22.49` lets the keyless scanner follow one validated Steam Community numeric-to-vanity profile redirect. The
-  detached workflow remains resumable, rate-limited, and restricted to the exact Steam Community HTTPS origin.
+- Current release: `1.22.50`.
+- `1.22.50` recognizes Steam Community's actual `day(s) since last ban` label. The keyless scanner remains resumable,
+  rate-limited, and restricted to the exact Steam Community HTTPS origin.
 - Bot behavioral baseline: `1.22.45`; the scanner runs only as a separate CLI process.
 - Last validation: 446/446 tests and `tsc --noEmit -p .` on 2026-11-06.
 - Production validation of the 1.22.45 scan redesign remains open.
@@ -38,7 +38,7 @@ to the user. Do not reset or overwrite them.
 
 1. Back up `data/player-intelligence`; older releases through 1.22.44 cannot read the availability event introduced in
    1.22.45.
-2. Pull/restart and verify `RUSTPLUS v1.22.49 OPERATIONAL`.
+2. Pull/restart and verify `RUSTPLUS v1.22.50 OPERATIONAL`.
 3. Run `!scanplayers`; require at least one worker `completed` and no recurring 18-22 s parent rebuilds.
 4. Monitor RSS/heap and `pi_history_append` over several cycles.
 5. Re-run the real KIRK Discord OCR import.

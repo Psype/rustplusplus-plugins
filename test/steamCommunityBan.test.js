@@ -17,7 +17,7 @@ Test('public Steam profile parser projects game bans, age and persona without a 
         '<span class="actual_persona_name">H&#39; &amp; friend</span>',
         '<div class="profile_ban_status">',
         '<div class="profile_ban">1 game ban on record</div>',
-        '<div class="profile_ban">0 days since last ban</div>',
+        '<div class="profile_ban">0 day(s) since last ban</div>',
         '</div>'
     ].join('')), STEAM_A);
 

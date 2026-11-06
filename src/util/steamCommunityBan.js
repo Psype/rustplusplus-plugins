@@ -127,7 +127,7 @@ function parseProfileHtml(payload, expectedId) {
     const section = visibleText(payload.slice(markerMatch.index, markerMatch.index + 12 * 1024));
     const numberOfGameBans = count(section, /(\d[\d,]*)\s+game bans?\s+on record/iu);
     const numberOfVacBans = count(section, /(\d[\d,]*)\s+VAC bans?\s+on record/iu);
-    const daysMatch = /(\d[\d,]*)\s+days?\s+since last ban/iu.exec(section);
+    const daysMatch = /(\d[\d,]*)\s+day(?:s|\(s\))?\s+since last ban/iu.exec(section);
     const daysSinceLastBan = daysMatch ? Number(daysMatch[1].replace(/,/gu, '')) : null;
     if ((numberOfGameBans > 0 || numberOfVacBans > 0) &&
         (!Number.isSafeInteger(daysSinceLastBan) || /** @type {number} */ (daysSinceLastBan) < 0)) {

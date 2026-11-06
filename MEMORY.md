@@ -19,7 +19,8 @@ Historical detail is archived and is not part of the default AI context.
 
 ## Current release
 
-- Canonical version: `1.22.49` in `package.json` and `package-lock.json`.
+- Canonical version: `1.22.50` in `package.json` and `package-lock.json`.
+- `1.22.50` accepts Steam Community's real `day(s) since last ban` label in addition to singular/plural English forms.
 - `1.22.49` safely follows one Steam Community numeric-profile to vanity-profile redirect, restricted to the exact
   HTTPS origin and expected profile paths. External or chained redirects remain rejected.
 - `1.22.48` removed the scanner's Steamworks/API-key dependency. Ban scans now read bounded public Steam Community

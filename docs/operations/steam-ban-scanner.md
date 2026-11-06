@@ -51,7 +51,8 @@ npm run steam-bans -- scan --days 5 --min-observations 2
 npm run steam-bans -- scan --days 5 --min-wipes 2
 ```
 
-`--days 5` is strict and retains displayed values 0 through 4. The scanner makes one request at a time, with at least
+`--days 5` is strict and retains displayed values 0 through 4. Singular, plural, and Steam's `day(s)` English label
+are accepted. The scanner makes one request at a time, with at least
 15 seconds between requests by default. `Ctrl+C` finishes the current profile, fsyncs state/results, and exits. Running
 the same command resumes without calling or printing completed SteamID64 values again.
 
