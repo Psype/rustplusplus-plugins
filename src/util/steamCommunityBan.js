@@ -42,6 +42,36 @@ function providerError(error) {
     return new SteamCommunityError('Steam Community profile request failed.');
 }
 
+/** @param {any} headers @param {string} name */
+function headerValue(headers, name) {
+    if (!headers) return null;
+    if (typeof headers.get === 'function') return headers.get(name);
+    const key = Object.keys(headers).find(value => value.toLowerCase() === name.toLowerCase());
+    return key ? headers[key] : null;
+}
+
+/** @param {unknown} value @param {URL} root @param {string} expectedId */
+function safeRedirect(value, root, expectedId) {
+    if (typeof value !== 'string' || value.length > 2048) return null;
+    let target;
+    try {
+        target = new URL(value, root.origin);
+    }
+    catch {
+        return null;
+    }
+    const vanity = /^\/id\/[^/]{1,256}\/?$/u.test(target.pathname);
+    const numeric = target.pathname === `/profiles/${expectedId}/` || target.pathname === `/profiles/${expectedId}`;
+    if (target.origin !== root.origin || target.username || target.password || target.hash || (!vanity && !numeric)) {
+        return null;
+    }
+    for (const [key, item] of target.searchParams) {
+        if (key !== 'l' || item !== 'english') return null;
+    }
+    target.search = '?l=english';
+    return target.toString();
+}
+
 /** @param {string} value */
 function visibleText(value) {
     const numeric = value.replace(/&#(?:x([0-9a-f]+)|(\d+));/giu, (match, hexadecimal, decimal) => {
@@ -128,25 +158,39 @@ function createClient(options = {}) {
     /** @param {string} id */
     async function getPlayerBan(id) {
         if (!STEAM_ID_PATTERN.test(id)) throw new TypeError('SteamID64 is invalid.');
-        try {
-            const response = await httpClient.get(`${root.origin}/profiles/${id}/`, {
-                params: { l: 'english' },
-                responseType: 'text',
-                timeout: timeoutMs,
-                maxContentLength: MAX_RESPONSE_BYTES,
-                maxBodyLength: MAX_RESPONSE_BYTES,
-                maxRedirects: 0,
-                headers: { 'User-Agent': 'rustplusplus-steam-ban-scanner/1.22' }
-            });
-            if (Number.isInteger(response && response.status) && response.status !== 200) {
-                throw Object.assign(new Error('HTTP response'), { response });
+        /** @param {string} url @param {boolean} permitRedirect @param {Record<string,string>|undefined} params */
+        async function request(url, permitRedirect, params) {
+            try {
+                const response = await httpClient.get(url, {
+                    params,
+                    responseType: 'text',
+                    timeout: timeoutMs,
+                    maxContentLength: MAX_RESPONSE_BYTES,
+                    maxBodyLength: MAX_RESPONSE_BYTES,
+                    maxRedirects: 0,
+                    headers: { 'User-Agent': 'rustplusplus-steam-ban-scanner/1.22' }
+                });
+                if (Number.isInteger(response && response.status) && response.status !== 200) {
+                    throw Object.assign(new Error('HTTP response'), { response });
+                }
+                return response;
             }
-            return parseProfileHtml(response && response.data, id);
+            catch (error) {
+                if (error instanceof TypeError || error instanceof SteamCommunityError) throw error;
+                const response = /** @type {any} */ (error)?.response;
+                const status = Number.isInteger(response?.status) ? response.status : null;
+                if (permitRedirect && [301, 302, 307, 308].includes(status)) {
+                    const redirect = safeRedirect(headerValue(response.headers, 'location'), root, id);
+                    if (!redirect) {
+                        throw new SteamCommunityError('Steam Community returned an unsafe profile redirect.', status);
+                    }
+                    return request(redirect, false, undefined);
+                }
+                throw providerError(error);
+            }
         }
-        catch (error) {
-            if (error instanceof TypeError) throw error;
-            throw providerError(error);
-        }
+        const response = await request(`${root.origin}/profiles/${id}/`, true, { l: 'english' });
+        return parseProfileHtml(response && response.data, id);
     }
 
     return Object.freeze({ getPlayerBan });
@@ -159,5 +203,6 @@ module.exports = Object.freeze({
     STEAM_ID_PATTERN,
     SteamCommunityError,
     createClient,
-    parseProfileHtml
+    parseProfileHtml,
+    safeRedirect
 });

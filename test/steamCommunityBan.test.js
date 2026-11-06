@@ -64,3 +64,32 @@ Test('keyless Steam Community client uses one bounded English public profile req
     Assert.equal(calls[0].config.maxRedirects, 0);
     Assert.equal('key' in calls[0].config.params, false);
 });
+
+Test('client follows one same-origin numeric-to-vanity redirect and rejects every external redirect', async () => {
+    const calls = [];
+    const client = SteamCommunity.createClient({
+        httpClient: { get: async (url, config) => {
+            calls.push({ url, config });
+            if (calls.length === 1) {
+                const error = new Error('redirect');
+                error.response = { status: 302,
+                    headers: { location: 'https://steamcommunity.com/id/handcamonmyyt/?l=english' } };
+                throw error;
+            }
+            return { status: 200, data: profile('<span class="actual_persona_name">Vanity</span>') };
+        } }
+    });
+    const result = await client.getPlayerBan(STEAM_A);
+    Assert.equal(result.steamName, 'Vanity');
+    Assert.equal(calls.length, 2);
+    Assert.equal(calls[1].url, 'https://steamcommunity.com/id/handcamonmyyt/?l=english');
+    Assert.equal(calls[1].config.maxRedirects, 0);
+    Assert.equal(calls[1].config.params, undefined);
+
+    const unsafe = SteamCommunity.createClient({ httpClient: { get: async () => {
+        const error = new Error('redirect');
+        error.response = { status: 302, headers: { location: 'https://example.com/id/stolen/' } };
+        throw error;
+    } } });
+    await Assert.rejects(() => unsafe.getPlayerBan(STEAM_A), /unsafe profile redirect/u);
+});

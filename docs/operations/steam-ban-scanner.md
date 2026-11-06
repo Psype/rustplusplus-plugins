@@ -8,6 +8,8 @@ or scanner crashes cannot stop Rust+/Discord. It never writes to `data/player-in
 The scanner never uses Steamworks, a Steam Web API key, a Steam login, or cookies. It reads the public ban header shown
 by `steamcommunity.com/profiles/<SteamID64>/`, one profile at a time. HTML is bounded and structurally validated;
 challenge, error, or changed-layout pages fail closed instead of becoming clean results.
+Steam may redirect a numeric profile to its vanity `/id/<name>/` URL. The scanner follows at most one such redirect,
+only on the exact `https://steamcommunity.com` origin; external, credentialed, malformed, or chained redirects fail.
 
 ## Output
 
