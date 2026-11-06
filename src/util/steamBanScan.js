@@ -5,11 +5,11 @@ const Crypto = require('node:crypto');
 const Fs = require('node:fs');
 const Path = require('node:path');
 
-const SteamApi = require('./steamBanApi.js');
+const SteamCommunity = require('./steamCommunityBan.js');
 const { atomicWrite } = require('./steamBanExport.js');
 
-const RESULT_SCHEMA_VERSION = 1;
-const STATE_SCHEMA_VERSION = 1;
+const RESULT_SCHEMA_VERSION = 2;
+const STATE_SCHEMA_VERSION = 2;
 const DEFAULT_CACHE_HOURS = 24;
 
 /** @param {number} milliseconds */
@@ -76,7 +76,7 @@ function sha256(contents) {
 /** @param {unknown} value */
 function validateIdentity(value) {
     const identity = /** @type {any} */ (value);
-    if (!value || typeof value !== 'object' || !SteamApi.STEAM_ID_PATTERN.test(`${identity.steamId || ''}`)) {
+    if (!value || typeof value !== 'object' || !SteamCommunity.STEAM_ID_PATTERN.test(`${identity.steamId || ''}`)) {
         throw new TypeError('Identity snapshot row is invalid.');
     }
     for (const field of ['priorityRank', 'wipeCount', 'observationCount', 'confirmedClanSnapshotCount']) {
@@ -115,7 +115,7 @@ async function loadSnapshot(outputDirectory) {
 
 /** @param {any} error @param {number} attempt */
 function retryDelay(error, attempt) {
-    if (error instanceof SteamApi.SteamApiError) {
+    if (error instanceof SteamCommunity.SteamCommunityError) {
         if (error.status !== null && error.status < 500 && error.status !== 429) return null;
         if (error.retryAfterMs !== null) return error.retryAfterMs;
     }
@@ -137,7 +137,7 @@ async function withRetries(action, options) {
             options.onRetry?.({
                 attempt: attempt + 1,
                 delayMs: delay,
-                status: error instanceof SteamApi.SteamApiError ? error.status : null
+                status: error instanceof SteamCommunity.SteamCommunityError ? error.status : null
             });
             await options.sleep(delay);
         }
@@ -175,8 +175,8 @@ function csv(value) {
 function reportCsv(matches) {
     const headers = [
         'steamid64', 'profile_url', 'steam_name', 'local_display_name', 'verified_aliases', 'battlemetrics_ids',
-        'days_since_last_ban', 'approx_last_ban_date', 'game_bans', 'vac_bans', 'vac_banned', 'community_banned',
-        'economy_ban', 'rust_hours_steam', 'warbandits_hours_max', 'warbandits_by_server', 'priority_rank',
+        'days_since_last_ban', 'approx_last_ban_date', 'game_bans', 'vac_bans', 'vac_banned', 'ban_source',
+        'warbandits_hours_max', 'warbandits_by_server', 'priority_rank',
         'wipe_count', 'observation_count', 'confirmed_clan_snapshots', 'first_observed_at', 'last_observed_at',
         'checked_at', 'recency_basis'
     ];
@@ -184,7 +184,7 @@ function reportCsv(matches) {
         value.steamId, value.profileUrl, value.steamName || '', value.localDisplayName || '',
         value.verifiedAliases.join(' | '), value.battlemetricsPlayerIds.join(' | '), value.daysSinceLastBan,
         value.approximateLastBanDate, value.numberOfGameBans, value.numberOfVacBans, value.vacBanned,
-        value.communityBanned, value.economyBan, value.steamRustHours ?? '', value.warBanditsHoursMax ?? '',
+        value.banSource, value.warBanditsHoursMax ?? '',
         value.warBanditsByServer.map((/** @type {any} */ item) =>
             `${item.serverKey}=${item.hours}`).join(' | '), value.priorityRank,
         value.wipeCount, value.observationCount, value.confirmedClanSnapshotCount, value.firstObservedAt || '',
@@ -211,13 +211,7 @@ function buildMatches(rows, results, days) {
             numberOfGameBans: result.numberOfGameBans,
             numberOfVacBans: result.numberOfVacBans,
             vacBanned: result.vacBanned,
-            communityBanned: result.communityBanned,
-            economyBan: result.economyBan,
-            detailedBans: result.detailedBans,
-            steamRustMinutes: result.steamRustMinutes,
-            steamRustHours: result.steamRustMinutes === null ? null :
-                Math.round((result.steamRustMinutes / 60) * 10) / 10,
-            steamEnrichment: result.steamEnrichment,
+            banSource: result.source,
             warBanditsHoursMax: identity.warBanditsHoursMax,
             warBanditsByServer: identity.warBanditsByServer,
             priorityRank: identity.priorityRank,
@@ -227,7 +221,7 @@ function buildMatches(rows, results, days) {
             firstObservedAt: identity.firstObservedAt,
             lastObservedAt: identity.lastObservedAt,
             checkedAt: result.checkedAt,
-            recencyBasis: 'game-ban count > 0 and aggregate Steam DaysSinceLastBan strictly below threshold'
+            recencyBasis: 'public Steam profile game-ban count > 0 and displayed days since last ban below threshold'
         }));
     }
     return Object.freeze(matches);
@@ -245,7 +239,7 @@ async function loadRunResults(path, runId) {
     const results = new Map();
     for (const value of await readJsonl(path)) {
         if (!value || value.schemaVersion !== RESULT_SCHEMA_VERSION || value.runId !== runId ||
-            !SteamApi.STEAM_ID_PATTERN.test(`${value.steamId || ''}`)) continue;
+            !SteamCommunity.STEAM_ID_PATTERN.test(`${value.steamId || ''}`)) continue;
         results.set(value.steamId, value);
     }
     return results;
@@ -258,7 +252,7 @@ async function loadBanCache(path, maximumAgeMs, nowMs) {
     for (const value of await readJsonl(path)) {
         lineCount += 1;
         if (!value || value.schemaVersion !== RESULT_SCHEMA_VERSION ||
-            !SteamApi.STEAM_ID_PATTERN.test(`${value.steamId || ''}`) ||
+            !SteamCommunity.STEAM_ID_PATTERN.test(`${value.steamId || ''}`) ||
             typeof value.checkedAt !== 'string' || !Number.isFinite(Date.parse(value.checkedAt)) ||
             nowMs - Date.parse(value.checkedAt) > maximumAgeMs) continue;
         const previous = results.get(value.steamId);
@@ -268,7 +262,7 @@ async function loadBanCache(path, maximumAgeMs, nowMs) {
 }
 
 /**
- * @param {{outputDirectory:string,client:any,days?:number,delayMs?:number,batchSize?:number,maxIds?:number,
+ * @param {{outputDirectory:string,client:any,days?:number,delayMs?:number,maxIds?:number,
  * minWipes?:number,minObservations?:number,restart?:boolean,force?:boolean,cacheHours?:number,
  * now?:()=>Date,nowMs?:()=>number,
  * sleep?:(ms:number)=>Promise<void>,stopRequested?:()=>boolean,onProgress?:(value:any)=>void,
@@ -279,7 +273,6 @@ async function scan(options) {
     const outputDirectory = Path.resolve(options.outputDirectory);
     const days = boundedInteger(options.days ?? 5, 'days', 1, 3650);
     const delayMs = boundedInteger(options.delayMs ?? 15_000, 'delayMs', 1000, 10 * 60_000);
-    const batchSize = boundedInteger(options.batchSize ?? 25, 'batchSize', 1, 100);
     const maxIds = boundedInteger(options.maxIds ?? 0, 'maxIds', 0, 10_000_000);
     const minWipes = boundedInteger(options.minWipes ?? 0, 'minWipes', 0, 100_000);
     const minObservations = boundedInteger(options.minObservations ?? 1, 'minObservations', 1, 100_000_000);
@@ -294,7 +287,7 @@ async function scan(options) {
     if (maxIds > 0) selected = selected.slice(0, maxIds);
     const selection = Object.freeze({ days, maxIds, minWipes, minObservations,
         selectedIdentityCount: selected.length });
-    const requestPolicy = Object.freeze({ delayMs, batchSize, cacheHours });
+    const requestPolicy = Object.freeze({ delayMs, cacheHours });
     const restart = options.restart === true || options.force === true;
     const ignoreCache = options.force === true;
     const statePath = Path.join(outputDirectory, 'scan-state.json');
@@ -374,80 +367,36 @@ async function scan(options) {
     }
 
     while (!stopRequested()) {
-        /** @type {any[]} */
-        const batch = [];
-        while (cursor < selected.length && batch.length < batchSize) {
-            const identity = selected[cursor++];
-            if (!results.has(identity.steamId)) batch.push(identity);
+        let identity = null;
+        while (cursor < selected.length && identity === null) {
+            const candidate = selected[cursor++];
+            if (!results.has(candidate.steamId)) identity = candidate;
         }
-        if (batch.length === 0) break;
-        let bans;
+        if (identity === null) break;
+        let ban;
         try {
-            bans = await withRetries(async () => {
+            ban = await withRetries(async () => {
                 await waitForRequest();
-                return options.client.getPlayerBans(batch.map(row => row.steamId));
+                return options.client.getPlayerBan(identity.steamId);
             }, {
                 attempts: 5,
                 sleep: sleepImpl,
-                onRetry: value => options.onRetry?.({ provider: 'steam', operation: 'player-bans', ...value })
+                onRetry: value => options.onRetry?.({
+                    provider: 'steam-community', operation: 'public-profile-ban-status', ...value
+                })
             });
         }
         catch (error) {
-            await saveState(error instanceof Error ? error.message : 'Steam Web API failure.');
+            await saveState(error instanceof Error ? error.message : 'Steam Community profile failure.');
             throw error;
         }
-        const recentIds = bans.filter((/** @type {any} */ value) =>
-            value.numberOfGameBans > 0 && value.daysSinceLastBan < days)
-        .map((/** @type {any} */ value) => value.steamId);
-        const summaries = new Map();
-        let summaryAvailable = true;
-        if (recentIds.length > 0) {
-            try {
-                for (const value of await withRetries(async () => {
-                    await waitForRequest();
-                    return options.client.getPlayerSummaries(recentIds);
-                }, {
-                    attempts: 3,
-                    sleep: sleepImpl,
-                    onRetry: value => options.onRetry?.({ provider: 'steam', operation: 'player-summaries', ...value })
-                })) summaries.set(value.steamId, value);
-            }
-            catch {
-                summaryAvailable = false;
-            }
-        }
-        const playtimes = new Map();
-        for (const id of recentIds) {
-            try {
-                playtimes.set(id, await withRetries(async () => {
-                    await waitForRequest();
-                    return options.client.getRustPlaytimeMinutes(id);
-                }, {
-                    attempts: 2,
-                    sleep: sleepImpl,
-                    onRetry: value => options.onRetry?.({ provider: 'steam', operation: 'rust-playtime', ...value })
-                }));
-            }
-            catch {
-                playtimes.set(id, null);
-            }
-        }
         const checkedAt = now().toISOString();
-        const additions = bans.map((/** @type {any} */ value) => {
-            const summary = summaries.get(value.steamId) || null;
-            const recent = recentIds.includes(value.steamId);
-            return Object.freeze({
-                schemaVersion: RESULT_SCHEMA_VERSION,
-                runId: state.runId,
-                checkedAt,
-                ...value,
-                profileUrl: summary?.profileUrl || `https://steamcommunity.com/profiles/${value.steamId}/`,
-                steamName: summary?.personaName || null,
-                steamRustMinutes: recent ? (playtimes.get(value.steamId) ?? null) : null,
-                steamEnrichment: recent ?
-                    (summaryAvailable && playtimes.has(value.steamId) ? 'attempted' : 'partial') : 'not-requested'
-            });
-        });
+        const additions = [Object.freeze({
+            schemaVersion: RESULT_SCHEMA_VERSION,
+            runId: state.runId,
+            checkedAt,
+            ...ban
+        })];
         await appendJsonl(resultsPath, additions);
         if (cacheHours > 0) {
             await appendJsonl(cachePath, additions);

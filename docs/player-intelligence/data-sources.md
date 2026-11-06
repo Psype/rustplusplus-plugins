@@ -56,28 +56,21 @@ cannot prove presence.
 
 Steam presence is at most secondary evidence: `In-Game: Rust` does not prove presence on WarBandits, invisible/private users disappear, and server address presence is not guaranteed. Facepunch explicitly notes that an invisible Steam status hides the game, IP, and port in its [server privacy guidance](https://wiki.facepunch.com/rust/Creating_a_hidden_whitelisted_server#UsersVisibility).
 
-### Official Steam Web API
+### Steamworks excluded
 
-With a server-side Steam Web API key, useful read-only calls include:
-
-- [`ISteamUser/GetPlayerSummaries`](https://partner.steamgames.com/doc/webapi/ISteamUser): up to 100 SteamIDs per request; persona, visibility, profile URL, avatars, and public presence fields.
-- `ISteamUser/GetPlayerBans`: community/VAC/game/economy ban summaries.
-- `ISteamUser/GetFriendList`: only when the target's friend list is public.
-- [`IPlayerService`](https://partner.steamgames.com/doc/webapi/IPlayerService): recently played/owned games and playtime when the profile permits it.
-- [`IGameServersService`](https://partner.steamgames.com/doc/webapi/igameserversservice): resolves a game server's IP/port to its Steam game-server ID and back. This can stabilize server identity across DNS changes, but it does not expose player presence.
-
-These enrich a known SteamID64 but do not discover a reliable WarBandits session. Keys must remain environment secrets and calls should be batched/cached.
+This deployment deliberately uses no Steamworks account or Web API key. Public Steam Community profile surfaces may
+enrich a known SteamID64, but their failure remains non-blocking and cannot create presence evidence.
 
 Release `1.22.47` adds the detached [`steam-ban scanner`](../operations/steam-ban-scanner.md). It exports a deterministic
 priority snapshot from the append-only intelligence databases, or an operator-selected bounded all-time WarBandits
-PvP ranks, then calls `GetPlayerBans` in slow resumable batches. Only recent candidates receive Steam persona and
-public Rust-playtime enrichment. The report preserves local verified aliases, BattleMetrics IDs and server-specific
-WarBandits hours. Page and SteamID caches make a top-limit extension incremental; 429 responses honor `Retry-After`,
-and `--force` is the explicit cache bypass. It never runs inside the bot and never modifies the intelligence journal.
+PvP ranks, then reads bounded public Steam Community ban headers one profile at a time. The report preserves local
+verified aliases, BattleMetrics IDs, the visible current persona, and server-specific WarBandits hours. Page and
+SteamID caches make a top-limit extension incremental; 429 responses honor `Retry-After`, and `--force` is the explicit
+cache bypass. It never runs inside the bot and never modifies the intelligence journal.
 
-`DaysSinceLastBan` is aggregate Steam recency, not a game-ban-specific timestamp. A row therefore proves that at least
-one game ban exists and that the latest Steam ban is recent; a newer VAC ban beside an older game ban can produce a
-false positive. The optional detailed ban fields are retained without interpreting undocumented `BanType` values.
+The displayed “days since last ban” is aggregate Steam recency, not a game-ban-specific timestamp. A row therefore
+proves only that at least one game ban exists and that the latest displayed Steam ban is recent; a newer VAC ban beside
+an older game ban can produce a false positive.
 
 ### Steam client presence
 
@@ -158,7 +151,7 @@ The active Premium plan shown on 2026-09-10 exposes Player Log, Player Flags, an
 | [RustMetrics](https://github.com/swiss-shift-ch/rustmetrics) | Yes, MIT/self-hosted | A2S population and display-name sessions; Discord transitions | Its documentation explicitly detects Rust streamer-mode anonymization and states that watchlisting cannot work there. It stores only display names from A2S and SteamIDs only when BattleMetrics surfaces them. WarBandits' observed A2S names are censored. |
 | [GameDig](https://github.com/gamedig/node-gamedig) or direct A2S | Yes | Server health, population and any public player names | GameDig can fetch only what the server publishes; its player name may be empty and its player array may differ from the population. It cannot recover SteamID64 from WarBandits' masked names. |
 | [GameMonitoring](https://gamemonitoring.net/developers/docs/api/servers/:server_id/players/__get) | Public endpoint | Cached server/player directory data when exposed | The provider documents that the player list exists only when the game/server expose it. It is therefore another view of the same censored source, not an identity bypass. |
-| Steam Web API / [RustRadar-style presence](https://rustradar.net/) | A Steam Web API key is free; up to 100 SteamIDs per `GetPlayerSummaries` request | Steam online/offline and current-game presence when public | `playing Rust` does not identify the Rust server. Private/invisible users produce incomplete evidence, so absence must remain `unknown`, not `offline on WarBandits`. |
+| Public Steam Community profile | Yes; no account or key | Persona and coarse public profile/ban state | HTML can change or rate-limit; `playing Rust` still does not identify the server and absence remains `unknown`. |
 | WarBandits public stats | Yes but undocumented and rate-limited | Strong SteamID64/name resolution and interval activity deltas | No per-player online flag or timestamp; it cannot emit exact connect/disconnect transitions. |
 | RCON or an owner-side uMod/Carbon endpoint | Software can be self-hosted | Authoritative connected SteamID64 list | Requires cooperation and credentials from WarBandits. It is unavailable to a normal player account. |
 

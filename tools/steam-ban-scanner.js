@@ -5,7 +5,7 @@ require('dotenv').config({ quiet: true });
 
 const Path = require('node:path');
 
-const SteamBanApi = require('../src/util/steamBanApi.js');
+const SteamCommunityBan = require('../src/util/steamCommunityBan.js');
 const SteamBanExport = require('../src/util/steamBanExport.js');
 const SteamBanScan = require('../src/util/steamBanScan.js');
 const WarBanditsLeaderboard = require('../src/util/warBanditsLeaderboard.js');
@@ -24,7 +24,6 @@ function usage() {
         'Options:',
         '  --days N              Recent-ban threshold (default: 5).',
         '  --delay-ms N          Minimum delay between Steam calls (default: 15000).',
-        '  --batch-size N        SteamIDs per ban call, 1-100 (default: 25).',
         '  --max-ids N           Scan only the N highest-priority IDs; 0 means all (default: 0).',
         '  --min-wipes N         Require at least N distinct server/wipe scopes (default: 0).',
         '  --min-observations N  Require at least N local observations (default: 1).',
@@ -37,8 +36,7 @@ function usage() {
         '  --restart             Start a new immutable scan run when options/snapshot changed.',
         '  --force               Always start a fresh run and ignore every prior scan result.',
         '',
-        'Environment:',
-        '  RPP_STEAM_WEB_API_KEY is required for scan/run and is never written to output.'
+        'No Steamworks account, API key, login, or cookie is used.'
     ].join('\n');
 }
 
@@ -67,7 +65,6 @@ function parseArguments(argv) {
         command,
         days: 5,
         delayMs: 15_000,
-        batchSize: 25,
         maxIds: 0,
         minWipes: 0,
         minObservations: 1,
@@ -81,7 +78,7 @@ function parseArguments(argv) {
         force: false
     };
     const numeric = new Map([
-        ['--days', 'days'], ['--delay-ms', 'delayMs'], ['--batch-size', 'batchSize'],
+        ['--days', 'days'], ['--delay-ms', 'delayMs'],
         ['--max-ids', 'maxIds'], ['--min-wipes', 'minWipes'], ['--min-observations', 'minObservations'],
         ['--warbandits-top', 'warBanditsTop'], ['--warbandits-delay-ms', 'warBanditsDelayMs'],
         ['--cache-hours', 'cacheHours']
@@ -169,7 +166,7 @@ async function main() {
                 `${options.outputDirectory}.\n`);
         }
         if (options.command === 'scan' || options.command === 'run') {
-            const client = SteamBanApi.createClient();
+            const client = SteamCommunityBan.createClient();
             const result = await SteamBanScan.scan({
                 ...options,
                 client,
@@ -181,7 +178,6 @@ async function main() {
                     `last-ban:${value.daysSinceLastBan}d`,
                     `game-bans:${value.numberOfGameBans}`,
                     `VAC-bans:${value.numberOfVacBans}`,
-                    `Steam-Rust:${value.steamRustHours ?? 'unknown'}h`,
                     `WB:${value.warBanditsHoursMax ?? 'unknown'}h`,
                     value.profileUrl
                 ].join(' | ') + '\n'),
