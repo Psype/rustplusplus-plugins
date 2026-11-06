@@ -50,6 +50,7 @@ reading path so an AI does not spend context on superseded chronology.
 - [`cache-inventory.md`](operations/cache-inventory.md): cache ownership, limits, and invalidation.
 - [`player-crash-diagnostic.md`](operations/player-crash-diagnostic.md): Rust client crash triage.
 - [`deep-sea-debugging.md`](operations/deep-sea-debugging.md): Deep Sea event diagnostics.
+- [`steam-ban-scanner.md`](operations/steam-ban-scanner.md): resumable local/WarBandits Steam ban audit and exports.
 
 ### `player-intelligence/`
 

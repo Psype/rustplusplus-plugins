@@ -68,6 +68,17 @@ With a server-side Steam Web API key, useful read-only calls include:
 
 These enrich a known SteamID64 but do not discover a reliable WarBandits session. Keys must remain environment secrets and calls should be batched/cached.
 
+Release `1.22.47` adds the detached [`steam-ban scanner`](../operations/steam-ban-scanner.md). It exports a deterministic
+priority snapshot from the append-only intelligence databases, or an operator-selected bounded all-time WarBandits
+PvP ranks, then calls `GetPlayerBans` in slow resumable batches. Only recent candidates receive Steam persona and
+public Rust-playtime enrichment. The report preserves local verified aliases, BattleMetrics IDs and server-specific
+WarBandits hours. Page and SteamID caches make a top-limit extension incremental; 429 responses honor `Retry-After`,
+and `--force` is the explicit cache bypass. It never runs inside the bot and never modifies the intelligence journal.
+
+`DaysSinceLastBan` is aggregate Steam recency, not a game-ban-specific timestamp. A row therefore proves that at least
+one game ban exists and that the latest Steam ban is recent; a newer VAC ban beside an older game ban can produce a
+false positive. The optional detailed ban fields are retained without interpreting undocumented `BanType` values.
+
 ### Steam client presence
 
 For an authenticated Steam client account, [`ISteamFriends/GetFriendGamePlayed`](https://partner.steamgames.com/doc/api/ISteamFriends) can expose the game ID plus game/query server IP and ports for a friend who is currently playing. An exact IP/port match against the active WarBandits endpoint would be strong live corroboration. It is not available for arbitrary players: it requires a Steam client session and the target normally has to be a friend or otherwise known to that client. The same interface's “recently played with” list only contains users previously registered through the game's `SetPlayedWith` calls, so it cannot be assumed complete for Rust. A headless Steam account would add credential and operational risk, so this is not recommended for the current tracker without a separate explicit design decision.

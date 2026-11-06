@@ -19,11 +19,13 @@ Historical detail is archived and is not part of the default AI context.
 
 ## Current release
 
-- Canonical version: `1.22.46` in `package.json` and `package-lock.json`.
-- `1.22.46` reorganizes documentation, shortens the default AI context, and updates runtime/help references to the new
-  paths. It does not change player-intelligence semantics.
-- Last behavioral release: `1.22.45`, commit `adc9e85` before this documentation release.
-- Last completed behavioral validation: 430/430 unit tests plus `tsc --noEmit -p .` on 2026-10-11.
+- Canonical version: `1.22.47` in `package.json` and `package-lock.json`.
+- `1.22.47` adds a detached, resumable Steam ban audit. It can export all consolidated local SteamIDs in
+  multi-wipe/clan/observation/age priority or a bounded WarBandits all-time top, then scans Steam slowly and writes
+  CSV/JSONL reports. It never runs inside the bot or modifies the intelligence journal.
+- `1.22.46` reorganized documentation and shortened the default AI context.
+- Last bot-integrated behavioral release: `1.22.45`, commit `adc9e85`; the 1.22.47 scanner is a detached CLI.
+- Last completed validation: 445/445 unit tests plus `tsc --noEmit -p .` on 2026-11-06.
 - Local tests do not prove Linux/systemd behavior, external providers, OCR availability, or production memory.
 
 ## Architecture in one page
@@ -71,6 +73,10 @@ Historical detail is archived and is not part of the default AI context.
   rows/8 MiB. Incomplete reads fail closed without modifying the file.
 - JSONL append/revision work is still `O(N)` and is instrumented as `pi_history_append`.
 - Main-process shutdown grace is 30 s so an in-progress fsync/checkpoint commit is not normally cut off.
+- The optional Steam ban scanner stores only generated state under `data/steam-ban-scanner/`. Its recent-game-ban
+  filter combines `NumberOfGameBans > 0` with aggregate `DaysSinceLastBan`; it cannot prove the latest ban was a game
+  ban or that any game ban belongs to Rust. SteamID results and 25-row WarBandits pages cache for 24 hours by default,
+  allowing top-N extensions to fetch only new ranks; `--force` bypasses both caches.
 
 ## Open production checks
 

@@ -75,6 +75,8 @@ persona names to validate each OCR-derived name/SteamID pair; a mismatched or un
 an import warning. On an uncertain `/cinfo`, the bot can
 make at most three candidate queries per batch through the existing rate-limited WarBandits provider and the bounded
 public Steam profile-name reader. Provider failure is non-blocking and never turns an ambiguous candidate into a match.
+The optional standalone [Steam ban scanner](../operations/steam-ban-scanner.md) does require
+`RPP_STEAM_WEB_API_KEY`. The key belongs only in `.env`; it is not needed by normal bot identity reconciliation.
 Each image is read from one bounded Rust-UI color/luminance mask and from the original image; semantic completeness
 selects the result, not a blind retry. Known persistent aliases are supplied through Tesseract's
 [`--user-words`](https://github.com/tesseract-ocr/tesseract/blob/main/doc/tesseract.1.asc) file;

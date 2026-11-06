@@ -9,3 +9,4 @@ temp
 data/player-trackers/*.json
 data/warbandits/*.json
 data/player-intelligence/
+data/steam-ban-scanner/

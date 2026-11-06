@@ -5,9 +5,11 @@ Use this after the repository-root [`MEMORY.md`](../../MEMORY.md). It is intenti
 ## Repository state
 
 - Branch: `master`.
-- Documentation release: `1.22.46`.
-- Behavioral baseline: `1.22.45`, commit `adc9e85` before the documentation-only path update.
-- Last behavioral validation: 430/430 tests and `tsc --noEmit -p .` on 2026-10-11.
+- Current release: `1.22.47`.
+- `1.22.47` adds the standalone `npm run steam-bans` export/scan workflow. It is isolated from the bot, resumable,
+  rate-limited, and documented in `docs/operations/steam-ban-scanner.md`.
+- Bot behavioral baseline: `1.22.45`; the `1.22.47` scanner runs only as a separate CLI process.
+- Last validation: 445/445 tests and `tsc --noEmit -p .` on 2026-11-06.
 - Production validation of the 1.22.45 scan redesign remains open.
 
 Always inspect `git status --short`, `git diff --check`, and the existing diff before editing. Worktree changes belong
@@ -36,7 +38,7 @@ to the user. Do not reset or overwrite them.
 
 1. Back up `data/player-intelligence`; older releases through 1.22.44 cannot read the availability event introduced in
    1.22.45.
-2. Pull/restart and verify `RUSTPLUS v1.22.46 OPERATIONAL`.
+2. Pull/restart and verify `RUSTPLUS v1.22.47 OPERATIONAL`.
 3. Run `!scanplayers`; require at least one worker `completed` and no recurring 18-22 s parent rebuilds.
 4. Monitor RSS/heap and `pi_history_append` over several cycles.
 5. Re-run the real KIRK Discord OCR import.

@@ -1,6 +1,6 @@
 {
     "name": "rustplusplus",
-    "version": "1.22.46",
+    "version": "1.22.47",
     "description": "A NodeJS Discord Bot that uses the rustplus.js library to utilize the power of the Rust+ Companion App with additional Quality-of-Life features.",
     "main": "index.js",
     "scripts": {
@@ -20,7 +20,8 @@
         "benchmark:unresolved-replay": "node benchmark/player-intelligence-unresolved-replay.js",
         "benchmark:visual-glyphs": "node benchmark/visual-glyph-library.js",
         "benchmark:ocr-corrections": "node benchmark/ocr-correction-memory.js",
-        "capture:intel": "node tools/player-intelligence-capture.js"
+        "capture:intel": "node tools/player-intelligence-capture.js",
+        "steam-bans": "node tools/steam-ban-scanner.js"
     },
     "repository": {
         "type": "git",
